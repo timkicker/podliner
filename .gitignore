@@ -1,0 +1,32 @@
+# Build artifacts
+**/bin/
+**/obj/
+**/out/
+
+# IDE / Project
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.iml
+_ReSharper.*/
+*.DotSettings.user
+
+# NuGet / packages
+*.nupkg
+*.snupkg
+packages/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs & local files
+*.log
+stui-podcast.log
+
+# Misc
+*.swp
+*.tmp
