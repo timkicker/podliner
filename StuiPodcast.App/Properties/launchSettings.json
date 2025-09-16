@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "StuiPodcast.App": {
+      "commandName": "Project",
+      "externalConsole": true,
+      "environmentVariables": {
+        "XDG_CURRENT_DESKTOP": "sway",
+        "TERM": "xterm-256color"
+      }
+    }
+  }
+}

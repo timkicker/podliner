@@ -1,16 +1,16 @@
-using System.Globalization;
-using Serilog;
+using System;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
+using Serilog;
 using Terminal.Gui;
-using System.Linq;              // falls noch nicht drin
 
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using KeyArgs = Terminal.Gui.View.KeyEventEventArgs;
 
 class Program {
-    // App state
-    
+    // ---------- App state ----------
     static object? _progressTimerToken;
 
     static Window mainWin = null!;
@@ -22,39 +22,71 @@ class Program {
     static AppData Data = new();
     static FeedService? Feeds;
     static IPlayer? Player;
+    static bool _exiting = false;
 
-    // UI elements
+    // ---------- UI elements ----------
     static ListView feedList = null!;
     static ListView episodeList = null!;
     static ProgressBar progress = null!;
-    static Label nowPlaying = null!;
     static TextField? commandBox;
     static TextField? searchBox;
 
     static int ActivePane = 0; // 0 = feeds, 1 = episodes
     static string? lastSearch;
-    static bool _exiting = false;
-    
-    
-    
-    
 
-    static void QuitApp()
-    {
+    // Player-UI Controls
+    static Label titleLabel = null!;
+    static Label timeLabel = null!;
+    static Button btnBack10 = null!;
+    static Button btnPlayPause = null!;
+    static Button btnFwd10 = null!;
+    static Button btnVolDown = null!;
+    static Button btnVolUp = null!;
+    static Button btnDownload = null!;
+
+    // ---------- Logging (Datei + Memory für In-App-Viewer) ----------
+    static MemoryLogSink MemLog = new MemoryLogSink(2000);
+
+    static void ConfigureLogging() {
+        var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(logDir);
+
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .Enrich.WithProperty("pid", Environment.ProcessId)
+            .WriteTo.Sink(MemLog) // → live im TUI via F12 / :logs
+            .WriteTo.File(
+                Path.Combine(logDir, "stui-podcast-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7,
+                shared: true,
+                outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj} {Exception}{NewLine}"
+            )
+            .CreateLogger();
+    }
+
+    static void InstallGlobalErrorHandlers() {
+        AppDomain.CurrentDomain.UnhandledException += (s, e) => {
+            var ex = e.ExceptionObject as Exception;
+            Log.Fatal(ex, "UnhandledException (IsTerminating={Terminating})", e.IsTerminating);
+        };
+        TaskScheduler.UnobservedTaskException += (s, e) => {
+            Log.Fatal(e.Exception, "UnobservedTaskException");
+            e.SetObserved();
+        };
+    }
+
+    static void QuitApp() {
         if (_exiting) return;
         _exiting = true;
 
-        // Progress-Timer abstöpseln, damit kein UI-Update mehr reinläuft
         try { if (_progressTimerToken != null) Application.MainLoop?.RemoveTimeout(_progressTimerToken); } catch { }
 
-        // Player-Events lösen und sofort entsorgen (non-blocking in Player.Dispose)
         try { if (Player != null) Player.StateChanged -= OnPlayerStateChanged; } catch { }
         try { (Player as IDisposable)?.Dispose(); } catch { }
 
-        // Loop stoppen
         Application.RequestStop();
 
-        // Fallback: falls irgendein Thread blockiert → harter Exit nach 500ms
         try {
             Application.MainLoop?.AddTimeout(TimeSpan.FromMilliseconds(500), _ => {
                 try { Environment.Exit(0); } catch { }
@@ -65,133 +97,150 @@ class Program {
         }
     }
 
-
-
+    // ---------- Main ----------
     static async Task Main() {
-    Log.Logger = new LoggerConfiguration()
-        .MinimumLevel.Information()
-        .WriteTo.File("stui-podcast.log", rollingInterval: RollingInterval.Day)
-        .CreateLogger();
+        ConfigureLogging();
+        InstallGlobalErrorHandlers();
 
-    // Daten & Services
-    Data  = await AppStorage.LoadAsync();
-    Feeds = new FeedService(Data);
+        Log.Information("Startup");
 
-    // Default-Feed beim allerersten Start
-    if (Data.Feeds.Count == 0) {
+        // Daten & Services
+        Data  = await AppStorage.LoadAsync();
+        Feeds = new FeedService(Data);
+        if (Data.Feeds.Count == 0) {
+            try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
+            catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
+        }
+
+        Player = new LibVlcPlayer();
+        Player.StateChanged += OnPlayerStateChanged;
+
+        Application.Init();
+        var top = Application.Top;
+
+        // Menü
+        var menu = new MenuBar(new MenuBarItem[] {
+            new("_File", new MenuItem[]{
+                new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
+                new("_Refresh All (:refresh)", "", async () => await RefreshAllAsync()),
+                new("_Quit (Q)", "Q", () => QuitApp())
+            }),
+            new("_Help", new MenuItem[]{
+                new("_Keys (:h)", "", () => MessageBox.Query("Keys", KeysHelp, "OK"))
+            })
+        });
+        top.Add(menu);
+
+        // Haupt-Container (alles über der Player-Leiste)
+        mainWin = new Window() { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
+        mainWin.Border.BorderStyle = BorderStyle.None;
+        top.Add(mainWin);
+
+        // Feeds
+        feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
+        mainWin.Add(feedsFrame);
+        feedList = new ListView(Data.Feeds.Select(f => f.Title).ToList()) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        feedList.OpenSelectedItem += _ => { ActivePane = 1; episodeList.SetFocus(); };
+        feedList.SelectedItemChanged += _ => UpdateEpisodeList();
+        feedsFrame.Add(feedList);
+
+        // Episodes
+        epsFrame = new FrameView("Episodes") { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        mainWin.Add(epsFrame);
+        episodeList = new ListView(new List<string>()) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        episodeList.OpenSelectedItem += _ => PlaySelectedEpisode();
+        epsFrame.Add(episodeList);
+
+        // Player unten
+        statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus=false };
+        top.Add(statusFrame);
+        BuildPlayerUI();
+
+        ApplyTheme(useMenuAccent: true);
+
+        // Globaler Keyhook:
+        // - blockt Ctrl+C/V/X (verhindert OS-Clipboard-Aufrufe → "Linux/null")
+        // - F12 zeigt Log-Overlay
+        top.KeyPress         += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+        feedList.KeyPress    += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+        episodeList.KeyPress += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+
+        feedList.SetFocus();
+        UpdateEpisodeList();
+
+        _progressTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ => {
+            if (Player != null) UpdatePlayerUI(Player.State);
+            return true;
+        });
+
         try {
-            await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3");
+            Application.Run();
         } catch (Exception ex) {
-            Log.Warning(ex, "Could not add default feed");
+            Log.Fatal(ex, "Application.Run crashed");
+            throw;
+        } finally {
+            try { Player?.Stop(); } catch (Exception ex) { Log.Warning(ex, "Stop on shutdown"); }
+            try { (Player as IDisposable)?.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Dispose on shutdown"); }
+            try { await AppStorage.SaveAsync(Data); } catch (Exception ex) { Log.Warning(ex, "Save on shutdown"); }
+            Application.Shutdown();
+            Log.Information("Shutdown complete");
+            Log.CloseAndFlush();
         }
     }
 
-    Player = new LibVlcPlayer();
-    Player.StateChanged += OnPlayerStateChanged;
+    // ---------- Player UI ----------
+    static void BuildPlayerUI() {
+        statusFrame.RemoveAll();
 
-    Application.Init();
+        // Zeile 0: Titel links (gekürzt), Zeitblock rechts
+        titleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
+        timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×") {
+            X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
+        };
 
-    var top = Application.Top;
+        // Zeile 1: kompakte Controls
+        btnBack10    = new Button("«10s")      { X = 2, Y = 1 };
+        btnPlayPause = new Button("Play ⏵")    { X = Pos.Right(btnBack10) + 1, Y = 1 };
+        btnFwd10     = new Button("10s»")      { X = Pos.Right(btnPlayPause) + 1, Y = 1 };
+        btnVolDown   = new Button("Vol−")      { X = Pos.Right(btnFwd10) + 3, Y = 1 };
+        btnVolUp     = new Button("Vol+")      { X = Pos.Right(btnVolDown) + 1, Y = 1 };
+        btnDownload  = new Button("⬇ Download"){ X = Pos.Right(btnVolUp) + 3, Y = 1 };
 
-    // Menü (behält eigenes Scheme)
-    var menu = new MenuBar(new MenuBarItem[] {
-        new("_File", new MenuItem[]{
-            new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
-            new("_Refresh All (:refresh)", "", async () => await RefreshAllAsync()),
-            new("_Quit (Q)", "Q", () => QuitApp())
-        }),
-        new("_Help", new MenuItem[]{
-            new("_Keys (:h)", "", () => MessageBox.Query("Keys", KeysHelp, "OK"))
-        })
-    });
-    top.Add(menu);
+        // Zeile 2: Progressbar
+        progress = new ProgressBar() { X = 2, Y = 2, Width = Dim.Fill(2), Height = 1 };
 
-    // Haupt-Container (kein Rahmen; Rahmen haben die Frames)
-    mainWin = new Window() { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(2) };
-    mainWin.Border.BorderStyle = BorderStyle.None;
-    top.Add(mainWin);
+        // Click-Handler
+        btnBack10.Clicked    += () => Player?.SeekRelative(TimeSpan.FromSeconds(-10));
+        btnPlayPause.Clicked += () => { Player?.TogglePause(); UpdatePlayPauseButton(); };
+        btnFwd10.Clicked     += () => Player?.SeekRelative(TimeSpan.FromSeconds(+10));
+        btnVolDown.Clicked   += () => { if (Player != null) Player.SetVolume(Player.State.Volume0_100 - 5); };
+        btnVolUp.Clicked     += () => { if (Player != null) Player.SetVolume(Player.State.Volume0_100 + 5); };
+        btnDownload.Clicked  += () => MessageBox.Query("Download", "Downloads kommen später (M5).", "OK");
 
-    // Linke Box: Feeds
-    feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
-    mainWin.Add(feedsFrame);
+        statusFrame.Add(titleLabel, timeLabel,
+                        btnBack10, btnPlayPause, btnFwd10, btnVolDown, btnVolUp, btnDownload,
+                        progress);
 
-    feedList = new ListView(Data.Feeds.Select(f => f.Title).ToList()) {
-        X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill()
-    };
-    feedList.OpenSelectedItem += _ => { ActivePane = 1; episodeList.SetFocus(); };
-    feedList.SelectedItemChanged += _ => UpdateEpisodeList();
-    feedsFrame.Add(feedList);
-
-    // Rechte Box: Episodes
-    epsFrame = new FrameView("Episodes") { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-    mainWin.Add(epsFrame);
-
-    episodeList = new ListView(new List<string>()) {
-        X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill()
-    };
-    episodeList.OpenSelectedItem += _ => PlaySelectedEpisode();
-    epsFrame.Add(episodeList);
-
-    // Unten: Player-Box
-    statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin)-2, Width = Dim.Fill(), Height = 2, CanFocus=false };
-    nowPlaying = new Label("⏸ 00:00 / --:--") { X = 2, Y = 0, Width = Dim.Fill(), Height = 1 };
-    progress   = new ProgressBar()            { X = 2, Y = 1, Width = Dim.Fill(2), Height = 1 };
-    statusFrame.Add(nowPlaying, progress);
-    top.Add(statusFrame);
-
-    // Theme anwenden (MenuBar-Farben auf alle Hauptviews)
-    ApplyTheme(useMenuAccent: true);
-
-    // Key-Handling (global + in Listen)
-    top.KeyPress         += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-    feedList.KeyPress    += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-    episodeList.KeyPress += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-
-    // Initiale Anzeige
-    feedList.SetFocus();
-    UpdateEpisodeList();
-
-    // Progress-Tick (Token merken, um ihn beim Quit abzuräumen)
-    _progressTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ => {
-        if (Player != null) UpdatePlayerUI(Player.State);
-        return true;
-    });
-
-
-    Application.Run();
-
-    // Geordneter Shutdown (falls QuitApp nicht schon alles erledigt hat)
-    try { Player?.Stop(); } catch { }
-    try { (Player as IDisposable)?.Dispose(); } catch { }
-    try { await AppStorage.SaveAsync(Data); } catch { }
-    Application.Shutdown();
-}
-
-    static void OnPlayerStateChanged(PlayerState s)
-    {
-        try {
-            Application.MainLoop?.Invoke(() => UpdatePlayerUI(s));
-        } catch {
-            // beim Shutdown kann MainLoop schon weg sein – ignorieren
-        }
+        UpdatePlayPauseButton();
     }
 
-
-
-
-
-
+    static void UpdatePlayPauseButton() {
+        if (btnPlayPause == null || Player == null) return;
+        btnPlayPause.Text = Player.State.IsPlaying ? "Pause ⏸" : "Play ⏵";
+    }
 
     static void UpdatePlayerUI(PlayerState s) {
+        string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
         var pos = s.Position;
         var len = s.Length ?? TimeSpan.Zero;
 
-        string fmt(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
-        var posStr = fmt(pos);
-        var lenStr = len == TimeSpan.Zero ? "--:--" : fmt(len);
-        var icon = s.IsPlaying ? "▶" : "⏸";
+        var posStr = F(pos);
+        var lenStr = len == TimeSpan.Zero ? "--:--" : F(len);
+        var remStr = len == TimeSpan.Zero ? "--:--" : F((len - pos) < TimeSpan.Zero ? TimeSpan.Zero : (len - pos));
+        var icon   = s.IsPlaying ? "▶" : "⏸";
 
-        nowPlaying.Text = $"{icon} {posStr} / {lenStr}   Vol {s.Volume0_100}%   {s.Speed:0.0}×";
+        timeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
+        UpdatePlayPauseButton();
 
         if (len.TotalMilliseconds > 0) {
             progress.Fraction = Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f);
@@ -200,18 +249,31 @@ class Program {
         }
     }
 
+    static void OnPlayerStateChanged(PlayerState s) {
+        try {
+            Application.MainLoop?.Invoke(() => UpdatePlayerUI(s));
+        } catch { /* beim Shutdown kann MainLoop schon weg sein – ignorieren */ }
+    }
+
+    // ---------- Lists / Feeds ----------
+    static void MoveList(int delta) {
+        var lv = ActivePane == 0 ? feedList : episodeList;
+        if (lv.Source?.Count > 0) {
+            lv.SelectedItem = Math.Clamp(lv.SelectedItem + delta, 0, lv.Source.Count - 1);
+            if (ActivePane == 0) UpdateEpisodeList();
+        }
+    }
 
     static void UpdateEpisodeList() {
         var feed = GetSelectedFeed();
         var items = (feed == null)
-            ? new List<string>()
+            ? new System.Collections.Generic.List<string>()
             : Data.Episodes.Where(e => e.FeedId == feed.Id)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
                 .Select(e => $"{(e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??"),-10}  {e.Title}")
                 .ToList();
         episodeList.SetSource(items);
     }
-
 
     static Feed? GetSelectedFeed() {
         if (Data.Feeds.Count == 0) return null;
@@ -244,77 +306,85 @@ class Program {
         var ep = GetSelectedEpisode();
         if (ep == null || Player == null) return;
 
+        Log.Information("UI PlaySelectedEpisode feed={Feed} ep={Episode}", GetSelectedFeed()?.Title, ep.Title);
+
         Player.Play(ep.AudioUrl);
 
-        // Titel im Window-Title spiegeln
         if (Application.Top.Subviews.OfType<Window>().FirstOrDefault() is Window w) {
             w.Title = $"stui-podcast — {ep.Title}";
         }
+        titleLabel.Text = ep.Title ?? "(untitled)";
     }
 
+    // ---------- Global Keys ----------
+    static bool HandleGlobalKeys(KeyArgs e) {
+        var key = e.KeyEvent.Key;
+        var kv  = e.KeyEvent.KeyValue;
 
-    // ---------- Vim-like global keys via AddKeyHandler ----------
-    
-     // vorher: static bool HandleGlobalKeys(KeyEvent keyEvent)
-    static bool HandleGlobalKeys(KeyArgs e)
-{
-    var key = e.KeyEvent.Key;
-    var kv  = e.KeyEvent.KeyValue; // 'q'/'Q'
+        // Blockiere System-Clipboard-Shortcuts (verhindert TextCopy → "Linux/null" in externen Konsolen)
+        if ((key & Key.CtrlMask) != 0) {
+            var baseKey = key & ~Key.CtrlMask;
+            if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) {
+                e.Handled = true;
+                return true;
+            }
+        }
 
-    // Quit: q, Q, Ctrl+Q
-    if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') {
-        QuitApp();
-        return true;
+        // Logs anzeigen
+        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
+
+        // Quit
+        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitApp(); return true; }
+
+        // Theme-Toggle
+        if (kv == 't' || kv == 'T') { useMenuAccent = !useMenuAccent; ApplyTheme(useMenuAccent); return true; }
+
+        // ":" und "/"
+        if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
+        if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
+
+        // Vim-Navigation
+        if (key == (Key)('h')) { ActivePane = 0; feedList.SetFocus(); return true; }
+        if (key == (Key)('l')) { ActivePane = 1; episodeList.SetFocus(); return true; }
+        if (key == (Key)('j')) { MoveList(+1); return true; }
+        if (key == (Key)('k')) { MoveList(-1); return true; }
+
+        // Playback
+        if (key == Key.Space) { Player?.TogglePause(); UpdatePlayPauseButton(); return true; }
+        if (key == Key.CursorLeft || key == (Key)('H')) { Player?.SeekRelative(TimeSpan.FromSeconds(-10)); return true; }
+        if (key == Key.CursorRight|| key == (Key)('L')) { Player?.SeekRelative(TimeSpan.FromSeconds(+10)); return true; }
+        if (kv == 'H') { Player?.SeekRelative(TimeSpan.FromSeconds(-60)); return true; }
+        if (kv == 'L') { Player?.SeekRelative(TimeSpan.FromSeconds(+60)); return true; }
+
+        // g/G
+        if (kv == 'g') { Player?.SeekTo(TimeSpan.Zero); return true; }
+        if (kv == 'G') { if (Player?.State.Length is TimeSpan len) Player.SeekTo(len); return true; }
+
+        // Volume
+        if (key == (Key)('-')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 - 5); return true; }
+        if (key == (Key)('+')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 + 5); return true; }
+
+        // Speed
+        if (key == (Key)('[')) { if (Player != null) Player.SetSpeed(Player.State.Speed - 0.1); return true; }
+        if (key == (Key)(']')) { if (Player != null) Player.SetSpeed(Player.State.Speed + 0.1); return true; }
+        if (key == (Key)('=')) { if (Player != null) Player.SetSpeed(1.0); return true; }
+        if (kv == '1') { Player?.SetSpeed(1.0);  return true; }
+        if (kv == '2') { Player?.SetSpeed(1.25); return true; }
+        if (kv == '3') { Player?.SetSpeed(1.5);  return true; }
+
+        // Download-Stub
+        if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads kommen später (M5).", "OK"); return true; }
+
+        // Enter → Play
+        if (key == Key.Enter) { PlaySelectedEpisode(); return true; }
+
+        // Suche wiederholen
+        if (key == (Key)('n')) { if (!string.IsNullOrEmpty(lastSearch)) ApplySearch(lastSearch!); return true; }
+
+        return false;
     }
 
-    // Theme-Toggle: 't' (MenuBar-Farben ↔ Base)
-    if (kv == 't' || kv == 'T') {
-        useMenuAccent = !useMenuAccent;
-        ApplyTheme(useMenuAccent);
-        return true;
-    }
-
-    // ":" und "/"
-    if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
-    if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
-
-    // Vim-Navigation
-    if (key == (Key)('h')) { ActivePane = 0; feedList.SetFocus(); return true; }
-    if (key == (Key)('l')) { ActivePane = 1; episodeList.SetFocus(); return true; }
-    if (key == (Key)('j')) {
-        var lv = ActivePane == 0 ? feedList : episodeList;
-        lv.SelectedItem = Math.Min(lv.SelectedItem + 1, (lv.Source?.Count ?? 1) - 1);
-        if (ActivePane == 0) UpdateEpisodeList();
-        return true;
-    }
-    if (key == (Key)('k')) {
-        var lv = ActivePane == 0 ? feedList : episodeList;
-        lv.SelectedItem = Math.Max(lv.SelectedItem - 1, 0);
-        if (ActivePane == 0) UpdateEpisodeList();
-        return true;
-    }
-
-    // Playback
-    if (key == Key.Space) { Player?.TogglePause(); return true; }
-    if (key == Key.CursorLeft || key == (Key)('H')) { Player?.SeekRelative(TimeSpan.FromSeconds(-10)); return true; }
-    if (key == Key.CursorRight|| key == (Key)('L')) { Player?.SeekRelative(TimeSpan.FromSeconds(+10)); return true; }
-    if (key == (Key)('-')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 - 5); return true; }
-    if (key == (Key)('+')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 + 5); return true; }
-    if (key == (Key)('[')) { if (Player != null) Player.SetSpeed(Player.State.Speed - 0.1); return true; }
-    if (key == (Key)(']')) { if (Player != null) Player.SetSpeed(Player.State.Speed + 0.1); return true; }
-    if (key == (Key)('=')) { if (Player != null) Player.SetSpeed(1.0); return true; }
-
-    // Enter → Play
-    if (key == Key.Enter) { PlaySelectedEpisode(); return true; }
-
-    // Suche wiederholen
-    if (key == (Key)('n')) { if (!string.IsNullOrEmpty(lastSearch)) ApplySearch(lastSearch!); return true; }
-
-    return false;
-}
-
-    static void ApplyTheme(bool useMenuAccent)
-    {
+    static void ApplyTheme(bool useMenuAccent) {
         var scheme = useMenuAccent ? Colors.Menu : Colors.Base;
 
         try {
@@ -334,11 +404,7 @@ class Program {
         }
     }
 
-
-
-
-
-    // ":" commandline
+    // ---------- ":" commandline ----------
     static void ShowCommandBox(string seed) {
         commandBox?.SuperView?.Remove(commandBox);
         commandBox = new TextField(seed) {
@@ -364,30 +430,67 @@ class Program {
         commandBox.CursorPosition = commandBox.Text.ToString()!.Length;
     }
 
-
     static async void HandleCommand(string cmd) {
         try {
             if (cmd.StartsWith(":add ")) {
                 var url = cmd.Substring(5).Trim();
                 if (string.IsNullOrWhiteSpace(url)) return;
                 var feed = await Feeds!.AddFeedAsync(url);
-                // refresh lists
                 feedList.SetSource(Data.Feeds.Select(f => f.Title).ToList());
                 feedList.SelectedItem = Data.Feeds.FindIndex(f => f.Id == feed.Id);
                 UpdateEpisodeList();
             } else if (cmd.StartsWith(":refresh")) {
                 await RefreshAllAsync();
             } else if (cmd is ":q" or ":quit") {
-                Application.RequestStop();
+                QuitApp();
             } else if (cmd is ":h" or ":help") {
                 MessageBox.Query("Keys", KeysHelp, "OK");
+            } else if (cmd.StartsWith(":logs")) {
+                var arg = cmd.Substring(5).Trim();
+                int tail = 500;
+                if (int.TryParse(arg, out var n) && n > 0) tail = Math.Min(n, 5000);
+                ShowLogsOverlay(tail);
+            } else if (cmd.StartsWith(":seek")) {
+                var arg = cmd.Substring(5).Trim();
+                if (Player == null) return;
+                if (string.IsNullOrWhiteSpace(arg)) return;
+
+                if (arg.EndsWith("%") && double.TryParse(arg.TrimEnd('%'), out var pct)) {
+                    if (Player.State.Length is TimeSpan len) {
+                        var pos = TimeSpan.FromMilliseconds(len.TotalMilliseconds * Math.Clamp(pct/100.0, 0, 1));
+                        Player.SeekTo(pos);
+                    }
+                    return;
+                }
+
+                if (arg.StartsWith("+") || arg.StartsWith("-")) {
+                    if (int.TryParse(arg, out var secsRel)) {
+                        Player.SeekRelative(TimeSpan.FromSeconds(secsRel));
+                    }
+                    return;
+                }
+
+                var parts = arg.Split(':');
+                if (parts.Length == 2 && int.TryParse(parts[0], out var mm) && int.TryParse(parts[1], out var ss)) {
+                    Player.SeekTo(TimeSpan.FromSeconds(mm*60 + ss));
+                    return;
+                }
+            } else if (cmd.StartsWith(":vol")) {
+                var arg = cmd.Substring(4).Trim();
+                if (Player == null) return;
+                if (int.TryParse(arg, out var v)) Player.SetVolume(v);
+            } else if (cmd.StartsWith(":speed")) {
+                var arg = cmd.Substring(6).Trim();
+                if (Player == null) return;
+                if (double.TryParse(arg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp))
+                    Player.SetSpeed(sp);
             }
         } catch (Exception ex) {
             MessageBox.ErrorQuery("Command error", ex.Message, "OK");
         }
     }
 
-    // "/" search
+    // ---------- "/" search ----------
     static void ShowSearchBox(string seed) {
         searchBox?.SuperView?.Remove(searchBox);
         searchBox = new TextField(seed) { X=0, Y=Pos.AnchorEnd(1), Width=Dim.Fill(), Height=1 };
@@ -412,7 +515,6 @@ class Program {
         searchBox.CursorPosition = searchBox.Text.ToString()!.Length;
     }
 
-
     static void ApplySearch(string q) {
         var feed = GetSelectedFeed();
         if (feed == null) return;
@@ -430,21 +532,72 @@ class Program {
     }
 
     static string KeysHelp =>
-        @"Vim-like keys:
-  h/l        Focus left/right pane
-  j/k        Move selection
+@"Vim-like keys:
+  h/l        Focus left/right pane     j/k    Move selection
   Enter      Play selected episode
   /          Search titles+shownotes (Enter to apply, n to repeat)
-  :          Command line (e.g. :add URL, :refresh, :q, :h)
+  :          Command line (e.g. :add URL, :refresh, :q, :h, :logs)
 Playback:
   Space      Play/Pause
-  H/L        Seek -10s/+10s   (Arrow keys Left/Right also)
+  ← / →      Seek -10s / +10s   H / L  Seek -60s / +60s
+  g / G      Go to start / end
   - / +      Volume down/up
-  [ / ]      Slower/Faster    (= reset 1.0×)
+  [ / ]      Slower/Faster    (= reset 1.0×; 1/2/3 = 1.0×/1.25×/1.5×)
 Misc:
+  F12        Show logs
+  d          Download (stub)
+  t          Theme toggle (Base/Menu)
   q / Q / Ctrl+Q  Quit
 ";
 
+    // ---------- Log-Overlay ----------
+    static void ShowLogsOverlay(int tail = 500) {
+        try {
+            var lines = MemLog.Snapshot(tail);
+            var dlg = new Dialog($"Logs (last {tail}) — F12/Esc to close", 100, 30);
 
+            var tv = new Terminal.Gui.TextView {
+                ReadOnly = true,
+                X = 0, Y = 0,
+                Width = Dim.Fill(), Height = Dim.Fill(),
+                WordWrap = false
+            };
+            tv.Text = string.Join('\n', lines);
+            tv.MoveEnd();
 
+            dlg.KeyPress += (KeyArgs e) => {
+                if (e.KeyEvent.Key == Key.F12 || e.KeyEvent.Key == Key.Esc) {
+                    Application.RequestStop();
+                    e.Handled = true;
+                }
+            };
+
+            dlg.Add(tv);
+            Application.Run(dlg);
+        } catch { }
+    }
+}
+
+// ---------- kleiner Memory-Log-Sink für In-App-Viewer ----------
+sealed class MemoryLogSink : Serilog.Core.ILogEventSink {
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+    private readonly int _capacity;
+    public MemoryLogSink(int capacity = 2000) => _capacity = Math.Max(100, capacity);
+
+    public void Emit(Serilog.Events.LogEvent logEvent) {
+        var ts = logEvent.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff");
+        var lvl = logEvent.Level.ToString()[..3].ToUpperInvariant();
+        var msg = logEvent.RenderMessage();
+        var exc = logEvent.Exception is null ? "" : $"  {logEvent.Exception}";
+        var line = $"{ts} [{lvl}] {msg}{exc}";
+
+        _lines.Enqueue(line);
+        while (_lines.Count > _capacity && _lines.TryDequeue(out _)) { }
+    }
+
+    public string[] Snapshot(int last = 500) {
+        var arr = _lines.ToArray();
+        if (arr.Length <= last) return arr;
+        return arr[^last..];
+    }
 }
