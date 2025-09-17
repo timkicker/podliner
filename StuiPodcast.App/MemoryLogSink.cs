@@ -1,19 +1,15 @@
-using System.Collections.Concurrent;
-using Serilog.Core;
-using Serilog.Events;
-
 namespace StuiPodcast.App.Debug;
 
-public sealed class MemoryLogSink : ILogEventSink
+public sealed class MemoryLogSink : Serilog.Core.ILogEventSink
 {
-    private readonly ConcurrentQueue<string> _lines = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
     private readonly int _capacity;
 
-    public MemoryLogSink(int capacity = 2000) => _capacity = Math.Max(100, capacity);
+    public MemoryLogSink(int capacity = 2000) => _capacity = System.Math.Max(100, capacity);
 
-    public void Emit(LogEvent logEvent)
+    public void Emit(Serilog.Events.LogEvent logEvent)
     {
-        var ts = logEvent.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff");
+        var ts  = logEvent.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff");
         var lvl = logEvent.Level.ToString()[..3].ToUpperInvariant();
         var msg = logEvent.RenderMessage();
         var exc = logEvent.Exception is null ? "" : $"  {logEvent.Exception}";
