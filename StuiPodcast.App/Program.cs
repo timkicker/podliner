@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Serilog;
 using StuiPodcast.App.Debug;
 using Terminal.Gui;
-
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 
@@ -47,89 +46,66 @@ class Program
         UI = new Shell(MemLog);
         UI.Build();
 
-        // events
+        // events → commands (centralized in CommandRouter)
         UI.QuitRequested += () => QuitApp();
 
-        UI.AddFeedRequested += async url =>
+        UI.Command += cmd =>
         {
-            var f = await Feeds!.AddFeedAsync(url);
-            UI.SetFeeds(Data.Feeds, f.Id);
-            UI.SelectFeed(f.Id);
-            UI.SetEpisodesForFeed(f.Id, Data.Episodes);
+            if (Feeds == null || Player == null || Playback == null || UI == null) return;
+            _ = CommandRouter.HandleAsync(cmd, Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
         };
 
-        UI.RefreshRequested += async () =>
+        UI.SearchApplied += q =>
         {
-            await Feeds!.RefreshAllAsync();
-            var keep = UI.GetSelectedFeedId();
-            UI.SetFeeds(Data.Feeds, keep);
-            if (keep is Guid fid) UI.SetEpisodesForFeed(fid, Data.Episodes);
-        };
-
-        UI.SelectedFeedChanged += () =>
-        {
-            if (UI.GetSelectedFeedId() is Guid fid)
-                UI.SetEpisodesForFeed(fid, Data.Episodes);
-        };
-
-        UI.PlaySelected += () =>
-        {
-            var ep = UI.GetSelectedEpisode();
-            if (ep == null) return;
-            Playback!.Play(ep);
-            UI.SetWindowTitle(ep.Title);
+            if (Feeds == null || Player == null || Playback == null || UI == null) return;
+            _ = CommandRouter.HandleAsync($":search {q}", Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
         };
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
 
         UI.TogglePlayedRequested += () =>
         {
-            var ep = UI.GetSelectedEpisode();
-            if (ep == null) return;
-            ep.Played = !ep.Played;
-            if (ep.Played && ep.LengthMs is long len) ep.LastPosMs = len;
-            _ = SaveAsync();
-            if (UI.GetSelectedFeedId() is Guid fid) UI.SetEpisodesForFeed(fid, Data.Episodes);
-            UI.ShowDetails(ep);
+            if (Feeds == null || Player == null || Playback == null || UI == null) return;
+            _ = CommandRouter.HandleAsync(":mark", Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
         };
 
-        // sehr kleine Command-Map ohne externen Router
-        UI.Command += HandleUiCommand;
-
-        UI.SearchApplied += query =>
+        UI.SelectedFeedChanged += () =>
         {
-            if (UI.GetSelectedFeedId() is not Guid fid) return;
-
-            var list = Data.Episodes.Where(e => e.FeedId == fid);
-            if (!string.IsNullOrWhiteSpace(query))
-                list = list.Where(e =>
-                    (e.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (e.DescriptionText?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
-
-            UI.SetEpisodesForFeed(fid, list);
+            var fid = UI.GetSelectedFeedId();
+            if (fid != null) UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
         };
 
-        // initial
-        UI.SetFeeds(Data.Feeds);
-        if (UI.GetSelectedFeedId() is Guid initId)
-            UI.SetEpisodesForFeed(initId, Data.Episodes);
+        UI.PlaySelected += () =>
+        {
+            var ep = UI.GetSelectedEpisode();
+            if (ep == null || Playback == null || UI == null) return;
+            Playback.Play(ep);
+            UI.SetWindowTitle(ep.Title);
+        };
 
-        // player → UI
+        // initial lists
+        UI.SetFeeds(Data.Feeds);
+        var startFeedId = UI.GetSelectedFeedId();
+        if (startFeedId != null) UI.SetEpisodesForFeed(startFeedId.Value, Data.Episodes);
+
+        // player → UI updates + persistence tick
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
             UI.UpdatePlayerUI(s);
-            Playback!.PersistProgressTick(s, eps =>
+            Playback!.PersistProgressTick(s, (eps) =>
             {
-                if (UI.GetSelectedFeedId() is Guid fid) UI.SetEpisodesForFeed(fid, eps);
+                var fid = UI.GetSelectedFeedId();
+                if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
             }, Data.Episodes);
         });
 
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             UI.UpdatePlayerUI(Player.State);
-            Playback!.PersistProgressTick(Player.State, eps =>
+            Playback!.PersistProgressTick(Player.State, (eps) =>
             {
-                if (UI.GetSelectedFeedId() is Guid fid) UI.SetEpisodesForFeed(fid, eps);
+                var fid = UI.GetSelectedFeedId();
+                if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
             }, Data.Episodes);
             return true;
         });
@@ -144,94 +120,6 @@ class Program
             try { Application.Shutdown(); } catch { }
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }
-        }
-    }
-
-    // ------ Commands aus Shell (Buttons/Keys) ------
-    static void HandleUiCommand(string cmd)
-    {
-        if (UI is null) return;
-
-        // quit-commands
-        if (cmd is ":q" or ":quit")
-        {
-            QuitApp();
-            return;
-        }
-
-        if (Player is null) return;
-
-        try
-        {
-            if (cmd == ":toggle")
-            {
-                Player.TogglePause();
-                UI.UpdatePlayerUI(Player.State);
-                return;
-            }
-
-            if (cmd.StartsWith(":seek"))
-            {
-                var arg = cmd.Substring(5).Trim();
-                if (string.IsNullOrWhiteSpace(arg)) return;
-
-                if (arg.EndsWith("%") && double.TryParse(arg.TrimEnd('%'), out var pct))
-                {
-                    if (Player.State.Length is TimeSpan len)
-                    {
-                        var pos = TimeSpan.FromMilliseconds(len.TotalMilliseconds * Math.Clamp(pct / 100.0, 0, 1));
-                        Player.SeekTo(pos);
-                    }
-                    return;
-                }
-
-                if (arg.StartsWith("+") || arg.StartsWith("-"))
-                {
-                    if (int.TryParse(arg, out var secsRel))
-                        Player.SeekRelative(TimeSpan.FromSeconds(secsRel));
-                    return;
-                }
-
-                var parts = arg.Split(':');
-                if (parts.Length == 2
-                    && int.TryParse(parts[0], out var mm)
-                    && int.TryParse(parts[1], out var ss))
-                {
-                    Player.SeekTo(TimeSpan.FromSeconds(mm * 60 + ss));
-                }
-                return;
-            }
-
-            if (cmd.StartsWith(":vol"))
-            {
-                var arg = cmd.Substring(4).Trim();
-                if (int.TryParse(arg, out var v))
-                {
-                    if (arg.StartsWith("+") || arg.StartsWith("-"))
-                        Player.SetVolume(Player.State.Volume0_100 + v);
-                    else
-                        Player.SetVolume(v);
-                }
-                return;
-            }
-
-            if (cmd.StartsWith(":speed"))
-            {
-                var arg = cmd.Substring(6).Trim();
-                if (double.TryParse(arg, System.Globalization.NumberStyles.Float,
-                                    System.Globalization.CultureInfo.InvariantCulture, out var sp))
-                {
-                    if (arg.StartsWith("+") || arg.StartsWith("-"))
-                        Player.SetSpeed(Player.State.Speed + sp);
-                    else
-                        Player.SetSpeed(sp);
-                }
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Debug(ex, "UI command failed: {Cmd}", cmd);
         }
     }
 
