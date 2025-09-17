@@ -26,6 +26,10 @@ public static class AppStorage {
     public static async Task SaveAsync(AppData data) {
         Directory.CreateDirectory(BaseDir);
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(DataPath, json);
+        var tmp = DataPath + ".tmp";
+        await File.WriteAllTextAsync(tmp, json);
+        File.Move(tmp, DataPath, true); // atomarer Replace
     }
+
+
 }

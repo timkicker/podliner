@@ -12,6 +12,25 @@ using KeyArgs = Terminal.Gui.View.KeyEventEventArgs;
 class Program {
     // ---------- App state ----------
     static object? _progressTimerToken;
+    // Resume-Logik
+    static object? _resumeTimerToken;
+    static long?   _resumeWantedMs;
+    static int _exitOnce = 0;
+    
+    static volatile bool _shuttingDown = false;
+    static System.Threading.CancellationTokenSource _shutdownCts = new();
+    static System.Threading.SemaphoreSlim _saveGate = new(1,1);
+    static Task? _inflightSave = null;
+    static DateTime _lastPeriodicSave = DateTime.MinValue;
+    
+    // Autosave-Logik
+    static DateTime _lastUiProgressRefresh = DateTime.MinValue; // falls noch nicht da
+    static System.Threading.CancellationTokenSource? _saveDebounceCts;
+
+    static bool UseAsciiMarks = false; // mit 'P' togglen, falls Unicode-Kreise nicht hübsch sind
+
+    static Episode? currentEpisode;
+    static DateTime _lastProgressPersist = DateTime.MinValue;
 
     static Window mainWin = null!;
     static FrameView feedsFrame = null!;
@@ -47,6 +66,37 @@ class Program {
     // ---------- Logging (Datei + Memory für In-App-Viewer) ----------
     static MemoryLogSink MemLog = new MemoryLogSink(2000);
 
+    static char ProgressGlyph(double p, bool played)
+    {
+        // Unicode hübsch, ASCII fallback
+        if (!UseAsciiMarks) {
+            if (played) return '✔';
+            if (p <= 0.0) return '○';
+            if (p < 0.25) return '◔';
+            if (p < 0.50) return '◑';
+            if (p < 0.75) return '◕';
+            return '●';
+        } else {
+            if (played) return '#';
+            if (p <= 0.0) return ' ';
+            if (p < 0.25) return '·';
+            if (p < 0.50) return '-';
+            if (p < 0.75) return '=';
+            return '≡';
+        }
+    }
+
+    static string EpisodeRowText(Episode e)
+    {
+        var len = (e.LengthMs ?? 0);
+        var pos = (e.LastPosMs ?? 0);
+        double ratio = (len > 0) ? Math.Clamp((double)pos / len, 0, 1) : 0;
+        var mark = ProgressGlyph(ratio, e.Played);
+        var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
+        return $"{mark} {date,-10}  {e.Title}";
+    }
+
+    
     static void ConfigureLogging() {
         var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(logDir);
@@ -76,26 +126,47 @@ class Program {
         };
     }
 
-    static void QuitApp() {
-        if (_exiting) return;
-        _exiting = true;
 
-        try { if (_progressTimerToken != null) Application.MainLoop?.RemoveTimeout(_progressTimerToken); } catch { }
+    static void QuitApp()
+    {
+        if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
 
+        try { Application.MainLoop?.RemoveTimeout(_progressTimerToken); } catch { }
+        try { _saveDebounceCts?.Cancel(); } catch { }
+
+        // Player best effort schließen, NICHT warten
         try { if (Player != null) Player.StateChanged -= OnPlayerStateChanged; } catch { }
+        try { Player?.Stop(); } catch { }
         try { (Player as IDisposable)?.Dispose(); } catch { }
 
-        Application.RequestStop();
+        // TUI runterfahren
+        try { Application.RequestStop(); } catch { }
+        try { Application.Shutdown(); } catch { }
 
+        // TERMINAL HART RESETTEN
         try {
-            Application.MainLoop?.AddTimeout(TimeSpan.FromMilliseconds(500), _ => {
-                try { Environment.Exit(0); } catch { }
-                return false;
-            });
-        } catch {
-            try { Environment.Exit(0); } catch { }
-        }
+            // Maus-Tracking aus, Bracketed Paste aus, Cursor an, Attrs reset, Alt-Screen raus
+            Console.Write(
+                "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse off (alle Modi)
+                "\x1b[?2004l" +                                           // bracketed paste off
+                "\x1b[?25h"   +                                           // cursor sichtbar
+                "\x1b[0m"     +                                           // SGR reset
+                "\x1b[?1049l"                                             // alt screen verlassen
+            );
+            Console.Out.Flush();
+            // Voll-Reset (RIS) – falls oben nicht reicht
+            Console.Write("\x1bc");
+            Console.Out.Flush();
+        } catch { }
+
+        try { Log.CloseAndFlush(); } catch { }
+
+        // **jetzt sofort raus**
+        Environment.Exit(0);
     }
+
+
+
 
     // ---------- Main ----------
     static async Task Main() {
@@ -112,6 +183,17 @@ class Program {
 
     Player = new LibVlcPlayer();
     Player.StateChanged += OnPlayerStateChanged;
+
+    Console.TreatControlCAsInput = false;                 // Ctrl+C soll SIGINT sein
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; QuitApp(); };
+    AppDomain.CurrentDomain.ProcessExit += (_, __) => {   // falls Exit anderswo passiert
+        try {
+            Console.Write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?25h\x1b[0m\x1b[?1049l\x1bc");
+            Console.Out.Flush();
+        } catch { }
+    };
+
+    AppDomain.CurrentDomain.ProcessExit += (_, __) => { ResetTerminal(); };
 
     Application.Init();
     var top = Application.Top;
@@ -171,13 +253,16 @@ class Program {
     try { Application.Run(); }
     catch (Exception ex) { Log.Fatal(ex, "Application.Run crashed"); throw; }
     finally {
-        try { Player?.Stop(); } catch (Exception ex) { Log.Warning(ex, "Stop on shutdown"); }
-        try { (Player as IDisposable)?.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Dispose on shutdown"); }
-        try { await AppStorage.SaveAsync(Data); } catch (Exception ex) { Log.Warning(ex, "Save on shutdown"); }
-        Application.Shutdown();
+        try { Player?.Stop(); } catch { }
+        try { (Player as IDisposable)?.Dispose(); } catch { }
+        try { await AppStorage.SaveAsync(Data); } catch { }
+
+        try { Application.Shutdown(); } catch { }
+        ResetTerminal();         // <— wichtig
         Log.Information("Shutdown complete");
-        Log.CloseAndFlush();
+        try { Log.CloseAndFlush(); } catch { }
     }
+
 }
 
     static TabView rightTabs = null!;
@@ -253,24 +338,61 @@ class Program {
     }
 
     static void UpdatePlayerUI(PlayerState s) {
-        string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
-        var pos = s.Position;
-        var len = s.Length ?? TimeSpan.Zero;
+    // --- Anzeige aktualisieren ---
+    string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+    var pos = s.Position;
+    var len = s.Length ?? TimeSpan.Zero;
 
-        var posStr = F(pos);
-        var lenStr = len == TimeSpan.Zero ? "--:--" : F(len);
-        var remStr = len == TimeSpan.Zero ? "--:--" : F((len - pos) < TimeSpan.Zero ? TimeSpan.Zero : (len - pos));
-        var icon   = s.IsPlaying ? "▶" : "⏸";
+    var posStr = F(pos);
+    var lenStr = len == TimeSpan.Zero ? "--:--" : F(len);
+    var remStr = len == TimeSpan.Zero ? "--:--" : F((len - pos) < TimeSpan.Zero ? TimeSpan.Zero : (len - pos));
+    var icon   = s.IsPlaying ? "▶" : "⏸";
 
-        timeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
-        UpdatePlayPauseButton();
+    timeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
+    UpdatePlayPauseButton();
 
-        if (len.TotalMilliseconds > 0) {
-            progress.Fraction = Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f);
-        } else {
-            progress.Fraction = 0f;
+    if (len.TotalMilliseconds > 0) {
+        progress.Fraction = Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f);
+    } else {
+        progress.Fraction = 0f;
+    }
+
+    // --- PERSIST-SEKTION: Fortschritt im Modell + Speichern ------------------
+    if (currentEpisode != null) {
+        try {
+            // Fortschritt ins Modell schreiben
+            if (len.TotalMilliseconds > 0) currentEpisode.LengthMs = (long)len.TotalMilliseconds;
+            currentEpisode.LastPosMs = (long)Math.Max(0, pos.TotalMilliseconds);
+
+            // "played" heuristik
+            if (len.TotalMilliseconds > 0) {
+                var remain = len - pos;
+                var ratio  = pos.TotalMilliseconds / len.TotalMilliseconds;
+                if (ratio >= 0.90 || remain <= TimeSpan.FromSeconds(30)) {
+                    if (!currentEpisode.Played) {
+                        currentEpisode.Played = true;
+                        currentEpisode.LastPlayedAt = DateTimeOffset.Now;
+                        Log.Information("Episode marked played: {Title}", currentEpisode.Title);
+                        SaveSoonDebounced(300); // schnell nach dem Markieren sichern
+                    }
+                }
+            }
+
+            // Liste ca. 1x pro Sekunde auffrischen
+            if ((DateTime.UtcNow - _lastUiProgressRefresh) > TimeSpan.FromSeconds(1)) {
+                _lastUiProgressRefresh = DateTime.UtcNow;
+                UpdateEpisodeList();
+            }
+
+            // PERIODISCHES, ZUVERLÄSSIGES SPEICHERN (Throttle ~3s)
+            SavePeriodicThrottle(3000);
+
+        } catch (Exception ex) {
+            Log.Debug(ex, "UpdatePlayerUI persist error");
         }
     }
+    // -------------------------------------------------------------------------
+}
 
     static void OnPlayerStateChanged(PlayerState s) {
         try {
@@ -293,19 +415,51 @@ class Program {
             ? new System.Collections.Generic.List<string>()
             : Data.Episodes.Where(e => e.FeedId == feed.Id)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .Select(e => $"{(e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??"),-10}  {e.Title}")
+                .Select(EpisodeRowText)
                 .ToList();
-        episodeList.SetSource(items);
 
-        // Details für aktuelle Auswahl zeigen
-        UpdateDetailsPane();
+        // Auswahl beibehalten
+        var sel = Math.Clamp(episodeList.SelectedItem, 0, Math.Max(0, items.Count - 1));
+        episodeList.SetSource(items);
+        episodeList.SelectedItem = sel;
     }
+
     
     static void UpdateDetailsPane() {
         if (rightTabs == null || detailsView == null) return;
         var ep = GetSelectedEpisode();
         detailsView.Text = ep == null ? "(No episode selected)" : FormatEpisodeDetails(ep);
     }
+    
+    static void TogglePlayedSelected() {
+        var ep = GetSelectedEpisode();
+        if (ep == null) return;
+        ep.Played = !ep.Played;
+        if (ep.Played) {
+            ep.LastPlayedAt = DateTimeOffset.Now;
+            // wenn als gespielt markiert → Position ans Ende setzen
+            if (ep.LengthMs is long len) ep.LastPosMs = len;
+        }
+        UpdateEpisodeList();
+        _ = Task.Run(async () => { try { await AppStorage.SaveAsync(Data); } catch {} });
+    }
+
+    static void ResetTerminal()
+    {
+        try {
+            // Maus-Reporting aus (alle Modi), Bracketed Paste aus, Alt-Screen raus, Cursor an, Attribute reset
+            Console.Write(
+                "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse off
+                "\x1b[?2004l" +                                           // bracketed paste off
+                "\x1b[?25h"   +                                           // cursor show
+                "\x1b[0m"     +                                           // attributes reset
+                "\x1b[?1049l"                                             // leave alt screen
+            );
+            Console.Out.Flush();
+        } catch { /* ignore */ }
+    }
+
+
 
     static string FormatEpisodeDetails(Episode e)
     {
@@ -381,16 +535,89 @@ class Program {
         if (ep == null || Player == null) return;
 
         Log.Information("UI PlaySelectedEpisode feed={Feed} ep={Episode}", GetSelectedFeed()?.Title, ep.Title);
-        Player.Play(ep.AudioUrl);
 
+        // alte Resume-Versuche brauchen wir nicht mehr
+        // (Wenn Du die Methoden noch hast, machen sie nichts; sonst gelöscht.)
+        // CancelResumeAttempts();  // <- entfernen
+
+        // sofern vorher etwas lief: einmal sichern
+        if (currentEpisode != null && !ReferenceEquals(currentEpisode, ep)) {
+            SaveSoonDebounced(200);
+        }
+
+        currentEpisode = ep;
         titleLabel.Text = ep.Title ?? "(untitled)";
-        // Optional: automatisch zur Details-Ansicht springen
-        // rightTabs.SelectedTab = rightTabs.Tabs[1];
-        // detailsView.SetFocus();
+
+        // Resume-Entscheidung (nahe Anfang/Ende → neu starten)
+        long? startMs = ep.LastPosMs;
+        if (startMs is long ms && ep.LengthMs is long len &&
+            (ms < 5_000 || ms > (len - 10_000)))
+            startMs = null;
+
+        Player.Play(ep.AudioUrl, startMs);
+
+        UpdateDetailsPane();
+        SaveSoonDebounced(400); // Auswahl & evtl. neue Timestamps zeitnah sichern
     }
 
+    
+    static void SaveSoonDebounced(int delayMs = 1200)
+    {
+        if (_shuttingDown) return;
 
+        try { _saveDebounceCts?.Cancel(); } catch { }
+        _saveDebounceCts = new System.Threading.CancellationTokenSource();
+        var ct = _saveDebounceCts.Token;
 
+        _inflightSave = Task.Run(async () =>
+        {
+            try {
+                await Task.Delay(delayMs, ct);
+                if (ct.IsCancellationRequested || _shuttingDown) return;
+
+                await _saveGate.WaitAsync(ct);
+                try {
+                    await AppStorage.SaveAsync(Data);
+                    Log.Debug("debounced save ok");
+                }
+                finally {
+                    _saveGate.Release();
+                }
+            }
+            catch (TaskCanceledException) { }
+            catch (Exception ex) { Log.Debug(ex, "debounced save failed"); }
+        }, ct);
+    }
+
+    static void SaveNow()
+    {
+        try { _saveDebounceCts?.Cancel(); } catch { }
+        try {
+            _saveGate.Wait();
+            try { AppStorage.SaveAsync(Data).GetAwaiter().GetResult(); Log.Debug("save now ok"); }
+            finally { _saveGate.Release(); }
+        } catch (Exception ex) { Log.Debug(ex, "save now failed"); }
+    }
+
+    static void SavePeriodicThrottle(int minIntervalMs = 3000)
+    {
+        if (_shuttingDown) return;
+        var now = DateTime.UtcNow;
+        if ((now - _lastPeriodicSave).TotalMilliseconds < minIntervalMs) return;
+        _lastPeriodicSave = now;
+
+        _ = Task.Run(async () => {
+            try {
+                await _saveGate.WaitAsync();
+                try { await AppStorage.SaveAsync(Data); Log.Debug("periodic save ok"); }
+                finally { _saveGate.Release(); }
+            } catch (Exception ex) { Log.Debug(ex, "periodic save failed"); }
+        });
+    }
+
+    
+ 
+  
     // ---------- Global Keys ----------
     static bool HandleGlobalKeys(KeyArgs e) {
     var key = e.KeyEvent.Key;
@@ -401,6 +628,10 @@ class Program {
         var baseKey = key & ~Key.CtrlMask;
         if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
     }
+    
+    // Mark as played/unplayed
+    if (kv == 'm' || kv == 'M') { TogglePlayedSelected(); return true; }
+
 
     // Logs
     if (key == Key.F12) { ShowLogsOverlay(500); return true; }
@@ -611,6 +842,7 @@ class Program {
 
     static string KeysHelp =>
 @"Vim-like keys:
+  m Mark played/unplayed
   h/l        Focus left/right pane     j/k    Move selection
   Enter      Play selected episode
   /          Search titles+shownotes (Enter to apply, n to repeat)

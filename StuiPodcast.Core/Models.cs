@@ -10,6 +10,12 @@ public class Feed {
 }
 
 public class Episode {
+    // in Episode.cs (oder wo dein Episode-Modell liegt)
+    public long? LastPosMs { get; set; }      // letzte Position
+    public long? LengthMs  { get; set; }      // bekannte Länge
+    public bool  Played    { get; set; }      // als gespielt markiert
+    public DateTimeOffset? LastPlayedAt { get; set; } // optionales Meta
+
     public Guid   Id { get; set; } = Guid.NewGuid();
     public Guid   FeedId { get; set; }
     public string Title { get; set; } = "";
