@@ -1,80 +1,134 @@
 using System;
-using System.Linq;
-using Serilog;
-using StuiPodcast.App.Debug;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
+using StuiPodcast.App.Debug;
 
 sealed class PlaybackCoordinator
 {
-    private readonly AppData _data;
-    private readonly IPlayer _player;
-    private readonly Func<System.Threading.Tasks.Task> _save;
-    private readonly MemoryLogSink _mem;
+    readonly AppData _data;
+    readonly IPlayer _player;
+    readonly Func<Task> _saveAsync;
+    readonly MemoryLogSink _mem;
 
-    private Episode? _current;
-    private DateTime _lastUiRefresh = DateTime.MinValue;
-    private DateTime _lastPeriodicSave = DateTime.MinValue;
+    Episode? _current;
+    CancellationTokenSource? _resumeCts;
+    DateTime _lastUiRefresh = DateTime.MinValue;
+    DateTime _lastPeriodicSave = DateTime.MinValue;
 
-    public PlaybackCoordinator(AppData data, IPlayer player, Func<System.Threading.Tasks.Task> save, MemoryLogSink mem)
+    public PlaybackCoordinator(AppData data, IPlayer player, Func<Task> saveAsync, MemoryLogSink mem)
     {
-        _data = data; _player = player; _save = save; _mem = mem;
+        _data = data;
+        _player = player;
+        _saveAsync = saveAsync;
+        _mem = mem;
     }
 
+    // start playback; do a single delayed seek for resume to avoid libvlc lockups
     public void Play(Episode ep)
     {
-        if (_current != null && !ReferenceEquals(_current, ep))
-            _ = _save();
-
         _current = ep;
+        CancelResume();
 
         long? startMs = ep.LastPosMs;
-        if (startMs is long ms && ep.LengthMs is long len &&
-            (ms < 5_000 || ms > (len - 10_000)))
-            startMs = null;
+        if (startMs is long ms)
+        {
+            long knownLen = ep.LengthMs ?? 0;
+            // skip resume if too close to start/end
+            if ((knownLen > 0 && (ms < 5_000 || ms > knownLen - 10_000)) ||
+                (knownLen == 0 && ms < 5_000))
+                startMs = null;
+        }
 
-        _player.Play(ep.AudioUrl, startMs);
+        // start clean, then resume once after a short delay (safer with libvlc)
+        _player.Play(ep.AudioUrl, null);
+
+        if (startMs is long want && want > 0)
+            StartOneShotResume(want);
     }
 
-    public void PersistProgressTick(PlayerState s,
-        Action<System.Collections.Generic.IEnumerable<Episode>> refreshEpisodes,
-        System.Collections.Generic.IEnumerable<Episode> allEpisodes)
+    void StartOneShotResume(long ms)
     {
-        if (_current == null) return;
+        _resumeCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _resumeCts = cts;
 
-        var lenMs = s.Length?.TotalMilliseconds ?? 0;
-        var posMs = Math.Max(0, s.Position.TotalMilliseconds);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // let the decoder attach & length populate
+                await Task.Delay(350, cts.Token);
+                if (cts.IsCancellationRequested) return;
 
-        if (lenMs > 0) _current.LengthMs = (long)lenMs;
-        _current.LastPosMs = (long)posMs;
+                Application.MainLoop?.Invoke(() =>
+                {
+                    try
+                    {
+                        var lenMs = _player.State.Length?.TotalMilliseconds ?? 0;
+                        if (lenMs > 0 && ms > lenMs - 10_000) return; // ignore if too close to end
+                        _player.SeekTo(TimeSpan.FromMilliseconds(ms));  // one single seek
+                    }
+                    catch { /* ignore */ }
+                });
+            }
+            catch (TaskCanceledException) { }
+            catch { /* ignore */ }
+        });
+    }
+
+    void CancelResume()
+    {
+        try { _resumeCts?.Cancel(); } catch { }
+        _resumeCts = null;
+    }
+
+    // called regularly (from StateChanged + UI timer) to persist progress & do light UI refresh
+    public void PersistProgressTick(
+        PlayerState s,
+        Action<IEnumerable<Episode>> refreshUi,
+        IEnumerable<Episode> allEpisodes)
+    {
+        if (_current is null) return;
+
+        var lenMs = (long)(s.Length?.TotalMilliseconds ?? 0);
+        var posMs = (long)Math.Max(0, s.Position.TotalMilliseconds);
+
+        if (lenMs > 0) _current.LengthMs = lenMs;
+        _current.LastPosMs = posMs;
 
         if (lenMs > 0)
         {
-            var remain = TimeSpan.FromMilliseconds(lenMs - posMs);
-            var ratio  = posMs / lenMs;
+            var remain = TimeSpan.FromMilliseconds(Math.Max(0, lenMs - posMs));
+            var ratio = (double)posMs / lenMs;
             if (ratio >= 0.90 || remain <= TimeSpan.FromSeconds(30))
             {
                 if (!_current.Played)
                 {
                     _current.Played = true;
                     _current.LastPlayedAt = DateTimeOffset.Now;
-                    Log.Information("Episode marked played: {Title}", _current.Title);
-                    _ = _save();
+                    _ = _saveAsync(); // quick save when marking played
                 }
             }
         }
 
-        if ((DateTime.UtcNow - _lastUiRefresh) > TimeSpan.FromSeconds(1))
+        var now = DateTime.UtcNow;
+
+        // refresh episodes about 1x/sec
+        if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(1))
         {
-            _lastUiRefresh = DateTime.UtcNow;
-            var feedId = _current.FeedId;
-            refreshEpisodes(allEpisodes.Where(e => e.FeedId == feedId));
+            _lastUiRefresh = now;
+            refreshUi(allEpisodes);
         }
 
-        if ((DateTime.UtcNow - _lastPeriodicSave) > TimeSpan.FromSeconds(3))
+        // periodic save ~3s
+        if ((now - _lastPeriodicSave) > TimeSpan.FromSeconds(3))
         {
-            _lastPeriodicSave = DateTime.UtcNow;
-            _ = _save();
+            _lastPeriodicSave = now;
+            _ = _saveAsync();
         }
     }
 }
