@@ -15,7 +15,7 @@ class Program {
 
     static Window mainWin = null!;
     static FrameView feedsFrame = null!;
-    static FrameView epsFrame = null!;
+    static View epsFrame = null!;
     static FrameView statusFrame = null!;
     static bool useMenuAccent = true; // true = MenuBar-Farben überall
 
@@ -143,8 +143,10 @@ class Program {
     feedsFrame.Add(feedList);
 
     // Rechts: Episoden + Details als Tabs
-    epsFrame = new FrameView("Episodes") { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    // Right pane ohne Rahmen/Titel – Tabs kümmern sich um Labels
+    epsFrame = new View { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
     mainWin.Add(epsFrame);
+
     BuildRightTabs();   // <- neu
 
     // Player unten
