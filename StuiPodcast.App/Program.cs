@@ -99,94 +99,115 @@ class Program {
 
     // ---------- Main ----------
     static async Task Main() {
-        ConfigureLogging();
-        InstallGlobalErrorHandlers();
+    ConfigureLogging();
+    InstallGlobalErrorHandlers();
+    Log.Information("Startup");
 
-        Log.Information("Startup");
-
-        // Daten & Services
-        Data  = await AppStorage.LoadAsync();
-        Feeds = new FeedService(Data);
-        if (Data.Feeds.Count == 0) {
-            try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
-            catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
-        }
-
-        Player = new LibVlcPlayer();
-        Player.StateChanged += OnPlayerStateChanged;
-
-        Application.Init();
-        var top = Application.Top;
-
-        // Menü
-        var menu = new MenuBar(new MenuBarItem[] {
-            new("_File", new MenuItem[]{
-                new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
-                new("_Refresh All (:refresh)", "", async () => await RefreshAllAsync()),
-                new("_Quit (Q)", "Q", () => QuitApp())
-            }),
-            new("_Help", new MenuItem[]{
-                new("_Keys (:h)", "", () => MessageBox.Query("Keys", KeysHelp, "OK"))
-            })
-        });
-        top.Add(menu);
-
-        // Haupt-Container (alles über der Player-Leiste)
-        mainWin = new Window() { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
-        mainWin.Border.BorderStyle = BorderStyle.None;
-        top.Add(mainWin);
-
-        // Feeds
-        feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
-        mainWin.Add(feedsFrame);
-        feedList = new ListView(Data.Feeds.Select(f => f.Title).ToList()) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-        feedList.OpenSelectedItem += _ => { ActivePane = 1; episodeList.SetFocus(); };
-        feedList.SelectedItemChanged += _ => UpdateEpisodeList();
-        feedsFrame.Add(feedList);
-
-        // Episodes
-        epsFrame = new FrameView("Episodes") { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-        mainWin.Add(epsFrame);
-        episodeList = new ListView(new List<string>()) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-        episodeList.OpenSelectedItem += _ => PlaySelectedEpisode();
-        epsFrame.Add(episodeList);
-
-        // Player unten
-        statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus=false };
-        top.Add(statusFrame);
-        BuildPlayerUI();
-
-        ApplyTheme(useMenuAccent: true);
-
-        // Globaler Keyhook:
-        // - blockt Ctrl+C/V/X (verhindert OS-Clipboard-Aufrufe → "Linux/null")
-        // - F12 zeigt Log-Overlay
-        top.KeyPress         += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-        feedList.KeyPress    += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-        episodeList.KeyPress += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
-
-        feedList.SetFocus();
-        UpdateEpisodeList();
-
-        _progressTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ => {
-            if (Player != null) UpdatePlayerUI(Player.State);
-            return true;
-        });
-
-        try {
-            Application.Run();
-        } catch (Exception ex) {
-            Log.Fatal(ex, "Application.Run crashed");
-            throw;
-        } finally {
-            try { Player?.Stop(); } catch (Exception ex) { Log.Warning(ex, "Stop on shutdown"); }
-            try { (Player as IDisposable)?.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Dispose on shutdown"); }
-            try { await AppStorage.SaveAsync(Data); } catch (Exception ex) { Log.Warning(ex, "Save on shutdown"); }
-            Application.Shutdown();
-            Log.Information("Shutdown complete");
-            Log.CloseAndFlush();
-        }
+    Data  = await AppStorage.LoadAsync();
+    Feeds = new FeedService(Data);
+    if (Data.Feeds.Count == 0) {
+        try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
+        catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
     }
+
+    Player = new LibVlcPlayer();
+    Player.StateChanged += OnPlayerStateChanged;
+
+    Application.Init();
+    var top = Application.Top;
+
+    var menu = new MenuBar(new MenuBarItem[] {
+        new("_File", new MenuItem[]{
+            new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
+            new("_Refresh All (:refresh)", "", async () => await RefreshAllAsync()),
+            new("_Quit (Q)", "Q", () => QuitApp())
+        }),
+        new("_Help", new MenuItem[]{
+            new("_Keys (:h)", "", () => MessageBox.Query("Keys", KeysHelp, "OK"))
+        })
+    });
+    top.Add(menu);
+
+    // Hauptcontainer (ohne Titelzeile)
+    mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
+    mainWin.Border.BorderStyle = BorderStyle.None;
+    mainWin.Title = "";
+    top.Add(mainWin);
+
+    // Feeds links
+    feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
+    mainWin.Add(feedsFrame);
+    feedList = new ListView(Data.Feeds.Select(f => f.Title).ToList()) { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    feedList.OpenSelectedItem += _ => { ActivePane = 1; episodeList.SetFocus(); };
+    feedList.SelectedItemChanged += _ => UpdateEpisodeList();
+    feedsFrame.Add(feedList);
+
+    // Rechts: Episoden + Details als Tabs
+    epsFrame = new FrameView("Episodes") { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    mainWin.Add(epsFrame);
+    BuildRightTabs();   // <- neu
+
+    // Player unten
+    statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus=false };
+    top.Add(statusFrame);
+    BuildPlayerUI();
+
+    ApplyTheme(useMenuAccent: true);
+
+    top.KeyPress         += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+    feedList.KeyPress    += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+    episodeList.KeyPress += (KeyArgs e) => { if (HandleGlobalKeys(e)) e.Handled = true; };
+
+    feedList.SetFocus();
+    UpdateEpisodeList();      // lädt auch Details
+
+    _progressTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ => {
+        if (Player != null) UpdatePlayerUI(Player.State);
+        return true;
+    });
+
+    try { Application.Run(); }
+    catch (Exception ex) { Log.Fatal(ex, "Application.Run crashed"); throw; }
+    finally {
+        try { Player?.Stop(); } catch (Exception ex) { Log.Warning(ex, "Stop on shutdown"); }
+        try { (Player as IDisposable)?.Dispose(); } catch (Exception ex) { Log.Warning(ex, "Dispose on shutdown"); }
+        try { await AppStorage.SaveAsync(Data); } catch (Exception ex) { Log.Warning(ex, "Save on shutdown"); }
+        Application.Shutdown();
+        Log.Information("Shutdown complete");
+        Log.CloseAndFlush();
+    }
+}
+
+    static TabView rightTabs = null!;
+    static TextView detailsView = null!;
+
+    static void BuildRightTabs() {
+        epsFrame.RemoveAll();
+
+        rightTabs = new TabView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        epsFrame.Add(rightTabs);
+
+        // Tab "Episodes"
+        var epHost = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        episodeList = new ListView(new System.Collections.Generic.List<string>()) {
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill()
+        };
+        episodeList.OpenSelectedItem += _ => PlaySelectedEpisode();
+        episodeList.SelectedItemChanged += _ => UpdateDetailsPane(); // Details live updaten
+        epHost.Add(episodeList);
+
+        // Tab "Details"
+        var detFrame = new FrameView("Shownotes") { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        detailsView = new TextView {
+            X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(),
+            ReadOnly = true, WordWrap = true
+        };
+        detFrame.Add(detailsView);
+
+        rightTabs.AddTab(new TabView.Tab("Episodes", epHost), true);
+        rightTabs.AddTab(new TabView.Tab("Details",  detFrame), false);
+    }
+
 
     // ---------- Player UI ----------
     static void BuildPlayerUI() {
@@ -273,7 +294,58 @@ class Program {
                 .Select(e => $"{(e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??"),-10}  {e.Title}")
                 .ToList();
         episodeList.SetSource(items);
+
+        // Details für aktuelle Auswahl zeigen
+        UpdateDetailsPane();
     }
+    
+    static void UpdateDetailsPane() {
+        if (rightTabs == null || detailsView == null) return;
+        var ep = GetSelectedEpisode();
+        detailsView.Text = ep == null ? "(No episode selected)" : FormatEpisodeDetails(ep);
+    }
+
+    static string FormatEpisodeDetails(Episode e)
+    {
+        var sb = new System.Text.StringBuilder();
+        var date = e.PubDate?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—";
+
+        var title = e.Title ?? "(untitled)";
+        sb.AppendLine(title);
+        sb.AppendLine(new string('─', Math.Min(title.Length, 60)));
+        sb.AppendLine($"Date: {date}");
+        if (!string.IsNullOrWhiteSpace(e.AudioUrl))
+            sb.AppendLine($"Audio: {e.AudioUrl}");
+        sb.AppendLine();
+
+        // Nur Text – kein DescriptionHtml im Modell
+        var notes = e.DescriptionText?.Trim();
+        sb.AppendLine(string.IsNullOrWhiteSpace(notes) ? "(no shownotes)" : notes);
+        return sb.ToString();
+    }
+
+    static bool OnDetails() =>
+        rightTabs?.SelectedTab?.Text.ToString() == "Details";
+
+    static TabView.Tab? GetTabByTitle(string title) =>
+        rightTabs?.Tabs.FirstOrDefault(t => string.Equals(t.Text.ToString(), title, StringComparison.Ordinal));
+
+    static void FocusDetailsTab()
+    {
+        if (rightTabs == null) return;
+        var tab = GetTabByTitle("Details") ?? rightTabs.Tabs.ElementAtOrDefault(1);
+        if (tab != null) { rightTabs.SelectedTab = tab; detailsView?.SetFocus(); }
+    }
+
+    static void FocusEpisodesTab()
+    {
+        if (rightTabs == null) return;
+        var tab = GetTabByTitle("Episodes") ?? rightTabs.Tabs.ElementAtOrDefault(0);
+        if (tab != null) { rightTabs.SelectedTab = tab; episodeList?.SetFocus(); }
+    }
+
+
+
 
     static Feed? GetSelectedFeed() {
         if (Data.Feeds.Count == 0) return null;
@@ -307,82 +379,86 @@ class Program {
         if (ep == null || Player == null) return;
 
         Log.Information("UI PlaySelectedEpisode feed={Feed} ep={Episode}", GetSelectedFeed()?.Title, ep.Title);
-
         Player.Play(ep.AudioUrl);
 
-        if (Application.Top.Subviews.OfType<Window>().FirstOrDefault() is Window w) {
-            w.Title = $"stui-podcast — {ep.Title}";
-        }
         titleLabel.Text = ep.Title ?? "(untitled)";
+        // Optional: automatisch zur Details-Ansicht springen
+        // rightTabs.SelectedTab = rightTabs.Tabs[1];
+        // detailsView.SetFocus();
     }
+
+
 
     // ---------- Global Keys ----------
     static bool HandleGlobalKeys(KeyArgs e) {
-        var key = e.KeyEvent.Key;
-        var kv  = e.KeyEvent.KeyValue;
+    var key = e.KeyEvent.Key;
+    var kv  = e.KeyEvent.KeyValue;
 
-        // Blockiere System-Clipboard-Shortcuts (verhindert TextCopy → "Linux/null" in externen Konsolen)
-        if ((key & Key.CtrlMask) != 0) {
-            var baseKey = key & ~Key.CtrlMask;
-            if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) {
-                e.Handled = true;
-                return true;
-            }
-        }
-
-        // Logs anzeigen
-        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
-
-        // Quit
-        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitApp(); return true; }
-
-        // Theme-Toggle
-        if (kv == 't' || kv == 'T') { useMenuAccent = !useMenuAccent; ApplyTheme(useMenuAccent); return true; }
-
-        // ":" und "/"
-        if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
-        if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
-
-        // Vim-Navigation
-        if (key == (Key)('h')) { ActivePane = 0; feedList.SetFocus(); return true; }
-        if (key == (Key)('l')) { ActivePane = 1; episodeList.SetFocus(); return true; }
-        if (key == (Key)('j')) { MoveList(+1); return true; }
-        if (key == (Key)('k')) { MoveList(-1); return true; }
-
-        // Playback
-        if (key == Key.Space) { Player?.TogglePause(); UpdatePlayPauseButton(); return true; }
-        if (key == Key.CursorLeft || key == (Key)('H')) { Player?.SeekRelative(TimeSpan.FromSeconds(-10)); return true; }
-        if (key == Key.CursorRight|| key == (Key)('L')) { Player?.SeekRelative(TimeSpan.FromSeconds(+10)); return true; }
-        if (kv == 'H') { Player?.SeekRelative(TimeSpan.FromSeconds(-60)); return true; }
-        if (kv == 'L') { Player?.SeekRelative(TimeSpan.FromSeconds(+60)); return true; }
-
-        // g/G
-        if (kv == 'g') { Player?.SeekTo(TimeSpan.Zero); return true; }
-        if (kv == 'G') { if (Player?.State.Length is TimeSpan len) Player.SeekTo(len); return true; }
-
-        // Volume
-        if (key == (Key)('-')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 - 5); return true; }
-        if (key == (Key)('+')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 + 5); return true; }
-
-        // Speed
-        if (key == (Key)('[')) { if (Player != null) Player.SetSpeed(Player.State.Speed - 0.1); return true; }
-        if (key == (Key)(']')) { if (Player != null) Player.SetSpeed(Player.State.Speed + 0.1); return true; }
-        if (key == (Key)('=')) { if (Player != null) Player.SetSpeed(1.0); return true; }
-        if (kv == '1') { Player?.SetSpeed(1.0);  return true; }
-        if (kv == '2') { Player?.SetSpeed(1.25); return true; }
-        if (kv == '3') { Player?.SetSpeed(1.5);  return true; }
-
-        // Download-Stub
-        if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads kommen später (M5).", "OK"); return true; }
-
-        // Enter → Play
-        if (key == Key.Enter) { PlaySelectedEpisode(); return true; }
-
-        // Suche wiederholen
-        if (key == (Key)('n')) { if (!string.IsNullOrEmpty(lastSearch)) ApplySearch(lastSearch!); return true; }
-
-        return false;
+    // Blockiere System-Clipboard-Shortcuts (verhindert TextCopy → "Linux/null")
+    if ((key & Key.CtrlMask) != 0) {
+        var baseKey = key & ~Key.CtrlMask;
+        if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
     }
+
+    // Logs
+    if (key == Key.F12) { ShowLogsOverlay(500); return true; }
+
+    // Quit
+    if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitApp(); return true; }
+
+    // Theme
+    if (kv == 't' || kv == 'T') { useMenuAccent = !useMenuAccent; ApplyTheme(useMenuAccent); return true; }
+
+    // ":" und "/"
+    if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
+    if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
+
+    // Vim-Navigation
+    if (key == (Key)('h')) { ActivePane = 0; feedList.SetFocus(); return true; }
+    if (key == (Key)('l')) { ActivePane = 1; episodeList.SetFocus(); return true; }
+    if (key == (Key)('j')) { MoveList(+1); return true; }
+    if (key == (Key)('k')) { MoveList(-1); return true; }
+
+    // Details-Tab togglen
+    if (kv == 'i' || kv == 'I') { FocusDetailsTab(); UpdateDetailsPane(); return true; }
+    if (key == Key.Esc && OnDetails()) { FocusEpisodesTab(); return true; }
+
+    // Playback
+    if (key == Key.Space) { Player?.TogglePause(); UpdatePlayPauseButton(); return true; }
+    if (key == Key.CursorLeft || key == (Key)('H')) { Player?.SeekRelative(TimeSpan.FromSeconds(-10)); return true; }
+    if (key == Key.CursorRight|| key == (Key)('L')) { Player?.SeekRelative(TimeSpan.FromSeconds(+10)); return true; }
+    if (kv == 'H') { Player?.SeekRelative(TimeSpan.FromSeconds(-60)); return true; }
+    if (kv == 'L') { Player?.SeekRelative(TimeSpan.FromSeconds(+60)); return true; }
+
+    // g/G
+    if (kv == 'g') { Player?.SeekTo(TimeSpan.Zero); return true; }
+    if (kv == 'G') { if (Player?.State.Length is TimeSpan len) Player.SeekTo(len); return true; }
+
+    // Volume
+    if (key == (Key)('-')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 - 5); return true; }
+    if (key == (Key)('+')) { if (Player != null) Player.SetVolume(Player.State.Volume0_100 + 5); return true; }
+
+    // Speed
+    if (key == (Key)('[')) { if (Player != null) Player.SetSpeed(Player.State.Speed - 0.1); return true; }
+    if (key == (Key)(']')) { if (Player != null) Player.SetSpeed(Player.State.Speed + 0.1); return true; }
+    if (key == (Key)('=')) { if (Player != null) Player.SetSpeed(1.0); return true; }
+    if (kv == '1') { Player?.SetSpeed(1.0);  return true; }
+    if (kv == '2') { Player?.SetSpeed(1.25); return true; }
+    if (kv == '3') { Player?.SetSpeed(1.5);  return true; }
+
+    // Download-Stub
+    if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads kommen später (M5).", "OK"); return true; }
+
+    // Enter → Play (nicht in Details)
+    if (key == Key.Enter && !OnDetails()) { PlaySelectedEpisode(); return true; }
+
+    // Suche wiederholen
+    if (key == (Key)('n')) { if (!string.IsNullOrEmpty(lastSearch)) ApplySearch(lastSearch!); return true; }
+
+    return false;
+}
+
+
 
     static void ApplyTheme(bool useMenuAccent) {
         var scheme = useMenuAccent ? Colors.Menu : Colors.Base;
