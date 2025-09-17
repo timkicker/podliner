@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Serilog;
 using StuiPodcast.App.Debug;
 using Terminal.Gui;
+
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 
@@ -16,6 +17,7 @@ class Program
 
     static Shell? UI;
     static PlaybackCoordinator? Playback;
+    static CommandRouter? Router;
     static MemoryLogSink MemLog = new(2000);
 
     static object? _uiTimer;
@@ -46,67 +48,46 @@ class Program
         UI = new Shell(MemLog);
         UI.Build();
 
-        // events → commands (centralized in CommandRouter)
-        UI.QuitRequested += () => QuitApp();
+        // Router
+        Router = new CommandRouter(
+            data: Data,
+            feeds: Feeds!,
+            player: Player!,
+            playback: Playback!,
+            ui: UI!,
+            save: SaveAsync,
+            quit: QuitApp
+        );
 
-        UI.Command += cmd =>
-        {
-            if (Feeds == null || Player == null || Playback == null || UI == null) return;
-            _ = CommandRouter.HandleAsync(cmd, Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
-        };
-
-        UI.SearchApplied += q =>
-        {
-            if (Feeds == null || Player == null || Playback == null || UI == null) return;
-            _ = CommandRouter.HandleAsync($":search {q}", Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
-        };
-
-        UI.ToggleThemeRequested += () => UI.ToggleTheme();
-
-        UI.TogglePlayedRequested += () =>
-        {
-            if (Feeds == null || Player == null || Playback == null || UI == null) return;
-            _ = CommandRouter.HandleAsync(":mark", Data, Feeds, Player, Playback, UI, SaveAsync, MemLog);
-        };
-
-        UI.SelectedFeedChanged += () =>
-        {
-            var fid = UI.GetSelectedFeedId();
-            if (fid != null) UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
-        };
-
-        UI.PlaySelected += () =>
-        {
-            var ep = UI.GetSelectedEpisode();
-            if (ep == null || Playback == null || UI == null) return;
-            Playback.Play(ep);
-            UI.SetWindowTitle(ep.Title);
-        };
+        // wire shell → router (alles zentralisiert)
+        UI.QuitRequested        += () => _ = Router.Handle(":q");
+        UI.PlaySelected         += () => _ = Router.Handle(":play");
+        UI.ToggleThemeRequested += () => _ = Router.Handle(":theme");
+        UI.TogglePlayedRequested+= () => _ = Router.Handle(":mark");
+        UI.Command              += cmd => _ = Router!.Handle(cmd);
+        UI.SearchApplied        += q => _ = Router!.Handle($":search {q}");
 
         // initial lists
         UI.SetFeeds(Data.Feeds);
-        var startFeedId = UI.GetSelectedFeedId();
-        if (startFeedId != null) UI.SetEpisodesForFeed(startFeedId.Value, Data.Episodes);
+        var initFeed = UI.GetSelectedFeedId() ?? Data.Feeds.FirstOrDefault()?.Id;
+        if (initFeed is Guid f0) UI.SetEpisodesForFeed(f0, Data.Episodes);
 
-        // player → UI updates + persistence tick
+        // player → UI (+ persist-tick)
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
             UI.UpdatePlayerUI(s);
-            Playback!.PersistProgressTick(s, (eps) =>
-            {
-                var fid = UI.GetSelectedFeedId();
-                if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
-            }, Data.Episodes);
+            // update right list to reflect progress/played flag
+            var fid = UI.GetSelectedFeedId();
+            if (fid is Guid g) UI.SetEpisodesForFeed(g, Data.Episodes);
+            Playback!.PersistProgressTick(s, _ => { /* ignored, we update via UI above */ }, Data.Episodes);
         });
 
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             UI.UpdatePlayerUI(Player.State);
-            Playback!.PersistProgressTick(Player.State, (eps) =>
-            {
-                var fid = UI.GetSelectedFeedId();
-                if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
-            }, Data.Episodes);
+            var fid = UI.GetSelectedFeedId();
+            if (fid is Guid g) UI.SetEpisodesForFeed(g, Data.Episodes);
+            Playback!.PersistProgressTick(Player.State, _ => { }, Data.Episodes);
             return true;
         });
 
