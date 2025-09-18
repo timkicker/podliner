@@ -30,13 +30,20 @@ class Program
     Data  = await AppStorage.LoadAsync();
     Feeds = new FeedService(Data);
 
-    // Default-Feeds (mind. einer + Anchor-Feed dazu)
+    // Default-Feed beim allerersten Start
     if (Data.Feeds.Count == 0)
     {
         try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
         catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
     }
-    try { await Feeds!.AddFeedAsync("https://anchor.fm/s/fc0e8c18/podcast/rss"); }
+
+    // Anchor-Feed nur hinzufügen, wenn noch nicht da
+    var anchorUrl = "https://anchor.fm/s/fc0e8c18/podcast/rss";
+    try
+    {
+        if (!HasFeedWithUrl(anchorUrl))
+            await Feeds!.AddFeedAsync(anchorUrl);
+    }
     catch (Exception ex) { Log.Warning(ex, "Could not add anchor feed"); }
 
     Player   = new LibVlcPlayer();
@@ -57,22 +64,63 @@ class Program
     UI.AddFeedRequested += async url =>
     {
         var f = await Feeds!.AddFeedAsync(url);
+
+        Data.LastSelectedFeedId = f.Id;
+        Data.LastSelectedEpisodeIndexByFeed[f.Id] = 0;
+        _ = SaveAsync();
+
         UI.SetFeeds(Data.Feeds, f.Id);
         UI.SetEpisodesForFeed(f.Id, Data.Episodes);
+        UI.SelectEpisodeIndex(0);
     };
 
     UI.RefreshRequested += async () =>
     {
         await Feeds!.RefreshAllAsync();
-        var selected = UI.GetSelectedFeedId();
+
+        var selected = UI.GetSelectedFeedId() ?? Data.LastSelectedFeedId;
         UI.SetFeeds(Data.Feeds, selected);
-        if (selected != null) UI.SetEpisodesForFeed(selected.Value, Data.Episodes);
+
+        if (selected != null)
+        {
+            UI.SetEpisodesForFeed(selected.Value, Data.Episodes);
+
+            if (Data.LastSelectedEpisodeIndexByFeed.TryGetValue(selected.Value, out var idx))
+                UI.SelectEpisodeIndex(idx);
+        }
     };
 
     UI.SelectedFeedChanged += () =>
     {
         var fid = UI.GetSelectedFeedId();
-        if (fid != null) UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
+        Data.LastSelectedFeedId = fid;
+
+        if (fid != null)
+        {
+            // read saved index FIRST
+            int idx = 0;
+            if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(fid.Value, out idx))
+            {
+                if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy; // old fallback
+            }
+
+            UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
+            UI.SelectEpisodeIndex(idx);
+        }
+
+        _ = SaveAsync();
+    };
+
+
+    // Auswahlwechsel in der Episodenliste → Index pro Feed persistieren
+    UI.EpisodeSelectionChanged += () =>
+    {
+        var fid = UI.GetSelectedFeedId();
+        if (fid != null)
+        {
+            Data.LastSelectedEpisodeIndexByFeed[fid.Value] = UI.GetSelectedEpisodeIndex();
+            _ = SaveAsync();
+        }
     };
 
     UI.PlaySelected += () =>
@@ -99,7 +147,7 @@ class Program
         }
         else
         {
-            ep.LastPosMs = 0; // ◯ → leerer Kreis bei unplayed
+            ep.LastPosMs = 0; // ◯ → leerer Kreis
         }
 
         _ = SaveAsync();
@@ -109,7 +157,7 @@ class Program
         UI.ShowDetails(ep);
     };
 
-    // Commands gehen komplett durch den Router (Data wird für Filter benötigt)
+    // Commands via Router
     UI.Command += cmd => CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data);
 
     UI.SearchApplied += query =>
@@ -117,17 +165,31 @@ class Program
         var fid = UI.GetSelectedFeedId();
         var list = Data.Episodes.AsEnumerable();
         if (fid != null) list = list.Where(e => e.FeedId == fid.Value);
+
         if (!string.IsNullOrWhiteSpace(query))
             list = list.Where(e =>
                 (e.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
                 (e.DescriptionText?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+
         if (fid != null) UI.SetEpisodesForFeed(fid.Value, list);
     };
 
     // --- initial lists ---
-    UI.SetFeeds(Data.Feeds);
-    var initial = UI.GetSelectedFeedId();
-    if (initial != null) UI.SetEpisodesForFeed(initial.Value, Data.Episodes);
+    UI.SetFeeds(Data.Feeds, Data.LastSelectedFeedId);
+
+    var initialFeed = UI.GetSelectedFeedId();
+    if (initialFeed != null)
+    {
+        int idx = 0;
+        if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(initialFeed.Value, out idx))
+        {
+            if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy; // old fallback
+        }
+
+        UI.SetEpisodesForFeed(initialFeed.Value, Data.Episodes);
+        UI.SelectEpisodeIndex(idx);
+    }
+
 
     // player → UI + persist progress
     Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
@@ -167,6 +229,8 @@ class Program
         try { Log.CloseAndFlush(); } catch { }
     }
 }
+
+
 
 
 
@@ -223,4 +287,22 @@ class Program
             e.SetObserved();
         };
     }
+    
+    static bool HasFeedWithUrl(string url)
+    {
+        return Data.Feeds.Any(f =>
+        {
+            var t = f.GetType();
+            // versuch mehrere gängige Property-Namen
+            var prop = t.GetProperty("Url") 
+                       ?? t.GetProperty("FeedUrl")
+                       ?? t.GetProperty("XmlUrl")
+                       ?? t.GetProperty("SourceUrl")
+                       ?? t.GetProperty("RssUrl");
+            var val = prop?.GetValue(f) as string;
+            return val != null && string.Equals(val, url, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+
 }

@@ -36,11 +36,13 @@ sealed class Shell
     TextField? commandBox;
     TextField? searchBox;
     string? _lastSearch;
+    
 
     static bool Has(Key k, Key mask) => (k & mask) == mask;
     static Key  BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
     
     // events (Program wires these)
+    public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
     public event Func<string, System.Threading.Tasks.Task>? AddFeedRequested;
     public event Func<System.Threading.Tasks.Task>? RefreshRequested;
@@ -150,7 +152,11 @@ sealed class Shell
         var epHost = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         episodeList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         episodeList.OpenSelectedItem += _ => PlaySelected?.Invoke();
-        episodeList.SelectedItemChanged += _ => ShowDetailsForSelection();
+        episodeList.SelectedItemChanged += _ => {
+            ShowDetailsForSelection();
+            EpisodeSelectionChanged?.Invoke(); // NEW
+        };
+
         epHost.Add(episodeList);
         // Key-Handling auch hier:
         epHost.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
@@ -165,6 +171,20 @@ sealed class Shell
         rightTabs.AddTab(new TabView.Tab("Episodes", epHost), true);
         rightTabs.AddTab(new TabView.Tab("Details", detFrame), false);
     }
+
+    public int GetSelectedEpisodeIndex()
+    {
+        if (_episodes.Count == 0) return 0;
+        return Math.Clamp(episodeList.SelectedItem, 0, _episodes.Count - 1);
+    }
+
+    public void SelectEpisodeIndex(int index)
+    {
+        if (_episodes.Count == 0) return;
+        episodeList.SelectedItem = Math.Clamp(index, 0, _episodes.Count - 1);
+        ShowDetailsForSelection();
+    }
+
 
 
     void BuildPlayerBar()
@@ -233,19 +253,29 @@ sealed class Shell
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
+        // keep current selection by Episode.Id
+        var prevId = GetSelectedEpisode()?.Id;
+
         _episodes = episodes
             .Where(e => e.FeedId == feedId)
             .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
             .ToList();
 
         var items = _episodes.Select(EpisodeRow).ToList();
-
-        var sel = Math.Clamp(episodeList.SelectedItem, 0, Math.Max(0, items.Count - 1));
         episodeList.SetSource(items);
-        episodeList.SelectedItem = sel;
 
+        int sel = 0;
+        if (prevId is Guid pid)
+        {
+            var found = _episodes.FindIndex(e => e.Id == pid);
+            if (found >= 0) sel = found;
+        }
+
+        episodeList.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
         ShowDetailsForSelection();
     }
+
+
 
     static string EpisodeRow(Episode e)
     {
@@ -572,7 +602,10 @@ Misc:
 
     void OnFeedListSelectedChanged(ListViewItemEventArgs _)
     {
+        // nur benachrichtigen – Program stellt Episoden & Index her
         SelectedFeedChanged?.Invoke();
-        RefreshEpisodesForSelectedFeed(_episodes.Concat(Array.Empty<Episode>())); // keeps current if no external list
+        // KEIN Refresh hier
     }
+
+
 }
