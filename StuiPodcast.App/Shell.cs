@@ -3,15 +3,15 @@ using System.Linq;
 using System.Collections.Generic;
 using Terminal.Gui;
 using StuiPodcast.Core;
-using StuiPodcast.Infra;
 using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
     readonly MemoryLogSink _mem;
     bool _useMenuAccent = true;
+    bool _playerAtTop = false;
 
-    // data (only for list rendering)
+    // data state
     List<Episode> _episodes = new();
     List<Feed> _feeds = new();
 
@@ -22,7 +22,6 @@ sealed class Shell
     FrameView statusFrame = null!;
     TabView rightTabs = null!;
     TextView detailsView = null!;
-
     ListView feedList = null!;
     ListView episodeList = null!;
     ProgressBar progress = null!;
@@ -36,11 +35,15 @@ sealed class Shell
     Button btnDownload = null!;
     TextField? commandBox;
     TextField? searchBox;
-
     string? _lastSearch;
 
+    static bool Has(Key k, Key mask) => (k & mask) == mask;
+    static Key  BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
+    
     // events (Program wires these)
     public event Action? QuitRequested;
+    public event Func<string, System.Threading.Tasks.Task>? AddFeedRequested;
+    public event Func<System.Threading.Tasks.Task>? RefreshRequested;
     public event Action? PlaySelected;
     public event Action? ToggleThemeRequested;
     public event Action? TogglePlayedRequested;
@@ -52,49 +55,89 @@ sealed class Shell
 
     // ---------- build ----------
     public void Build()
+{
+    var menu = new MenuBar(new MenuBarItem[] {
+        new("_File", new MenuItem[]{
+            new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
+            new("_Refresh All (:refresh)", "", async () => { if (RefreshRequested != null) await RefreshRequested(); }),
+            new("_Quit (Q)", "Q", () => QuitRequested?.Invoke())
+        }),
+        new("_View", new MenuItem[]{
+            new("_Toggle Player Position (Ctrl+P)", "", () => Command?.Invoke(":player toggle"))
+        }),
+        new("_Help", new MenuItem[]{
+            new("_Keys (:h)", "", () => ShowKeysHelp())
+        })
+    });
+    Application.Top.Add(menu);
+
+    mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
+    mainWin.Border.BorderStyle = BorderStyle.None;
+    mainWin.Title = "";
+    Application.Top.Add(mainWin);
+
+    feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
+    mainWin.Add(feedsFrame);
+    feedList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    feedList.OpenSelectedItem += _ => PlaySelected?.Invoke();
+    feedList.SelectedItemChanged += OnFeedListSelectedChanged;
+    feedsFrame.Add(feedList);
+
+    rightPane = new View { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    mainWin.Add(rightPane);
+
+    BuildRightTabs();
+
+    statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus = false };
+    Application.Top.Add(statusFrame);
+    BuildPlayerBar();
+
+    ApplyTheme(true);
+
+    // ---- WICHTIG: Key-Handler an ALLE relevanten Views binden ----
+    Application.Top.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
+    mainWin.KeyPress         += e => { if (HandleKeys(e)) e.Handled = true; };
+    feedsFrame.KeyPress      += e => { if (HandleKeys(e)) e.Handled = true; };
+    rightPane.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
+    statusFrame.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
+    feedList.KeyPress        += e => { if (HandleKeys(e)) e.Handled = true; };
+
+    // default layout; Program setzt danach ggf. PlayerAtTop
+    SetPlayerPlacement(false);
+}
+
+
+    public void SetPlayerPlacement(bool atTop)
     {
-        var menu = new MenuBar(new MenuBarItem[] {
-            new("_File", new MenuItem[]{
-                new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
-                new("_Refresh All (:refresh)", "", () => Command?.Invoke(":refresh")),
-                new("_Quit (Q)", "Q", () => QuitRequested?.Invoke())
-            }),
-            new("_Help", new MenuItem[]{
-                new("_Keys (:h)", "", () => ShowKeysHelp())
-            })
-        });
-        Application.Top.Add(menu);
+        _playerAtTop = atTop;
 
-        mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
-        mainWin.Border.BorderStyle = BorderStyle.None;
-        mainWin.Title = "";
-        Application.Top.Add(mainWin);
+        if (_playerAtTop)
+        {
+            // Player direkt unter dem Menü (Y=1)
+            statusFrame.Y = 1;
+            statusFrame.Height = 4;
+            statusFrame.Width = Dim.Fill();
 
-        feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
-        mainWin.Add(feedsFrame);
-        feedList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-        feedList.OpenSelectedItem += _ => PlaySelected?.Invoke();
-        feedList.SelectedItemChanged += OnFeedListSelectedChanged;
-        feedsFrame.Add(feedList);
+            // Hauptfenster darunter
+            mainWin.Y = 1 + 4;
+            mainWin.Height = Dim.Fill(); // kein Bottom-Reserve
+        }
+        else
+        {
+            // Hauptfenster füllt bis auf 4 Zeilen unten
+            mainWin.Y = 1;
+            mainWin.Height = Dim.Fill(4);
 
-        rightPane = new View { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-        mainWin.Add(rightPane);
+            // Player am unteren Rand
+            statusFrame.Y = Pos.Bottom(mainWin);
+            statusFrame.Height = 4;
+            statusFrame.Width = Dim.Fill();
+        }
 
-        BuildRightTabs();
-
-        statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus = false };
-        Application.Top.Add(statusFrame);
-        BuildPlayerBar();
-
-        ApplyTheme(true);
-
-        // Global + focused views key handling (so lists don't swallow vim keys)
-        Application.Top.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
-        feedList.KeyPress        += e => { if (HandleKeys(e)) e.Handled = true; };
-        episodeList.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
-        // allow ":" and "/" even when focus is in details
-        detailsView.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
+        Application.Top.SetNeedsDisplay();
     }
+
+    public void TogglePlayerPlacement() => SetPlayerPlacement(!_playerAtTop);
 
     void BuildRightTabs()
     {
@@ -102,20 +145,27 @@ sealed class Shell
 
         rightTabs = new TabView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         rightPane.Add(rightTabs);
+        rightTabs.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
 
         var epHost = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         episodeList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         episodeList.OpenSelectedItem += _ => PlaySelected?.Invoke();
         episodeList.SelectedItemChanged += _ => ShowDetailsForSelection();
         epHost.Add(episodeList);
+        // Key-Handling auch hier:
+        epHost.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
+        episodeList.KeyPress  += e => { if (HandleKeys(e)) e.Handled = true; };
 
         var detFrame = new FrameView("Shownotes") { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         detailsView = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = true };
         detFrame.Add(detailsView);
+        detFrame.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
+        detailsView.KeyPress  += e => { if (HandleKeys(e)) e.Handled = true; };
 
         rightTabs.AddTab(new TabView.Tab("Episodes", epHost), true);
         rightTabs.AddTab(new TabView.Tab("Details", detFrame), false);
     }
+
 
     void BuildPlayerBar()
     {
@@ -173,6 +223,12 @@ sealed class Shell
         if (_feeds.Count == 0) return;
         var idx = _feeds.FindIndex(f => f.Id == id);
         if (idx >= 0) feedList.SelectedItem = idx;
+    }
+
+    public void RefreshEpisodesForSelectedFeed(IEnumerable<Episode> episodes)
+    {
+        var fid = GetSelectedFeedId();
+        if (fid is Guid id) SetEpisodesForFeed(id, episodes);
     }
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
@@ -282,12 +338,14 @@ sealed class Shell
     public void ShowKeysHelp()
     {
         MessageBox.Query("Keys",
-@"Vim-like keys:
+            @"Vim-like keys:
   m mark played/unplayed
   h/l focus pane     j/k move
   Enter play
   / search (Enter apply, n repeat)
   : commands (:add URL, :refresh, :q, :h, :logs, :seek, :vol, :speed)
+  u toggle unplayed filter
+  J/K next/prev unplayed (play)
 Playback:
   Space toggle
   ←/→ -10s/+10s   H/L -60s/+60s
@@ -331,6 +389,8 @@ Misc:
     }
 
     // ---------- commands/requests ----------
+    public void RequestAddFeed(string url) => _ = AddFeedRequested?.Invoke(url);
+    public void RequestRefresh() => _ = RefreshRequested?.Invoke();
     public void RequestQuit() => QuitRequested?.Invoke();
 
     public void ShowCommandBox(string seed)
@@ -396,32 +456,51 @@ Misc:
         var key = e.KeyEvent.Key;
         var kv  = e.KeyEvent.KeyValue;
 
-        // block Ctrl+C/V/X to avoid clipboard weirdness
         if ((key & Key.CtrlMask) != 0)
         {
             var baseKey = key & ~Key.CtrlMask;
             if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
         }
 
-        // vim letters by KeyValue to avoid control masking issues
         if (kv == 'm' || kv == 'M') { TogglePlayedRequested?.Invoke(); return true; }
-        if (kv == 'h' || kv == 'H') { feedList.SetFocus(); return true; }
-        if (kv == 'l' || kv == 'L') { episodeList.SetFocus(); return true; }
-        if (kv == 'j' || kv == 'J') { MoveList(+1); return true; }
-        if (kv == 'k' || kv == 'K') { MoveList(-1); return true; }
+        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
+        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
 
-        // ":" and "/" via KeyValue (works even when controls eat Key)
-        if (kv == ':') { ShowCommandBox(":"); return true; }
-        if (kv == '/') { ShowSearchBox("/"); return true; }
+        if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
+
+        // toggle played (alias to 'm')
+        if (kv == 'u' || kv == 'U') { TogglePlayedRequested?.Invoke(); return true; }
+        
+        // jump to next/prev UNPLAYED (Shift+J / Shift+K)
+        if (BaseKey(key) == Key.J && Has(key, Key.ShiftMask)) { JumpToNextUnplayed(); return true; }
+        if (BaseKey(key) == Key.K && Has(key, Key.ShiftMask)) { JumpToPrevUnplayed(); return true; }
+
+// optional: fallback, falls manche Terminals KeyValue liefern
+        if (kv == 'J') { JumpToNextUnplayed(); return true; }
+        if (kv == 'K') { JumpToPrevUnplayed(); return true; }
+
+
+
+
+
+        if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
+        if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
+
+        if (key == (Key)('h')) { feedList.SetFocus(); return true; }
+        if (key == (Key)('l')) { episodeList.SetFocus(); return true; }
+        if (key == (Key)('j')) { MoveList(+1); return true; }
+        if (key == (Key)('k')) { MoveList(-1); return true; }
 
         if (kv == 'i' || kv == 'I') { rightTabs.SelectedTab = rightTabs.Tabs.Last(); detailsView.SetFocus(); return true; }
         if (key == Key.Esc && rightTabs.SelectedTab?.Text.ToString() == "Details")
         { rightTabs.SelectedTab = rightTabs.Tabs.First(); episodeList.SetFocus(); return true; }
 
-        // playback & misc
         if (key == Key.Space) { Command?.Invoke(":toggle"); return true; }
-        if (key == Key.CursorLeft)  { Command?.Invoke(":seek -10"); return true; }
-        if (key == Key.CursorRight) { Command?.Invoke(":seek +10"); return true; }
+        if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
+        if (key == Key.CursorRight|| key == (Key)('L')) { Command?.Invoke(":seek +10"); return true; }
+        if (kv == 'H') { Command?.Invoke(":seek -60"); return true; }
+        if (kv == 'L') { Command?.Invoke(":seek +60"); return true; }
+
         if (kv == 'g') { Command?.Invoke(":seek 0:00"); return true; }
         if (kv == 'G') { Command?.Invoke(":seek 100%"); return true; }
 
@@ -436,16 +515,53 @@ Misc:
         if (kv == '3') { Command?.Invoke(":speed 1.5");  return true; }
 
         if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads later (M5).", "OK"); return true; }
-        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
-        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q') { QuitRequested?.Invoke(); return true; }
 
         if (key == Key.Enter && rightTabs.SelectedTab?.Text.ToString() != "Details")
         { PlaySelected?.Invoke(); return true; }
 
-        if (kv == 'n' && !string.IsNullOrEmpty(_lastSearch)) { SearchApplied?.Invoke(_lastSearch!); return true; }
+        if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch)) { SearchApplied?.Invoke(_lastSearch!); return true; }
 
         return false;
     }
+
+    int CurrentEpisodeIndex()
+    {
+        if (_episodes.Count == 0) return 0;
+        return Math.Clamp(episodeList.SelectedItem, 0, _episodes.Count - 1);
+    }
+
+    void JumpToNextUnplayed()
+    {
+        if (_episodes.Count == 0) return;
+        var start = CurrentEpisodeIndex();
+        for (int step = 1; step <= _episodes.Count; step++)
+        {
+            int idx = (start + step) % _episodes.Count;
+            if (!_episodes[idx].Played)
+            {
+                episodeList.SelectedItem = idx;
+                ShowDetailsForSelection();
+                return;
+            }
+        }
+    }
+
+    void JumpToPrevUnplayed()
+    {
+        if (_episodes.Count == 0) return;
+        var start = CurrentEpisodeIndex();
+        for (int step = 1; step <= _episodes.Count; step++)
+        {
+            int idx = (start - step + _episodes.Count) % _episodes.Count;
+            if (!_episodes[idx].Played)
+            {
+                episodeList.SelectedItem = idx;
+                ShowDetailsForSelection();
+                return;
+            }
+        }
+    }
+
 
     void MoveList(int delta)
     {
@@ -457,6 +573,6 @@ Misc:
     void OnFeedListSelectedChanged(ListViewItemEventArgs _)
     {
         SelectedFeedChanged?.Invoke();
-        // Program updates right pane using current Data.Episodes
+        RefreshEpisodesForSelectedFeed(_episodes.Concat(Array.Empty<Episode>())); // keeps current if no external list
     }
 }

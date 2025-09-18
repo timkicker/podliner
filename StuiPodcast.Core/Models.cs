@@ -35,6 +35,7 @@ public class PlayerState {
 }
 
 public class AppData {
+    public bool PlayerAtTop { get; set; } = false;
     public List<Feed> Feeds { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();
 }
