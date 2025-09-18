@@ -11,6 +11,8 @@ using StuiPodcast.Infra;
 
 class Program
 {
+  
+
     static AppData Data = new();
     static FeedService? Feeds;
     static IPlayer? Player;
@@ -138,6 +140,10 @@ class Program
         {
             var ep = UI.GetSelectedEpisode();
             if (ep == null) return;
+            
+            ep.LastPlayedAt = DateTimeOffset.Now;
+            _ = SaveAsync();
+            
             Playback!.Play(ep);
             UI.SetWindowTitle(ep.Title);
         };
@@ -200,6 +206,38 @@ class Program
             UI.SetEpisodesForFeed(initialFeed.Value, Data.Episodes);
             UI.SelectEpisodeIndex(idx);
         }
+        
+        // Program.cs – nach Initial-Feed/-Episodes
+        var last = Data.Episodes
+            .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
+            .ThenByDescending(e => e.LastPosMs ?? 0)
+            .FirstOrDefault();
+
+        if (last == null)
+        {
+            // Fallback: was gerade selektiert ist (falls vorhanden)
+            last = UI.GetSelectedEpisode();
+        }
+
+        // nach Ermittlung von 'last'
+        if (last != null)
+        {
+            UI.SelectFeed(last.FeedId);
+            UI.SetEpisodesForFeed(last.FeedId, Data.Episodes);
+
+            var list = Data.Episodes
+                .Where(e => e.FeedId == last.FeedId)
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+
+            var idx = Math.Max(0, list.FindIndex(e => e.Id == last.Id));
+            UI.SelectEpisodeIndex(idx);
+
+            UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed); // <- Vol/Speed rein
+        }
+
+
+
 
         // player → UI + persist progress
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>

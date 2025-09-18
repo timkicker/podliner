@@ -7,6 +7,9 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    // Felder
+    bool _startupPinned = false;
+    
     readonly MemoryLogSink _mem;
     bool _useMenuAccent = true;
     bool _playerAtTop = false;
@@ -337,6 +340,16 @@ sealed class Shell
 
     public void UpdatePlayerUI(PlayerState s)
     {
+        // Startanzeige nicht überschreiben, solange der State noch „leer“ ist
+        if (_startupPinned)
+        {
+            bool meaningless = (s.Length == null || s.Length == TimeSpan.Zero)
+                               && s.Position == TimeSpan.Zero
+                               && !s.IsPlaying;
+            if (meaningless) return; // lass die Startanzeige stehen
+            _startupPinned = false;  // ab hier echte Player-Updates zulassen
+        }
+
         static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
         var pos = s.Position;
         var len = s.Length ?? TimeSpan.Zero;
@@ -353,6 +366,7 @@ sealed class Shell
             ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
             : 0f;
     }
+
 
     public void SetWindowTitle(string? subtitle)
     {
@@ -634,4 +648,31 @@ Misc:
             for (int i = 0; i < filled; i++) Driver.AddRune('█'); // Foreground = Accent → dein Orange
         }
     }
+    
+    // Shell.cs
+    public void ShowStartupEpisode(Episode ep, int? volume = null, double? speed = null)
+    {
+        _startupPinned = true; // Startanzeige fixieren
+
+        SetWindowTitle(ep.Title);
+
+        long len = ep.LengthMs ?? 0;
+        long pos = ep.LastPosMs ?? 0;
+        progress.Fraction = (len > 0) ? Math.Clamp((float)pos / len, 0f, 1f) : 0f;
+
+        static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+        var lenTs = TimeSpan.FromMilliseconds(Math.Max(0, len));
+        var posTs = TimeSpan.FromMilliseconds(Math.Max(0, Math.Min(pos, len)));
+
+        var posStr = F(posTs);
+        var lenStr = len == 0 ? "--:--" : F(lenTs);
+        var remStr = len == 0 ? "--:--" : F((lenTs - posTs) < TimeSpan.Zero ? TimeSpan.Zero : (lenTs - posTs));
+
+        var vol   = Math.Clamp(volume ?? 0, 0, 100);
+        var spd   = (speed is > 0 ? speed!.Value : 1.0);
+        timeLabel.Text = $"⏸ {posStr} / {lenStr}  (-{remStr})  Vol {vol}%  {spd:0.0}×";
+    }
+
+
+
 }

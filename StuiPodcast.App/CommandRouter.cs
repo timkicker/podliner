@@ -29,6 +29,17 @@ static class CommandRouter
             ui.UpdatePlayerUI(player.State);
             return;
         }
+        
+        // CommandRouter.cs – in Handle(...)
+        if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd[7..].Trim().ToLowerInvariant();
+            if (arg == "toggle" || string.IsNullOrEmpty(arg))
+                ui.TogglePlayerPlacement();
+            return;
+        }
+
+        
         if (cmd.StartsWith(":seek",  StringComparison.OrdinalIgnoreCase)) { Seek(cmd[5..].Trim(), player); return; }
         if (cmd.StartsWith(":vol",   StringComparison.OrdinalIgnoreCase)) { Volume(cmd[4..].Trim(), player, data, persist); return; }
         if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) { Speed(cmd[6..].Trim(), player, data, persist); return; }
