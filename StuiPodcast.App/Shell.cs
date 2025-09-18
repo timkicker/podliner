@@ -11,6 +11,12 @@ sealed class Shell
     bool _useMenuAccent = true;
     bool _playerAtTop = false;
 
+    // ---- Layout-Konstanten ----
+    // 0: Titel/Time, 1: Leerzeile, 2: Buttons, 3: (Spacer), 4: Progress
+    const int PlayerContentH = 5;                 // <- extra Luft vor Progress
+    const int PlayerFrameH   = PlayerContentH + 2;
+    const int SidePad        = 1;
+
     // data state
     List<Episode> _episodes = new();
     List<Feed> _feeds = new();
@@ -24,7 +30,7 @@ sealed class Shell
     TextView detailsView = null!;
     ListView feedList = null!;
     ListView episodeList = null!;
-    ProgressBar progress = null!;
+    SolidProgressBar progress = null!;
     Label titleLabel = null!;
     Label timeLabel = null!;
     Button btnBack10 = null!;
@@ -36,11 +42,10 @@ sealed class Shell
     TextField? commandBox;
     TextField? searchBox;
     string? _lastSearch;
-    
 
     static bool Has(Key k, Key mask) => (k & mask) == mask;
     static Key  BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
-    
+
     // events (Program wires these)
     public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
@@ -55,59 +60,61 @@ sealed class Shell
 
     public Shell(MemoryLogSink mem) { _mem = mem; }
 
-    // ---------- build ----------
     public void Build()
-{
-    var menu = new MenuBar(new MenuBarItem[] {
-        new("_File", new MenuItem[]{
-            new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
-            new("_Refresh All (:refresh)", "", async () => { if (RefreshRequested != null) await RefreshRequested(); }),
-            new("_Quit (Q)", "Q", () => QuitRequested?.Invoke())
-        }),
-        new("_View", new MenuItem[]{
-            new("_Toggle Player Position (Ctrl+P)", "", () => Command?.Invoke(":player toggle"))
-        }),
-        new("_Help", new MenuItem[]{
-            new("_Keys (:h)", "", () => ShowKeysHelp())
-        })
-    });
-    Application.Top.Add(menu);
+    {
+        var menu = new MenuBar(new MenuBarItem[] {
+            new("_File", new MenuItem[]{
+                new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
+                new("_Refresh All (:refresh)", "", async () => { if (RefreshRequested != null) await RefreshRequested(); }),
+                new("_Quit (Q)", "Q", () => QuitRequested?.Invoke())
+            }),
+            new("_View", new MenuItem[]{
+                new("_Toggle Player Position (Ctrl+P)", "", () => Command?.Invoke(":player toggle"))
+            }),
+            new("_Help", new MenuItem[]{
+                new("_Keys (:h)", "", () => ShowKeysHelp())
+            })
+        });
+        Application.Top.Add(menu);
 
-    mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(4) };
-    mainWin.Border.BorderStyle = BorderStyle.None;
-    mainWin.Title = "";
-    Application.Top.Add(mainWin);
+        mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(PlayerFrameH) };
+        mainWin.Border.BorderStyle = BorderStyle.None;
+        Application.Top.Add(mainWin);
 
-    feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
-    mainWin.Add(feedsFrame);
-    feedList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-    feedList.OpenSelectedItem += _ => PlaySelected?.Invoke();
-    feedList.SelectedItemChanged += OnFeedListSelectedChanged;
-    feedsFrame.Add(feedList);
+        feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
+        mainWin.Add(feedsFrame);
+        feedList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        feedList.OpenSelectedItem += _ => PlaySelected?.Invoke();
+        feedList.SelectedItemChanged += OnFeedListSelectedChanged;
+        feedsFrame.Add(feedList);
 
-    rightPane = new View { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-    mainWin.Add(rightPane);
+        rightPane = new View { X = Pos.Right(feedsFrame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        mainWin.Add(rightPane);
 
-    BuildRightTabs();
+        BuildRightTabs();
 
-    statusFrame = new FrameView("Player") { X = 0, Y = Pos.Bottom(mainWin), Width = Dim.Fill(), Height = 4, CanFocus = false };
-    Application.Top.Add(statusFrame);
-    BuildPlayerBar();
+        statusFrame = new FrameView("Player") {
+            X = SidePad,
+            Y = Pos.Bottom(mainWin),                 // direkt andocken
+            Width  = Dim.Fill(SidePad * 2),
+            Height = PlayerFrameH,
+            CanFocus = false,
+        };
+        Application.Top.Add(statusFrame);
 
-    ApplyTheme(true);
+        BuildPlayerBar();
+        ApplyTheme(true);
 
-    // ---- WICHTIG: Key-Handler an ALLE relevanten Views binden ----
-    Application.Top.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
-    mainWin.KeyPress         += e => { if (HandleKeys(e)) e.Handled = true; };
-    feedsFrame.KeyPress      += e => { if (HandleKeys(e)) e.Handled = true; };
-    rightPane.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
-    statusFrame.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
-    feedList.KeyPress        += e => { if (HandleKeys(e)) e.Handled = true; };
+        // Key-Handler breit anbinden
+        Application.Top.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
+        mainWin.KeyPress         += e => { if (HandleKeys(e)) e.Handled = true; };
+        feedsFrame.KeyPress      += e => { if (HandleKeys(e)) e.Handled = true; };
+        rightPane.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
+        statusFrame.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
+        feedList.KeyPress        += e => { if (HandleKeys(e)) e.Handled = true; };
 
-    // default layout; Program setzt danach ggf. PlayerAtTop
-    SetPlayerPlacement(false);
-}
-
+        SetPlayerPlacement(false);
+    }
 
     public void SetPlayerPlacement(bool atTop)
     {
@@ -115,25 +122,23 @@ sealed class Shell
 
         if (_playerAtTop)
         {
-            // Player direkt unter dem Menü (Y=1)
+            statusFrame.X = SidePad;
             statusFrame.Y = 1;
-            statusFrame.Height = 4;
-            statusFrame.Width = Dim.Fill();
+            statusFrame.Width  = Dim.Fill(SidePad * 2);
+            statusFrame.Height = PlayerFrameH;
 
-            // Hauptfenster darunter
-            mainWin.Y = 1 + 4;
-            mainWin.Height = Dim.Fill(); // kein Bottom-Reserve
+            mainWin.Y = 1 + PlayerFrameH;
+            mainWin.Height = Dim.Fill();
         }
         else
         {
-            // Hauptfenster füllt bis auf 4 Zeilen unten
             mainWin.Y = 1;
-            mainWin.Height = Dim.Fill(4);
+            mainWin.Height = Dim.Fill(PlayerFrameH);
 
-            // Player am unteren Rand
+            statusFrame.X = SidePad;
             statusFrame.Y = Pos.Bottom(mainWin);
-            statusFrame.Height = 4;
-            statusFrame.Width = Dim.Fill();
+            statusFrame.Width  = Dim.Fill(SidePad * 2);
+            statusFrame.Height = PlayerFrameH;
         }
 
         Application.Top.SetNeedsDisplay();
@@ -154,19 +159,18 @@ sealed class Shell
         episodeList.OpenSelectedItem += _ => PlaySelected?.Invoke();
         episodeList.SelectedItemChanged += _ => {
             ShowDetailsForSelection();
-            EpisodeSelectionChanged?.Invoke(); // NEW
+            EpisodeSelectionChanged?.Invoke();
         };
 
         epHost.Add(episodeList);
-        // Key-Handling auch hier:
-        epHost.KeyPress       += e => { if (HandleKeys(e)) e.Handled = true; };
-        episodeList.KeyPress  += e => { if (HandleKeys(e)) e.Handled = true; };
+        epHost.KeyPress      += e => { if (HandleKeys(e)) e.Handled = true; };
+        episodeList.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
 
         var detFrame = new FrameView("Shownotes") { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         detailsView = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = true };
         detFrame.Add(detailsView);
-        detFrame.KeyPress     += e => { if (HandleKeys(e)) e.Handled = true; };
-        detailsView.KeyPress  += e => { if (HandleKeys(e)) e.Handled = true; };
+        detFrame.KeyPress    += e => { if (HandleKeys(e)) e.Handled = true; };
+        detailsView.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
 
         rightTabs.AddTab(new TabView.Tab("Episodes", epHost), true);
         rightTabs.AddTab(new TabView.Tab("Details", detFrame), false);
@@ -185,23 +189,32 @@ sealed class Shell
         ShowDetailsForSelection();
     }
 
-
-
     void BuildPlayerBar()
     {
         statusFrame.RemoveAll();
 
+        // Zeile 0: Titel & Zeit
         titleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
-        timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×") { X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right };
+        timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×")
+        {
+            X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
+        };
 
-        btnBack10    = new Button("«10s")       { X = 2, Y = 1 };
-        btnPlayPause = new Button("Play ⏵")     { X = Pos.Right(btnBack10) + 1, Y = 1 };
-        btnFwd10     = new Button("10s»")       { X = Pos.Right(btnPlayPause) + 1, Y = 1 };
-        btnVolDown   = new Button("Vol−")       { X = Pos.Right(btnFwd10) + 3, Y = 1 };
-        btnVolUp     = new Button("Vol+")       { X = Pos.Right(btnVolDown) + 1, Y = 1 };
-        btnDownload  = new Button("⬇ Download") { X = Pos.Right(btnVolUp) + 3, Y = 1 };
+        // Zeile 1: bewusst frei
 
-        progress = new ProgressBar() { X = 2, Y = 2, Width = Dim.Fill(2), Height = 1 };
+        // Zeile 2: Buttons
+        btnBack10    = new Button("«10s")       { X = 2, Y = 2 };
+        btnPlayPause = new Button("Play ⏵")     { X = Pos.Right(btnBack10) + 2, Y = 2 };
+        btnFwd10     = new Button("10s»")       { X = Pos.Right(btnPlayPause) + 2, Y = 2 };
+        btnVolDown   = new Button("Vol−")       { X = Pos.Right(btnFwd10) + 4, Y = 2 };
+        btnVolUp     = new Button("Vol+")       { X = Pos.Right(btnVolDown) + 2, Y = 2 };
+        btnDownload  = new Button("⬇ Download") { X = Pos.Right(btnVolUp) + 4, Y = 2 };
+
+        // Zeile 3: weitere Leerzeile (Spacing vor Progress)
+
+        // Zeile 4: solide Progressbar in Accent-Foreground
+        progress = new SolidProgressBar { X = 2, Y = 4, Width = Dim.Fill(2), Height = 1 };
+        progress.ColorScheme = MakeProgressScheme();
 
         btnBack10.Clicked    += () => Command?.Invoke(":seek -10");
         btnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
@@ -214,6 +227,15 @@ sealed class Shell
                         btnBack10, btnPlayPause, btnFwd10, btnVolDown, btnVolUp, btnDownload,
                         progress);
     }
+
+    // Track = Base.Normal (Hintergrund), Fill = Menu.HotNormal (Accent-FOREGROUND!)
+    ColorScheme MakeProgressScheme() => new ColorScheme {
+        Normal    = Colors.Base.Normal,    // Track (wir malen mit ' ' -> Background zählt)
+        Focus     = Colors.Base.Focus,
+        Disabled  = Colors.Base.Disabled,
+        HotNormal = Colors.Menu.HotNormal, // wird für die Füllung (█, also Foreground) benutzt
+        HotFocus  = Colors.Menu.HotFocus
+    };
 
     public void SetFeeds(IEnumerable<Feed> feeds, Guid? selectId = null)
     {
@@ -253,7 +275,6 @@ sealed class Shell
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
-        // keep current selection by Episode.Id
         var prevId = GetSelectedEpisode()?.Id;
 
         _episodes = episodes
@@ -275,8 +296,6 @@ sealed class Shell
         ShowDetailsForSelection();
     }
 
-
-
     static string EpisodeRow(Episode e)
     {
         long len = e.LengthMs ?? 0;
@@ -294,7 +313,6 @@ sealed class Shell
         return _episodes.ElementAtOrDefault(idx);
     }
 
-    // ---------- details ----------
     public void ShowDetails(Episode e)
     {
         var sb = new System.Text.StringBuilder();
@@ -317,7 +335,6 @@ sealed class Shell
         if (ep != null) ShowDetails(ep);
     }
 
-    // ---------- player/status ----------
     public void UpdatePlayerUI(PlayerState s)
     {
         static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
@@ -339,9 +356,7 @@ sealed class Shell
 
     public void SetWindowTitle(string? subtitle)
     {
-        if (Application.Top.Subviews.OfType<Window>().FirstOrDefault() is Window w)
-            w.Title = string.IsNullOrWhiteSpace(subtitle) ? "stui-podcast" : $"stui-podcast — {subtitle}";
-        titleLabel.Text = subtitle ?? "—";
+        titleLabel.Text = string.IsNullOrWhiteSpace(subtitle) ? "—" : subtitle;
     }
 
     public void ToggleTheme()
@@ -362,9 +377,11 @@ sealed class Shell
         if (episodeList != null) episodeList.ColorScheme = scheme;
         if (commandBox != null)  commandBox.ColorScheme  = scheme;
         if (searchBox != null)   searchBox.ColorScheme   = scheme;
+
+        // Progressbar an Accent anpassen
+        if (progress != null) progress.ColorScheme = MakeProgressScheme();
     }
 
-    // ---------- dialogs/overlays ----------
     public void ShowKeysHelp()
     {
         MessageBox.Query("Keys",
@@ -418,7 +435,6 @@ Misc:
         } catch { }
     }
 
-    // ---------- commands/requests ----------
     public void RequestAddFeed(string url) => _ = AddFeedRequested?.Invoke(url);
     public void RequestRefresh() => _ = RefreshRequested?.Invoke();
     public void RequestQuit() => QuitRequested?.Invoke();
@@ -480,7 +496,6 @@ Misc:
         searchBox.CursorPosition = searchBox.Text.ToString()!.Length;
     }
 
-    // ---------- key handling ----------
     bool HandleKeys(View.KeyEventEventArgs e)
     {
         var key = e.KeyEvent.Key;
@@ -498,20 +513,12 @@ Misc:
 
         if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
 
-        // toggle played (alias to 'm')
         if (kv == 'u' || kv == 'U') { TogglePlayedRequested?.Invoke(); return true; }
-        
-        // jump to next/prev UNPLAYED (Shift+J / Shift+K)
+
         if (BaseKey(key) == Key.J && Has(key, Key.ShiftMask)) { JumpToNextUnplayed(); return true; }
         if (BaseKey(key) == Key.K && Has(key, Key.ShiftMask)) { JumpToPrevUnplayed(); return true; }
-
-// optional: fallback, falls manche Terminals KeyValue liefern
         if (kv == 'J') { JumpToNextUnplayed(); return true; }
         if (kv == 'K') { JumpToPrevUnplayed(); return true; }
-
-
-
-
 
         if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
         if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
@@ -592,7 +599,6 @@ Misc:
         }
     }
 
-
     void MoveList(int delta)
     {
         var lv = episodeList.HasFocus ? episodeList : feedList;
@@ -602,10 +608,30 @@ Misc:
 
     void OnFeedListSelectedChanged(ListViewItemEventArgs _)
     {
-        // nur benachrichtigen – Program stellt Episoden & Index her
         SelectedFeedChanged?.Invoke();
-        // KEIN Refresh hier
     }
 
+    // -------- Solide Progressbar: Track = Background, Fill = Accent-FG mit '█' --------
+    sealed class SolidProgressBar : View {
+        float _fraction;
+        public float Fraction {
+            get => _fraction;
+            set { _fraction = Math.Clamp(value, 0f, 1f); SetNeedsDisplay(); }
+        }
+        public SolidProgressBar() { Height = 1; }
 
+        public override void Redraw(Rect bounds) {
+            // Track (leer, Hintergrundfarbe der Normal-Attribute)
+            Driver.SetAttribute(ColorScheme?.Normal ?? Colors.Base.Normal);
+            Move(0, 0);
+            for (int i = 0; i < bounds.Width; i++) Driver.AddRune(' ');
+
+            // Fill – volle Blöcke in Accent-FG
+            var accent = ColorScheme?.HotNormal ?? Colors.Menu.HotNormal;
+            Driver.SetAttribute(accent);
+            int filled = (int)Math.Round(bounds.Width * Math.Clamp(Fraction, 0f, 1f));
+            Move(0, 0);
+            for (int i = 0; i < filled; i++) Driver.AddRune('█'); // Foreground = Accent → dein Orange
+        }
+    }
 }

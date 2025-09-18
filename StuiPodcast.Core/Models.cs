@@ -35,7 +35,16 @@ public class PlayerState {
 }
 
 public class AppData {
+    
+
     public Dictionary<Guid, int> LastSelectedEpisodeIndexByFeed { get; set; } = new();
+    public int  Volume0_100 { get; set; } = 50;
+    public double Speed { get; set; } = 1.0;
+
+    public int? LastVolume0_100 { get; set; }
+    public double? LastSpeed { get; set; }
+
+
     public Guid? LastSelectedFeedId { get; set; }
     public int?  LastSelectedEpisodeIndex { get; set; }
 
