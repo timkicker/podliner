@@ -8,8 +8,7 @@ using StuiPodcast.Infra;
 
 static class CommandRouter
 {
-    // UI-Filter (wird jetzt persistiert, sobald du willst – aktuell nur in-memory)
-    static bool _unplayedOnly = false;
+    
 
     public static void Handle(string raw,
                               IPlayer player,
@@ -39,10 +38,10 @@ static class CommandRouter
             return;
         }
 
-        
+        if (cmd.StartsWith(":vol",   StringComparison.OrdinalIgnoreCase)) { Volume(cmd[4..].Trim(), player, data, persist, ui); return; }
+        if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) { Speed (cmd[6..].Trim(), player, data, persist, ui); return; }
+
         if (cmd.StartsWith(":seek",  StringComparison.OrdinalIgnoreCase)) { Seek(cmd[5..].Trim(), player); return; }
-        if (cmd.StartsWith(":vol",   StringComparison.OrdinalIgnoreCase)) { Volume(cmd[4..].Trim(), player, data, persist); return; }
-        if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) { Speed(cmd[6..].Trim(), player, data, persist); return; }
         if (cmd.StartsWith(":logs",  StringComparison.OrdinalIgnoreCase)) { Logs(cmd[5..].Trim(), ui); return; }
         if (cmd is ":h" or ":help") { ui.ShowKeysHelp(); return; }
         if (cmd is ":q" or ":quit") { ui.RequestQuit(); return; }
@@ -75,17 +74,20 @@ static class CommandRouter
             return;
         }
 
-        // --- filtering / navigation ---
         if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase))
         {
             var arg = cmd[7..].Trim().ToLowerInvariant();
-            if (arg is "unplayed" or "only") _unplayedOnly = true;
-            else if (arg is "all") _unplayedOnly = false;
-            else if (arg is "toggle" or "" or null) _unplayedOnly = !_unplayedOnly;
+            if (arg is "unplayed" or "only") data.UnplayedOnly = true;
+            else if (arg is "all")           data.UnplayedOnly = false;
+            else if (arg is "toggle" or "" or null) data.UnplayedOnly = !data.UnplayedOnly;
 
+            ui.SetUnplayedHint(data.UnplayedOnly);
             ApplyList(ui, data);
+            _ = persist();
             return;
         }
+
+
 
         if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(+1, ui, playback, data); return; }
         if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(-1, ui, playback, data); return; }
@@ -99,17 +101,17 @@ static class CommandRouter
 
     // ---- helpers ------------------------------------------------------------
 
-    static void ApplyList(Shell ui, AppData data)
+    public static void ApplyList(Shell ui, AppData data)
     {
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
 
         var list = data.Episodes.Where(e => e.FeedId == feedId);
-        if (_unplayedOnly) list = list.Where(e => !e.Played);
+        if (data.UnplayedOnly) list = list.Where(e => !e.Played);
 
-        if (feedId is Guid fid)
-            ui.SetEpisodesForFeed(fid, list);
+        ui.SetEpisodesForFeed(feedId.Value, list);
     }
+
 
     static void JumpUnplayed(int dir, Shell ui, PlaybackCoordinator playback, AppData data)
     {
@@ -139,6 +141,7 @@ static class CommandRouter
                 playback.Play(target);
                 ui.SetWindowTitle(target.Title);
                 ui.ShowDetails(target);
+                ui.SetNowPlaying(target.Id); // <— NEU
                 return;
             }
         }
@@ -188,7 +191,7 @@ static class CommandRouter
         }
     }
 
-    static void Volume(string arg, IPlayer player, AppData data, Func<Task> persist)
+    static void Volume(string arg, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Volume0_100;
@@ -200,6 +203,7 @@ static class CommandRouter
             player.SetVolume(v);
             data.Volume0_100 = v;
             _ = persist();
+            ui.ShowOsd($"Vol {v}%");
             return;
         }
         if (int.TryParse(arg, out var abs))
@@ -208,10 +212,11 @@ static class CommandRouter
             player.SetVolume(v);
             data.Volume0_100 = v;
             _ = persist();
+            ui.ShowOsd($"Vol {v}%");
         }
     }
 
-    static void Speed(string arg, IPlayer player, AppData data, Func<Task> persist)
+    static void Speed(string arg, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Speed;
@@ -223,6 +228,7 @@ static class CommandRouter
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
+            ui.ShowOsd($"Speed {s:0.0}×");
             return;
         }
         if (double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var abs))
@@ -231,8 +237,10 @@ static class CommandRouter
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
+            ui.ShowOsd($"Speed {s:0.0}×");
         }
     }
+
 
     static void Logs(string arg, Shell ui)
     {

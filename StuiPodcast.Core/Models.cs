@@ -1,4 +1,5 @@
 using System;
+using Terminal.Gui;
 
 namespace StuiPodcast.Core;
 
@@ -36,7 +37,10 @@ public class PlayerState {
 
 public class AppData {
     
+    TabView.Tab? episodesTabRef = null; // <— Referenz auf „Episodes“-Tab
 
+    
+    public bool UnplayedOnly { get; set; } = false;
     public Dictionary<Guid, int> LastSelectedEpisodeIndexByFeed { get; set; } = new();
     public int  Volume0_100 { get; set; } = 50;
     public double Speed { get; set; } = 1.0;

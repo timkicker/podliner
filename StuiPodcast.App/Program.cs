@@ -11,10 +11,9 @@ using StuiPodcast.Infra;
 
 class Program
 {
-  
-
     static AppData Data = new();
     static FeedService? Feeds;
+    static Guid? _lastAutoFrom = null;
     static IPlayer? Player;
 
     static Shell? UI;
@@ -140,13 +139,17 @@ class Program
         {
             var ep = UI.GetSelectedEpisode();
             if (ep == null) return;
-            
+
             ep.LastPlayedAt = DateTimeOffset.Now;
             _ = SaveAsync();
-            
+
             Playback!.Play(ep);
             UI.SetWindowTitle(ep.Title);
+            UI.SetNowPlaying(ep.Id);
+            _lastAutoFrom = null; // <— neu
         };
+
+
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
 
@@ -193,6 +196,10 @@ class Program
 
         // --- initial lists ---
         UI.SetFeeds(Data.Feeds, Data.LastSelectedFeedId);
+        
+        UI.SetUnplayedHint(Data.UnplayedOnly);
+        CommandRouter.ApplyList(UI, Data); // respektiert UnplayedOnly, behält Auswahl per Shell-Logik
+
 
         var initialFeed = UI.GetSelectedFeedId();
         if (initialFeed != null)
@@ -206,7 +213,7 @@ class Program
             UI.SetEpisodesForFeed(initialFeed.Value, Data.Episodes);
             UI.SelectEpisodeIndex(idx);
         }
-        
+
         // Program.cs – nach Initial-Feed/-Episodes
         var last = Data.Episodes
             .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
@@ -219,7 +226,6 @@ class Program
             last = UI.GetSelectedEpisode();
         }
 
-        // nach Ermittlung von 'last'
         if (last != null)
         {
             UI.SelectFeed(last.FeedId);
@@ -236,9 +242,6 @@ class Program
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed); // <- Vol/Speed rein
         }
 
-
-
-
         // player → UI + persist progress
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
@@ -250,6 +253,44 @@ class Program
                     if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
                 },
                 Data.Episodes);
+            
+            // --- Auto-Advance: wenn Track am Ende und noch nicht weitergesprungen ---
+            try
+            {
+                var curId = UI.GetNowPlayingId();
+                var len   = s.Length ?? TimeSpan.Zero;
+
+                bool atEnd = (len > TimeSpan.Zero) &&
+                             (!s.IsPlaying) &&
+                             (len - s.Position <= TimeSpan.FromMilliseconds(500)); // Toleranz
+
+                if (curId != null && atEnd && _lastAutoFrom != curId)
+                {
+                    if (TryFindNextForAutoAdvance(curId.Value, out var next))
+                    {
+                        Playback!.Play(next);
+                        UI.SetWindowTitle(next.Title);
+                        UI.ShowDetails(next);
+                        UI.SetNowPlaying(next.Id);
+
+                        // Auswahl visuell mitziehen
+                        var list = Data.Episodes
+                            .Where(e => e.FeedId == next.FeedId)
+                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                            .ToList();
+                        var i = list.FindIndex(e => e.Id == next.Id);
+                        if (i >= 0) UI.SelectEpisodeIndex(i);
+                    }
+
+                    _lastAutoFrom = curId; // egal ob gefunden oder nicht: pro Track nur 1x versuchen
+                }
+
+                // wenn wieder Playing → neuen Track begonnen → Guard lösen
+                if (s.IsPlaying) _lastAutoFrom = null;
+            }
+            catch { /* keep UI safe */ }
+
+            
         });
 
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
@@ -331,6 +372,42 @@ class Program
             e.SetObserved();
         };
     }
+    
+    static bool TryFindNextForAutoAdvance(Guid currentEpisodeId, out Episode next)
+    {
+        next = null!;
+        var cur = Data.Episodes.FirstOrDefault(e => e.Id == currentEpisodeId);
+        if (cur == null) return false;
+
+        var feedId = cur.FeedId;
+        var eps = Data.Episodes
+            .Where(e => e.FeedId == feedId)
+            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+            .ToList();
+
+        var idx = eps.FindIndex(e => e.Id == currentEpisodeId);
+        if (idx < 0) return false;
+
+        // nach unten (ältere) suchen
+        for (int i = idx + 1; i < eps.Count; i++)
+        {
+            var candidate = eps[i];
+            if (Data.UnplayedOnly)
+            {
+                if (!candidate.Played) { next = candidate; return true; }
+            }
+            else
+            {
+                next = candidate; return true;
+            }
+        }
+
+        // optional: wrap-around (hier aus, gern einschalten)
+        // for (int i = 0; i < idx; i++) { ... }
+
+        return false;
+    }
+
 
     static bool HasFeedWithUrl(string url)
     {

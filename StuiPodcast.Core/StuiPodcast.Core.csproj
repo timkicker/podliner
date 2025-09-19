@@ -6,4 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Reference Include="Terminal.Gui">
+      <HintPath>..\..\..\.nuget\packages\terminal.gui\1.19.0\lib\net8.0\Terminal.Gui.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
 </Project>
