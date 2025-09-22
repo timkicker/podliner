@@ -81,9 +81,9 @@ static class CommandRouter
             else if (arg is "all")           data.UnplayedOnly = false;
             else if (arg is "toggle" or "" or null) data.UnplayedOnly = !data.UnplayedOnly;
 
-            ui.SetUnplayedHint(data.UnplayedOnly);
-            ApplyList(ui, data);
+            ui.SetUnplayedFilterVisual(data.UnplayedOnly);
             _ = persist();
+            ApplyList(ui, data);
             return;
         }
 
@@ -109,7 +109,8 @@ static class CommandRouter
         var list = data.Episodes.Where(e => e.FeedId == feedId);
         if (data.UnplayedOnly) list = list.Where(e => !e.Played);
 
-        ui.SetEpisodesForFeed(feedId.Value, list);
+        if (feedId is Guid fid)
+            ui.SetEpisodesForFeed(fid, list);
     }
 
 
@@ -141,11 +142,15 @@ static class CommandRouter
                 playback.Play(target);
                 ui.SetWindowTitle(target.Title);
                 ui.ShowDetails(target);
-                ui.SetNowPlaying(target.Id); // <— NEU
+
+                // >>> NEU: NowPlaying setzen, damit „▶ “ sofort erscheint
+                ui.SetNowPlaying(target.Id);
+
                 return;
             }
         }
     }
+
 
     static void Seek(string arg, IPlayer player)
     {

@@ -11,6 +11,19 @@ using StuiPodcast.Infra;
 
 class Program
 {
+    // Für Logik-Smoothing (TryMarkPlayed / Enderkennung)
+    static TimeSpan _lastPos = TimeSpan.Zero;
+    static DateTimeOffset _lastPosAt = DateTimeOffset.MinValue;
+
+
+    
+    const double PlayedThresholdPercent = 95.0;
+    static readonly TimeSpan EndSlack = TimeSpan.FromMilliseconds(750);
+
+    static bool _wasPlaying;
+    static bool _playedMarkedForCurrent;
+    static DateTimeOffset _lastAutoAdvanceAt = DateTimeOffset.MinValue;
+    
     static AppData Data = new();
     static FeedService? Feeds;
     static Guid? _lastAutoFrom = null;
@@ -71,6 +84,7 @@ class Program
 
         // >> Restore Player-Bar position
         UI.SetPlayerPlacement(Data.PlayerAtTop);
+        UI.SetUnplayedFilterVisual(Data.UnplayedOnly);
 
         // --- wire shell events ---
         UI.QuitRequested += () => QuitApp();
@@ -102,6 +116,7 @@ class Program
                 if (Data.LastSelectedEpisodeIndexByFeed.TryGetValue(selected.Value, out var idx))
                     UI.SelectEpisodeIndex(idx);
             }
+            CommandRouter.ApplyList(UI, Data); // setzt die Liste je nach Data.UnplayedOnly
         };
 
         UI.SelectedFeedChanged += () =>
@@ -140,15 +155,19 @@ class Program
             var ep = UI.GetSelectedEpisode();
             if (ep == null) return;
 
+            // Auto-Advance-Flags für neue Episode zurücksetzen
+            ResetAutoAdvance();
+
+            // „zuletzt gespielt“ sofort stempeln → hilft beim Restore
             ep.LastPlayedAt = DateTimeOffset.Now;
             _ = SaveAsync();
 
             Playback!.Play(ep);
             UI.SetWindowTitle(ep.Title);
-            UI.SetNowPlaying(ep.Id);
-            _lastAutoFrom = null; // <— neu
-        };
 
+            // >>> WICHTIG: NowPlaying für Pfeil + Auto-Advance-Guard
+            UI.SetNowPlaying(ep.Id);
+        };
 
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
@@ -242,59 +261,78 @@ class Program
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed); // <- Vol/Speed rein
         }
 
-        // player → UI + persist progress
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
+{
+    // 0) UI & Persist wie gehabt
+    UpdateSmoothing(s);
+    UI.UpdatePlayerUI(s);
+    Playback!.PersistProgressTick(
+        s,
+        eps => {
+            var fid = UI.GetSelectedFeedId();
+            if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
+        },
+        Data.Episodes);
+
+    // 1) Ab 95 % einmalig als "gespielt" markieren – weiterlaufen lassen
+    TryMarkPlayedOnce(s);
+
+    // 2) Auto-Advance: erst bei echtem Ende (Playing -> NotPlaying + fast am Ende)
+    //    -> nutzt die robustere Transition-Heuristik + Debounce
+    bool endedTransition = IsEndedTransition(s);
+
+    try
+    {
+        // Dein Guard über "NowPlayingId" bleibt erhalten
+        var curId = UI.GetNowPlayingId();
+
+        if (endedTransition && curId != null)
         {
-            UI.UpdatePlayerUI(s);
-            Playback!.PersistProgressTick(
-                s,
-                eps => {
-                    var fid = UI.GetSelectedFeedId();
-                    if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
-                },
-                Data.Episodes);
-            
-            // --- Auto-Advance: wenn Track am Ende und noch nicht weitergesprungen ---
-            try
+            // Finde nächste Episode (deine bestehende Logik)
+            if (TryFindNextForAutoAdvance(curId.Value, out var next))
             {
-                var curId = UI.GetNowPlayingId();
-                var len   = s.Length ?? TimeSpan.Zero;
+                // visuellen Selektor mitziehen
+                var list = Data.Episodes
+                    .Where(e => e.FeedId == next.FeedId)
+                    .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                    .ToList();
 
-                bool atEnd = (len > TimeSpan.Zero) &&
-                             (!s.IsPlaying) &&
-                             (len - s.Position <= TimeSpan.FromMilliseconds(500)); // Toleranz
+                var i = list.FindIndex(e => e.Id == next.Id);
+                if (i >= 0) UI.SelectEpisodeIndex(i);
 
-                if (curId != null && atEnd && _lastAutoFrom != curId)
-                {
-                    if (TryFindNextForAutoAdvance(curId.Value, out var next))
-                    {
-                        Playback!.Play(next);
-                        UI.SetWindowTitle(next.Title);
-                        UI.ShowDetails(next);
-                        UI.SetNowPlaying(next.Id);
+                // Abspielen & UI updaten
+                Playback!.Play(next);
+                UI.SetWindowTitle(next.Title);
+                UI.ShowDetails(next);
+                UI.SetNowPlaying(next.Id);
 
-                        // Auswahl visuell mitziehen
-                        var list = Data.Episodes
-                            .Where(e => e.FeedId == next.FeedId)
-                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                            .ToList();
-                        var i = list.FindIndex(e => e.Id == next.Id);
-                        if (i >= 0) UI.SelectEpisodeIndex(i);
-                    }
-
-                    _lastAutoFrom = curId; // egal ob gefunden oder nicht: pro Track nur 1x versuchen
-                }
-
-                // wenn wieder Playing → neuen Track begonnen → Guard lösen
-                if (s.IsPlaying) _lastAutoFrom = null;
+                // Debounce-Zeitpunkt merken (zusätzlich zum _wasPlaying-Flip)
+                _lastAutoAdvanceAt = DateTimeOffset.Now;
+                _playedMarkedForCurrent = false; // Reset für nächste Episode
             }
-            catch { /* keep UI safe */ }
+        }
 
-            
-        });
+        // wenn wieder Playing → neuen Track begonnen → Guard lösen
+        // wenn wieder Playing → neuen Track begonnen → Guard lösen
+        if (s.IsPlaying) {
+            _wasPlaying = true;
+            _lastAutoFrom = null;
+        } else {
+            if (_wasPlaying && !s.IsPlaying) _wasPlaying = false;
+        }
 
+    }
+    catch
+    {
+        // UI robust halten
+    }
+});
+
+        
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
+            var s = Player.State;
+            UpdateSmoothing(s);
             UI.UpdatePlayerUI(Player.State);
             Playback!.PersistProgressTick(
                 Player.State,
@@ -339,6 +377,8 @@ class Program
         try { Log.CloseAndFlush(); } catch { }
         Environment.Exit(0);
     }
+    
+    
 
     static void ConfigureLogging()
     {
@@ -423,4 +463,188 @@ class Program
             return val != null && string.Equals(val, url, StringComparison.OrdinalIgnoreCase);
         });
     }
+    
+    static void ResetAutoAdvance()
+{
+    _wasPlaying = false;
+    _playedMarkedForCurrent = false;
+}
+
+    static void TryMarkPlayedOnce(PlayerState s)
+    {
+        var effLen = GetEffectiveLength(s);
+        if (effLen <= TimeSpan.Zero || _playedMarkedForCurrent) return;
+
+        var frac = s.Position.TotalMilliseconds / effLen.TotalMilliseconds;
+
+        // Sicherheits-Netz: zusätzlich frühestens ab (effLen >= 60s) und Position >= 30s,
+        // damit ultrakurze/kaputte Längen nicht sofort markieren.
+        var minRunGuard = effLen >= TimeSpan.FromSeconds(60) ? s.Position >= TimeSpan.FromSeconds(30) : s.Position >= TimeSpan.FromSeconds(5);
+        if (frac >= PlayedThresholdPercent / 100.0 && minRunGuard)
+        {
+            Episode? ep = null;
+            var curId = UI?.GetNowPlayingId();
+            if (curId != null)
+                ep = Data.Episodes.FirstOrDefault(x => x.Id == curId.Value);
+            ep ??= UI?.GetSelectedEpisode();
+
+            if (ep != null && !ep.Played)
+            {
+                ep.Played = true;
+                ep.LastPlayedAt = DateTimeOffset.Now;
+                ep.LastPosMs = ep.LengthMs ?? (long)effLen.TotalMilliseconds; // auf „Ende“
+                _ = SaveAsync();
+
+                var fid = UI!.GetSelectedFeedId();
+                if (fid != null) UI!.SetEpisodesForFeed(fid.Value, Data.Episodes);
+            }
+            _playedMarkedForCurrent = true;
+        }
+    }
+
+
+
+
+
+    static bool IsEndedTransition(PlayerState s)
+    {
+        var effLen = GetEffectiveLength(s);
+        if (effLen <= TimeSpan.Zero) return false;
+
+        // „nahe Ende“ gegen effektive Länge
+        bool nearEnd = s.Position >= effLen - EndSlack;
+
+        // klassische Transition: vorher Playing → jetzt nicht + nahe Ende
+        bool transitioned = _wasPlaying && !s.IsPlaying && nearEnd;
+
+        // Debounce gegen Doppelfeuer
+        if (transitioned && (DateTimeOffset.Now - _lastAutoAdvanceAt) > EndSlack)
+            return true;
+
+        return false;
+    }
+
+
+
+
+static void AdvanceToNextEpisode()
+{
+    var cur = UI?.GetSelectedEpisode();
+    var fid = UI?.GetSelectedFeedId();
+    if (cur == null || fid == null) { ResetAutoAdvance(); return; }
+
+    // gleiche Sortierung wie in Shell.SetEpisodesForFeed(...)
+    var list = Data.Episodes
+        .Where(e => e.FeedId == fid.Value)
+        .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+        .ToList();
+
+    var curIdx = Math.Max(0, list.FindIndex(e => e.Id == cur.Id));
+    var nextIdx = curIdx + 1;
+
+    // am Ende: freundlich stoppen (kein Wrap)
+    if (nextIdx >= list.Count) { ResetAutoAdvance(); return; }
+
+    var next = list[nextIdx];
+
+    // UI selektieren & Details zeigen
+    UI!.SelectEpisodeIndex(nextIdx);
+    UI!.ShowDetails(next);
+
+    // und abspielen
+    Playback!.Play(next);
+    UI!.SetWindowTitle(next.Title);
+
+    // Flags reset für nächsten Durchlauf
+    ResetAutoAdvance();
+}
+
+
+
+static void UpdateSmoothing(PlayerState s)
+{
+    var now = DateTimeOffset.Now;
+    var pos = s.Position;
+
+    var jumpBackThresh    = TimeSpan.FromMilliseconds(300);
+    var jumpForwardThresh = TimeSpan.FromMilliseconds(300);
+    var freezeThresh      = TimeSpan.FromMilliseconds(5);
+
+    if (s.IsPlaying)
+    {
+        if (_lastPosAt != DateTimeOffset.MinValue)
+        {
+            var delta = pos - _lastPos;
+
+            // Sprung erkannt → Baseline neu setzen
+            if (delta <= -jumpBackThresh || delta >= jumpForwardThresh)
+            {
+                _lastPos   = pos;
+                _lastPosAt = now;
+            }
+            // Freeze → stehenlassen (Baseline bleibt), Extrapolation passiert erst in GetSmoothedPosition
+            else if (delta <= freezeThresh)
+            {
+                // nichts tun: wir behalten _lastPos/_lastPosAt
+            }
+            // normale Bewegung
+            else
+            {
+                _lastPos   = pos;
+                _lastPosAt = now;
+            }
+        }
+        else
+        {
+            _lastPos   = pos;
+            _lastPosAt = now;
+        }
+    }
+    else
+    {
+        _lastPos   = pos;
+        _lastPosAt = now;
+    }
+}
+
+
+static TimeSpan GetSmoothedPosition(PlayerState s)
+{
+    var pos = s.Position;
+    if (s.IsPlaying && _lastPosAt != DateTimeOffset.MinValue)
+    {
+        // wenn „stehend“, extrapolieren
+        if (pos <= _lastPos + TimeSpan.FromMilliseconds(5))
+        {
+            var delta = DateTimeOffset.Now - _lastPosAt;
+            var proj = _lastPos + TimeSpan.FromMilliseconds(delta.TotalMilliseconds * s.Speed);
+            if (proj > pos) pos = proj;
+        }
+    }
+    return pos;
+}
+
+static TimeSpan GetEffectiveLength(PlayerState s)
+{
+    // 1) Player-Länge
+    var lenMs = s.Length?.TotalMilliseconds ?? 0;
+
+    // 2) Metadaten-Länge der *laufenden* Episode, falls vorhanden
+    double metaMs = 0;
+    var curId = UI?.GetNowPlayingId();
+    if (curId != null)
+    {
+        var ep = Data.Episodes.FirstOrDefault(x => x.Id == curId.Value);
+        if (ep?.LengthMs is long m) metaMs = m;
+    }
+
+    // 3) Nie kleiner als aktuelle Position
+    var posMs = s.Position.TotalMilliseconds;
+
+    var effMs = Math.Max(Math.Max(lenMs, metaMs), posMs);
+    return TimeSpan.FromMilliseconds(effMs);
+}
+
+
+
 }

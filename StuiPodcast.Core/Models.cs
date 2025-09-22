@@ -38,6 +38,11 @@ public class PlayerState {
 public class AppData {
     
     TabView.Tab? episodesTabRef = null; // <— Referenz auf „Episodes“-Tab
+    // AppData.cs – Ergänzungen
+    public bool AutoAdvance  { get; set; } = true;      // automatisch weiter zur nächsten Episode
+    public bool WrapAdvance  { get; set; } = true;      // am Listenende wieder vorne anfangen
+    public int  PlayedThresholdPercent { get; set; } = 95; // ab x% als „gespielt“ markieren
+
 
     
     public bool UnplayedOnly { get; set; } = false;

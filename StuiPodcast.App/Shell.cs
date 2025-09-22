@@ -13,6 +13,17 @@ sealed class Shell
     Label? _osdLabel;
     object? _osdTimeout;
     Pane _activePane = Pane.Episodes;
+    TabView.Tab? _episodesTab;
+    
+    static TimeSpan _lastPos = TimeSpan.Zero;
+    static DateTimeOffset _lastPosAt = DateTimeOffset.MinValue;
+    
+    // Für UI-Smoothing (verhindert Freeze nahe Ende)
+    TimeSpan _lastUiPos = TimeSpan.Zero;
+    DateTimeOffset _lastUiAt = DateTimeOffset.MinValue;
+
+
+
     
     TabView.Tab? episodesTabRef = null; // <— Referenz auf „Episodes“-Tab
 
@@ -72,6 +83,12 @@ sealed class Shell
     public event Action<string>? SearchApplied;
     public event Action? SelectedFeedChanged;
 
+    public void SetUnplayedFilterVisual(bool on)
+    {
+        if (_episodesTab != null)
+            _episodesTab.Text = on ? "Episodes (Unplayed)" : "Episodes";
+    }
+    
     public Shell(MemoryLogSink mem) { _mem = mem; }
     
     public void ShowOsd(string text, int ms = 1200)
@@ -234,8 +251,11 @@ sealed class Shell
         detFrame.KeyPress    += e => { if (HandleKeys(e)) e.Handled = true; };
         detailsView.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
 
-        rightTabs.AddTab(episodesTabRef = new TabView.Tab("Episodes", epHost), true);
+        // Shell.cs – in BuildRightTabs()
+        _episodesTab = new TabView.Tab("Episodes", epHost);
+        rightTabs.AddTab(_episodesTab, true);
         rightTabs.AddTab(new TabView.Tab("Details", detFrame), false);
+
 
     }
     
@@ -395,17 +415,29 @@ sealed class Shell
 
     string EpisodeRow(Episode e)
     {
-        // Now-Playing-Pfeil vornedran, wenn diese Episode gerade läuft
+        // Now-Playing-Pfeil
         var now = (_nowPlayingId != null && e.Id == _nowPlayingId.Value);
         var nowPrefix = now ? "▶ " : "  ";
 
-        long len = e.LengthMs ?? 0;
-        long pos = e.LastPosMs ?? 0;
-        double r = (len > 0) ? Math.Clamp((double)pos / len, 0, 1) : 0;
-        char mark = e.Played ? '✔' : r <= 0.0 ? '○' : r < 0.25 ? '◔' : r < 0.50 ? '◑' : r < 0.75 ? '◕' : '●';
+        long lenMs = e.LengthMs ?? 0;
+        long posMs = e.LastPosMs ?? 0;
+
+        // Effektive Länge: niemals kleiner als Fortschritt
+        long effLenMs = Math.Max(lenMs, posMs);
+        double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
+
+        char mark = e.Played
+            ? '✔'
+            : r <= 0.0 ? '○'
+                : r < 0.25 ? '◔'
+                    : r < 0.50 ? '◑'
+                        : r < 0.75 ? '◕'
+                            : '●';
+
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
         return $"{nowPrefix}{mark} {date,-10}  {e.Title}";
     }
+
 
 
     public Episode? GetSelectedEpisode()
@@ -438,33 +470,93 @@ sealed class Shell
     }
 
     public void UpdatePlayerUI(PlayerState s)
+{
+    // Startanzeige nicht überschreiben, solange der State noch „leer“ ist
+    if (_startupPinned)
     {
-        // Startanzeige nicht überschreiben, solange der State noch „leer“ ist
-        if (_startupPinned)
-        {
-            bool meaningless = (s.Length == null || s.Length == TimeSpan.Zero)
-                               && s.Position == TimeSpan.Zero
-                               && !s.IsPlaying;
-            if (meaningless) return; // lass die Startanzeige stehen
-            _startupPinned = false;  // ab hier echte Player-Updates zulassen
-        }
-
-        static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
-        var pos = s.Position;
-        var len = s.Length ?? TimeSpan.Zero;
-
-        var posStr = F(pos);
-        var lenStr = len == TimeSpan.Zero ? "--:--" : F(len);
-        var remStr = len == TimeSpan.Zero ? "--:--" : F((len - pos) < TimeSpan.Zero ? TimeSpan.Zero : (len - pos));
-        var icon   = s.IsPlaying ? "▶" : "⏸";
-
-        timeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
-        btnPlayPause.Text = s.IsPlaying ? "Pause ⏸" : "Play ⏵";
-
-        progress.Fraction = (len.TotalMilliseconds > 0)
-            ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
-            : 0f;
+        bool meaningless = (s.Length == null || s.Length == TimeSpan.Zero)
+                           && s.Position == TimeSpan.Zero
+                           && !s.IsPlaying;
+        if (meaningless) return;
+        _startupPinned = false;
     }
+
+    static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+
+    var pos = s.Position;
+    var len = s.Length ?? TimeSpan.Zero;
+
+    // Effektive Länge: nie kleiner als Position
+    var effLen = pos > len ? pos : len;
+
+    // === UI-Smoothing mit Sprung-Erkennung ===
+    var now = DateTimeOffset.Now;
+    var jumpBackThresh   = TimeSpan.FromMilliseconds(300);  // erkenne Rücksprung
+    var jumpForwardThresh= TimeSpan.FromMilliseconds(300);  // erkenne großen Vorsprung
+    var freezeThresh     = TimeSpan.FromMilliseconds(5);    // „steht“ ~ keine Bewegung
+
+    if (s.IsPlaying)
+    {
+        if (_lastUiAt != DateTimeOffset.MinValue)
+        {
+            var delta = pos - _lastUiPos;
+
+            // 1) Diskontinuität: deutlicher Sprung (zurück oder groß vor)
+            if (delta <= -jumpBackThresh || delta >= jumpForwardThresh)
+            {
+                _lastUiPos = pos;
+                _lastUiAt  = now;
+                // NICHT extrapolieren – sofort neue Realität anzeigen
+            }
+            // 2) „steht“ → extrapolieren
+            else if (delta <= freezeThresh)
+            {
+                var wall = now - _lastUiAt;
+                var proj = _lastUiPos + TimeSpan.FromMilliseconds(wall.TotalMilliseconds * s.Speed);
+                if (proj > pos) pos = proj;
+                _lastUiPos = pos;
+                _lastUiAt  = now;
+            }
+            // 3) normale Vorwärtsbewegung
+            else
+            {
+                _lastUiPos = pos;
+                _lastUiAt  = now;
+            }
+        }
+        else
+        {
+            _lastUiPos = pos;
+            _lastUiAt  = now;
+        }
+    }
+    else
+    {
+        _lastUiPos = pos;
+        _lastUiAt  = now;
+    }
+
+    // Effektive Länge ggf. an geglättete Position anpassen
+    if (pos > effLen) effLen = pos;
+
+    var posStr = F(pos);
+    var lenStr = effLen == TimeSpan.Zero ? "--:--" : F(effLen);
+    var rem    = effLen == TimeSpan.Zero ? TimeSpan.Zero : (effLen - pos);
+    if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
+
+    var icon   = s.IsPlaying ? "▶" : "⏸";
+
+    timeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{F(rem)})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
+    btnPlayPause.Text = s.IsPlaying ? "Pause ⏸" : "Play ⏵";
+
+    progress.Fraction = (effLen.TotalMilliseconds > 0)
+        ? Math.Clamp((float)(pos.TotalMilliseconds / effLen.TotalMilliseconds), 0f, 1f)
+        : 0f;
+}
+
+
+
+
 
     public void SetWindowTitle(string? subtitle)
     {
@@ -497,14 +589,15 @@ sealed class Shell
 
     public void ShowKeysHelp()
     {
+        // Shell.cs – ShowKeysHelp() (Ausschnitt)
         MessageBox.Query("Keys",
             @"Vim-like keys:
   m mark played/unplayed
+  u toggle unplayed filter
   h/l focus pane     j/k move
   Enter play
   / search (Enter apply, n repeat)
-  : commands (:add URL, :refresh, :q, :h, :logs, :seek, :vol, :speed)
-  u toggle unplayed filter
+  : commands (:add URL, :refresh, :q, :h, :logs, :seek, :vol, :speed, :filter)
   J/K next/prev unplayed (play)
 Playback:
   Space toggle
@@ -516,6 +609,7 @@ Misc:
   F12 logs
   t theme toggle
   q quit", "OK");
+
     }
 
     public void ShowError(string title, string msg) => MessageBox.ErrorQuery(title, msg, "OK");
@@ -627,7 +721,9 @@ Misc:
     if (key == Key.F12) { ShowLogsOverlay(500); return true; }
     if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
     if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
+    // Shell.cs – HandleKeys(...) (ersetzt die alte u-Zeile)
     if (kv == 'u' || kv == 'U') { Command?.Invoke(":filter toggle"); return true; }
+
 
 
     if (BaseKey(key) == Key.J && Has(key, Key.ShiftMask)) { JumpToNextUnplayed(); return true; }
