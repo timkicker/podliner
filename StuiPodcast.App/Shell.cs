@@ -7,6 +7,8 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
+    
     bool _showFeedColumn = false;
     TimeSpan _lastEffLenTs = TimeSpan.Zero;
     // Track der *rohen* Backend-Position (für Stall-Erkennung nach Seeks)
@@ -421,40 +423,38 @@ sealed class Shell
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
-        // Flag für Podcast-Spalte setzen
+        // Flag für Podcast-Spalte (virtuelle Feeds)
         _showFeedColumn = (feedId == FEED_ALL || feedId == FEED_SAVED || feedId == FEED_DOWNLOADED);
 
         var prevId = GetSelectedEpisode()?.Id;
 
         IEnumerable<Episode> src = episodes ?? Enumerable.Empty<Episode>();
 
+        // Feed-Filter
         if (feedId == FEED_ALL)
         {
-            _episodes = src
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
+            // alle Episoden
         }
         else if (feedId == FEED_SAVED)
         {
-            _episodes = src
-                .Where(IsSaved)
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
+            src = src.Where(IsSaved);
         }
         else if (feedId == FEED_DOWNLOADED)
         {
-            _episodes = src
-                .Where(IsDownloaded)
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
+            src = src.Where(IsDownloaded);
         }
         else
         {
-            _episodes = src
-                .Where(e => e.FeedId == feedId)
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
+            src = src.Where(e => e.FeedId == feedId);
         }
+
+        // --- Sort anwenden (vom Program geliefert) ---
+        if (EpisodeSorter != null)
+            src = EpisodeSorter(src);
+        else
+            src = src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue); // Fallback wie bisher
+
+        _episodes = src.ToList();
 
         int sel = 0;
         if (prevId is Guid pid)
@@ -470,6 +470,7 @@ sealed class Shell
         RefreshListVisual(episodeList);
         ShowDetailsForSelection();
     }
+
 
     public void SetNowPlaying(Guid? episodeId)
     {

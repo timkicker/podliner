@@ -86,6 +86,8 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
+        
+        UI.EpisodeSorter = eps => ApplySort(eps, Data);
 
         // >> Restore Player-Bar position
         UI.SetPlayerPlacement(Data.PlayerAtTop);
@@ -360,6 +362,77 @@ class Program
             try { Log.CloseAndFlush(); } catch { }
         }
     }
+    
+    static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
+{
+    if (eps == null) return Enumerable.Empty<Episode>();
+    var by  = (data.SortBy  ?? "pubdate").Trim().ToLowerInvariant();
+    var dir = (data.SortDir ?? "desc").Trim().ToLowerInvariant();
+
+    bool desc = dir == "desc";
+
+    // Hilfsfunktionen
+    static double Progress(Episode e)
+    {
+        var pos = (double)(e.LastPosMs ?? 0);
+        var len = (double)(e.LengthMs  ?? 0);
+        if (len <= 0) return 0.0;
+        var r = pos / Math.Max(len, pos); // nie >1, nie NaN
+        return Math.Clamp(r, 0.0, 1.0);
+    }
+
+    string FeedTitle(Episode e)
+    {
+        var f = Data.Feeds.FirstOrDefault(x => x.Id == e.FeedId);
+        return f?.Title ?? "";
+    }
+
+    IOrderedEnumerable<Episode> ordered;
+
+    switch (by)
+    {
+        case "title":
+            ordered = desc
+                ? eps.OrderByDescending(e => e.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                : eps.OrderBy(e => e.Title ?? "", StringComparer.OrdinalIgnoreCase);
+            break;
+
+        case "played":
+            // played=false vor true (asc), umgekehrt bei desc
+            ordered = desc
+                ? eps.OrderByDescending(e => e.Played)
+                : eps.OrderBy(e => e.Played);
+            // sekundär: neueste oben
+            ordered = ordered.ThenByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
+            break;
+
+        case "progress":
+            ordered = desc
+                ? eps.OrderByDescending(Progress)
+                : eps.OrderBy(Progress);
+            // sekundär: neueste oben
+            ordered = ordered.ThenByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
+            break;
+
+        case "feed":
+            ordered = desc
+                ? eps.OrderByDescending(FeedTitle, StringComparer.OrdinalIgnoreCase)
+                : eps.OrderBy(FeedTitle, StringComparer.OrdinalIgnoreCase);
+            // sekundär: pubdate desc
+            ordered = ordered.ThenByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
+            break;
+
+        case "pubdate":
+        default:
+            ordered = desc
+                ? eps.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                : eps.OrderBy(e => e.PubDate ?? DateTimeOffset.MinValue);
+            break;
+    }
+
+    return ordered;
+}
+
     
     static async Task SaveAsync()
     {

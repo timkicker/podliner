@@ -73,6 +73,17 @@ static class CommandRouter
         { SelectMiddle(ui, data); return; }
         if (cmd.Equals(":zb", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":L", StringComparison.OrdinalIgnoreCase))
         { SelectAbsolute(int.MaxValue, ui, data); return; }
+        
+        // --- sort ------------------------------------------------------
+        if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd.Length > 5 ? cmd[5..].Trim() : "";
+            HandleSort(arg, ui, data, persist);
+            // Liste neu anwenden (Shell holt Sortierer aus Program)
+            ApplyList(ui, data);
+            return;
+        }
+
 
         // --- view / player placement ---
         if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase))
@@ -141,6 +152,70 @@ static class CommandRouter
         if (feedId is Guid fid)
             ui.SetEpisodesForFeed(fid, list);
     }
+    
+    static void HandleSort(string arg, Shell ui, AppData data, Func<Task> persist)
+    {
+        // :sort show
+        if (arg.Equals("show", StringComparison.OrdinalIgnoreCase))
+        {
+            ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}");
+            return;
+        }
+
+        // :sort reset
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            data.SortBy = "pubdate";
+            data.SortDir = "desc";
+            _ = persist();
+            ui.ShowOsd("sort: pubdate desc");
+            return;
+        }
+
+        // :sort reverse
+        if (arg.Equals("reverse", StringComparison.OrdinalIgnoreCase))
+        {
+            data.SortDir = (data.SortDir?.Equals("desc", StringComparison.OrdinalIgnoreCase) == true) ? "asc" : "desc";
+            _ = persist();
+            ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}");
+            return;
+        }
+
+        // :sort by <key> [asc|desc]
+        // akzeptierte keys
+        string[] keys = new[] { "pubdate", "title", "played", "progress", "feed" };
+
+        var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length >= 1 && parts[0].Equals("by", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parts.Length >= 2)
+            {
+                var key = parts[1].ToLowerInvariant();
+                if (!keys.Contains(key))
+                {
+                    ui.ShowOsd("sort: invalid key");
+                    return;
+                }
+                data.SortBy = key;
+
+                if (parts.Length >= 3)
+                {
+                    var dir = parts[2].ToLowerInvariant();
+                    if (dir is "asc" or "desc")
+                        data.SortDir = dir;
+                }
+
+                _ = persist();
+                ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}");
+                return;
+            }
+        }
+
+        // Fallback: kurze Hilfe
+        ui.ShowOsd("sort: by pubdate|title|played|progress|feed [asc|desc]");
+    }
+
 
     static List<Episode> BuildCurrentList(Shell ui, AppData data)
     {

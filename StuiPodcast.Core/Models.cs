@@ -39,6 +39,11 @@ public class PlayerState {
 
 public class AppData {
     
+    // --- Sortierung (global) ---
+    public string SortBy  { get; set; } = "pubdate"; // pubdate|title|played|progress|feed
+    public string SortDir { get; set; } = "desc";    // asc|desc
+
+    
     TabView.Tab? episodesTabRef = null; // <— Referenz auf „Episodes“-Tab
     // AppData.cs – Ergänzungen
     public bool AutoAdvance  { get; set; } = true;      // automatisch weiter zur nächsten Episode
