@@ -7,6 +7,7 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    TimeSpan _lastEffLenTs = TimeSpan.Zero;
     // Track der *rohen* Backend-Position (für Stall-Erkennung nach Seeks)
     TimeSpan _lastRawPos = TimeSpan.Zero;
     DateTimeOffset _lastRawAt = DateTimeOffset.MinValue;
@@ -306,43 +307,57 @@ sealed class Shell
 
 
     void BuildPlayerBar()
+{
+    statusFrame.RemoveAll();
+
+    // Zeile 0: Titel & Zeit
+    titleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
+    timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×")
     {
-        statusFrame.RemoveAll();
+        X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
+    };
 
-        // Zeile 0: Titel & Zeit
-        titleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
-        timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×")
+    // Zeile 1: bewusst frei
+
+    // Zeile 2: Buttons
+    btnBack10    = new Button("«10s")       { X = 2, Y = 2 };
+    btnPlayPause = new Button("Play ⏵")     { X = Pos.Right(btnBack10) + 2, Y = 2 };
+    btnFwd10     = new Button("10s»")       { X = Pos.Right(btnPlayPause) + 2, Y = 2 };
+    btnVolDown   = new Button("Vol−")       { X = Pos.Right(btnFwd10) + 4, Y = 2 };
+    btnVolUp     = new Button("Vol+")       { X = Pos.Right(btnVolDown) + 2, Y = 2 };
+    btnDownload  = new Button("⬇ Download") { X = Pos.Right(btnVolUp) + 4, Y = 2 };
+
+    // Zeile 3: weitere Leerzeile (Spacing vor Progress)
+
+    // Zeile 4: solide Progressbar in Accent-Foreground + Mouse-Seek
+    progress = new SolidProgressBar { X = 2, Y = 4, Width = Dim.Fill(2), Height = 1 };
+    progress.ColorScheme = MakeProgressScheme();
+
+    // Klick/Drag auf die Progressbar -> :seek <pct>%
+    progress.SeekRequested += frac =>
+    {
+        var pct = (int)Math.Round(Math.Clamp(frac, 0f, 1f) * 100);
+        Command?.Invoke($":seek {pct}%");
+
+        // OSD mit Zielzeit, wenn Länge bekannt
+        if (_lastEffLenTs > TimeSpan.Zero)
         {
-            X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
-        };
+            var target = TimeSpan.FromMilliseconds(_lastEffLenTs.TotalMilliseconds * frac);
+            ShowOsd($"→ {(int)target.TotalMinutes:00}:{target.Seconds:00}");
+        }
+    };
 
-        // Zeile 1: bewusst frei
+    btnBack10.Clicked    += () => Command?.Invoke(":seek -10");
+    btnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
+    btnPlayPause.Clicked += () => Command?.Invoke(":toggle");
+    btnVolDown.Clicked   += () => Command?.Invoke(":vol -5");
+    btnVolUp.Clicked     += () => Command?.Invoke(":vol +5");
+    btnDownload.Clicked  += () => MessageBox.Query("Download", "Downloads later (M5).", "OK");
 
-        // Zeile 2: Buttons
-        btnBack10    = new Button("«10s")       { X = 2, Y = 2 };
-        btnPlayPause = new Button("Play ⏵")     { X = Pos.Right(btnBack10) + 2, Y = 2 };
-        btnFwd10     = new Button("10s»")       { X = Pos.Right(btnPlayPause) + 2, Y = 2 };
-        btnVolDown   = new Button("Vol−")       { X = Pos.Right(btnFwd10) + 4, Y = 2 };
-        btnVolUp     = new Button("Vol+")       { X = Pos.Right(btnVolDown) + 2, Y = 2 };
-        btnDownload  = new Button("⬇ Download") { X = Pos.Right(btnVolUp) + 4, Y = 2 };
-
-        // Zeile 3: weitere Leerzeile (Spacing vor Progress)
-
-        // Zeile 4: solide Progressbar in Accent-Foreground
-        progress = new SolidProgressBar { X = 2, Y = 4, Width = Dim.Fill(2), Height = 1 };
-        progress.ColorScheme = MakeProgressScheme();
-
-        btnBack10.Clicked    += () => Command?.Invoke(":seek -10");
-        btnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
-        btnPlayPause.Clicked += () => Command?.Invoke(":toggle");
-        btnVolDown.Clicked   += () => Command?.Invoke(":vol -5");
-        btnVolUp.Clicked     += () => Command?.Invoke(":vol +5");
-        btnDownload.Clicked  += () => MessageBox.Query("Download", "Downloads later (M5).", "OK");
-
-        statusFrame.Add(titleLabel, timeLabel,
-                        btnBack10, btnPlayPause, btnFwd10, btnVolDown, btnVolUp, btnDownload,
-                        progress);
-    }
+    statusFrame.Add(titleLabel, timeLabel,
+                    btnBack10, btnPlayPause, btnFwd10, btnVolDown, btnVolUp, btnDownload,
+                    progress);
+}
 
     // Track = Base.Normal (Hintergrund), Fill = Menu.HotNormal (Accent-FOREGROUND!)
     ColorScheme MakeProgressScheme() => new ColorScheme {
@@ -574,13 +589,12 @@ sealed class Shell
     var effLen = rawPos > len ? rawPos : len;
 
     // --- Toleranzen ---
-    var forwardJumpTol = TimeSpan.FromMilliseconds(300); // großer Sprung (Seek etc.)
-    var backJumpTol    = TimeSpan.FromMilliseconds(300); // großer Rücksprung (Seek -10s)
-    var backJitterTol  = TimeSpan.FromMilliseconds(180); // kleiner rückwärts-Jitter
-    var stallWindow    = TimeSpan.FromMilliseconds(90);  // keine Raw-Ticks -> Stall
-    var endCapSlack    = TimeSpan.FromMilliseconds(120); // nahe Ende nicht überziehen
+    var forwardJumpTol = TimeSpan.FromMilliseconds(300);
+    var backJumpTol    = TimeSpan.FromMilliseconds(300);
+    var backJitterTol  = TimeSpan.FromMilliseconds(180);
+    var stallWindow    = TimeSpan.FromMilliseconds(90);
+    var endCapSlack    = TimeSpan.FromMilliseconds(120);
 
-    // RAW Stall erkennen
     bool rawTicked = rawPos != _lastRawPos;
     bool rawStall  = !rawTicked && (_lastRawAt != DateTimeOffset.MinValue) && (now - _lastRawAt) >= stallWindow;
 
@@ -592,30 +606,22 @@ sealed class Shell
         var largeForward = haveBaseline && (rawPos - _lastUiPos) >= forwardJumpTol;
         var largeBackward= haveBaseline && (_lastUiPos - rawPos) >= backJumpTol;
 
-        if (largeForward)
+        if (largeForward || largeBackward)
         {
-            // harter Vorwärts-Seek -> übernehmen
-            pos = rawPos;
-        }
-        else if (largeBackward)
-        {
-            // harter Rückwärts-Seek (z.B. :seek -10) -> rückwärts ausdrücklich zulassen
-            pos = rawPos;
+            pos = rawPos; // echte Seeks hart übernehmen
         }
         else
         {
             if (rawStall)
             {
-                // Backend steht kurz -> aus gerenderter Pos weiter extrapolieren
                 var wall = now - _lastUiAt;
                 if (wall > TimeSpan.Zero)
                     pos = _lastUiPos + TimeSpan.FromMilliseconds(wall.TotalMilliseconds * s.Speed);
             }
             else
             {
-                // normaler Tick: kleine Rücksprünge ignorieren (Jitter), sonst übernehmen
                 if (haveBaseline && rawPos + backJitterTol < _lastUiPos)
-                    pos = _lastUiPos; // Jitter nach hinten blocken
+                    pos = _lastUiPos; // kleinen rückwärts-Jitter blocken
                 else
                     pos = rawPos;
             }
@@ -623,18 +629,14 @@ sealed class Shell
     }
     else
     {
-        // nicht spielend -> harte Werte übernehmen
         pos = rawPos;
     }
 
-    // nahe Ende nicht über Länge hinaus
     if (effLen > TimeSpan.Zero && pos > effLen - endCapSlack)
         pos = TimeSpan.FromMilliseconds(Math.Min(pos.TotalMilliseconds, effLen.TotalMilliseconds));
 
-    // effektive Länge ggf. an geglättete Position anpassen
     if (pos > effLen) effLen = pos;
 
-    // render
     var icon   = s.IsPlaying ? "▶" : "⏸";
     var posStr = F(pos);
     var lenStr = effLen == TimeSpan.Zero ? "--:--" : F(effLen);
@@ -653,6 +655,9 @@ sealed class Shell
     _lastUiAt   = now;
     _lastRawPos = rawPos;
     _lastRawAt  = now;
+
+    // >>> für OSD beim Klick: effektive Länge merken
+    _lastEffLenTs = effLen;
 }
 
     public void SetWindowTitle(string? subtitle)
@@ -937,13 +942,22 @@ Misc:
 
 
     // -------- Solide Progressbar: Track = Background, Fill = Accent-FG mit '█' --------
+    // -------- Solide Progressbar mit Mouse-Seek --------
     sealed class SolidProgressBar : View {
         float _fraction;
         public float Fraction {
             get => _fraction;
             set { _fraction = Math.Clamp(value, 0f, 1f); SetNeedsDisplay(); }
         }
-        public SolidProgressBar() { Height = 1; }
+
+        // Event: angeforderter Seek als Fraction [0..1]
+        public event Action<float>? SeekRequested;
+
+        public SolidProgressBar() {
+            Height = 1;
+            CanFocus = false;
+            WantMousePositionReports = true;
+        }
 
         public override void Redraw(Rect bounds) {
             // Track (leer, Hintergrundfarbe der Normal-Attribute)
@@ -956,7 +970,27 @@ Misc:
             Driver.SetAttribute(accent);
             int filled = (int)Math.Round(bounds.Width * Math.Clamp(Fraction, 0f, 1f));
             Move(0, 0);
-            for (int i = 0; i < filled; i++) Driver.AddRune('█'); // Foreground = Accent → dein Orange
+            for (int i = 0; i < filled; i++) Driver.AddRune('█'); // Foreground = Accent
+        }
+
+        public override bool MouseEvent(MouseEvent me)
+        {
+            if (me.Flags.HasFlag(MouseFlags.Button1Clicked) ||
+                me.Flags.HasFlag(MouseFlags.Button1Pressed) ||
+                me.Flags.HasFlag(MouseFlags.Button1DoubleClicked) ||
+                me.Flags.HasFlag(MouseFlags.ReportMousePosition) && me.Flags.HasFlag(MouseFlags.Button1Pressed))
+            {
+                // X relativ zu dieser View
+                var localX = me.X;
+                var width  = Bounds.Width > 0 ? Bounds.Width : 1;
+                localX = Math.Clamp(localX, 0, Math.Max(0, width - 1));
+                var frac = width <= 1 ? 0f : (float)localX / (float)(width - 1);
+
+                SeekRequested?.Invoke(frac);
+                return true;
+            }
+
+            return base.MouseEvent(me);
         }
     }
 
