@@ -15,6 +15,11 @@ class Program
     static TimeSpan _lastPos = TimeSpan.Zero;
     static DateTimeOffset _lastPosAt = DateTimeOffset.MinValue;
 
+    // SaveAsync-Throttle (Klassenweite States statt static-lokaler Variablen)
+    static readonly object _saveGate = new();
+    static DateTimeOffset _lastSave = DateTimeOffset.MinValue;
+    static bool _savePending = false;
+    static bool _saveRunning = false;
 
     
     const double PlayedThresholdPercent = 95.0;
@@ -262,87 +267,85 @@ class Program
         }
 
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
-{
-    // 0) UI & Persist wie gehabt
-    UpdateSmoothing(s);
-    UI.UpdatePlayerUI(s);
-    Playback!.PersistProgressTick(
-        s,
-        eps => {
-            var fid = UI.GetSelectedFeedId();
-            if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
-        },
-        Data.Episodes);
-
-    // 1) Ab 95 % einmalig als "gespielt" markieren – weiterlaufen lassen
-    TryMarkPlayedOnce(s);
-
-    // 2) Auto-Advance: erst bei echtem Ende (Playing -> NotPlaying + fast am Ende)
-    //    -> nutzt die robustere Transition-Heuristik + Debounce
-    bool endedTransition = IsEndedTransition(s);
-
-    try
-    {
-        // Dein Guard über "NowPlayingId" bleibt erhalten
-        var curId = UI.GetNowPlayingId();
-
-        if (endedTransition && curId != null)
         {
-            // Finde nächste Episode (deine bestehende Logik)
-            if (TryFindNextForAutoAdvance(curId.Value, out var next))
+            try
             {
-                // visuellen Selektor mitziehen
-                var list = Data.Episodes
-                    .Where(e => e.FeedId == next.FeedId)
-                    .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                    .ToList();
+                // 0) Nur UI updaten – KEIN Program-Smoothing mehr (liegt jetzt sauber in der UI)
+                UI.UpdatePlayerUI(s);
 
-                var i = list.FindIndex(e => e.Id == next.Id);
-                if (i >= 0) UI.SelectEpisodeIndex(i);
+                // 1) Fortschritt/Persistenz – wie gehabt
+                Playback!.PersistProgressTick(
+                    s,
+                    eps => {
+                        var fid = UI.GetSelectedFeedId();
+                        if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
+                    },
+                    Data.Episodes);
 
-                // Abspielen & UI updaten
-                Playback!.Play(next);
-                UI.SetWindowTitle(next.Title);
-                UI.ShowDetails(next);
-                UI.SetNowPlaying(next.Id);
+                // 2) Mark-as-played ist im Program deaktiviert (Coordinator übernimmt)
+                // TryMarkPlayedOnce(s);  // bleibt NO-OP
 
-                // Debounce-Zeitpunkt merken (zusätzlich zum _wasPlaying-Flip)
-                _lastAutoAdvanceAt = DateTimeOffset.Now;
-                _playedMarkedForCurrent = false; // Reset für nächste Episode
+                // 3) Auto-Advance: robuste Transition + Debounce
+                bool endedTransition = IsEndedTransition(s);
+                if (endedTransition)
+                {
+                    var curId = UI.GetNowPlayingId();
+                    if (curId != null && TryFindNextForAutoAdvance(curId.Value, out var next))
+                    {
+                        var list = Data.Episodes
+                            .Where(e => e.FeedId == next.FeedId)
+                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                            .ToList();
+
+                        var i = list.FindIndex(e => e.Id == next.Id);
+                        if (i >= 0) UI.SelectEpisodeIndex(i);
+
+                        Playback!.Play(next);
+                        UI.SetWindowTitle(next.Title);
+                        UI.ShowDetails(next);
+                        UI.SetNowPlaying(next.Id);
+
+                        _lastAutoAdvanceAt = DateTimeOffset.Now;
+                        _playedMarkedForCurrent = false;
+                    }
+                }
+
+                // Playing-Flag für Ended-Transition pflegen
+                if (s.IsPlaying) {
+                    _wasPlaying = true;
+                    _lastAutoFrom = null;
+                } else {
+                    if (_wasPlaying && !s.IsPlaying) _wasPlaying = false;
+                }
             }
-        }
+            catch
+            {
+                // UI robust halten
+            }
+        });
 
-        // wenn wieder Playing → neuen Track begonnen → Guard lösen
-        // wenn wieder Playing → neuen Track begonnen → Guard lösen
-        if (s.IsPlaying) {
-            _wasPlaying = true;
-            _lastAutoFrom = null;
-        } else {
-            if (_wasPlaying && !s.IsPlaying) _wasPlaying = false;
-        }
-
-    }
-    catch
-    {
-        // UI robust halten
-    }
-});
 
         
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
-            var s = Player.State;
-            UpdateSmoothing(s);
-            UI.UpdatePlayerUI(Player.State);
-            Playback!.PersistProgressTick(
-                Player.State,
-                eps => {
-                    var fid = UI.GetSelectedFeedId();
-                    if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
-                },
-                Data.Episodes);
+            try
+            {
+                // Nur rohe Playerwerte → UI glättet
+                UI.UpdatePlayerUI(Player.State);
+
+                Playback!.PersistProgressTick(
+                    Player.State,
+                    eps => {
+                        var fid = UI.GetSelectedFeedId();
+                        if (fid != null) UI.SetEpisodesForFeed(fid.Value, eps);
+                    },
+                    Data.Episodes);
+            }
+            catch { /* robust bleiben */ }
+
             return true;
         });
+
 
         try { Application.Run(); }
         finally
@@ -356,12 +359,68 @@ class Program
             try { Log.CloseAndFlush(); } catch { }
         }
     }
-
+    
     static async Task SaveAsync()
     {
+        const int MIN_INTERVAL_MS = 1000;
+
+        void ScheduleDelayed()
+        {
+            if (_savePending) return;
+            _savePending = true;
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(MIN_INTERVAL_MS);
+                lock (_saveGate)
+                {
+                    _savePending = false;
+                    if (_saveRunning) return;
+                    _saveRunning = true;
+                }
+
+                try { AppStorage.SaveAsync(Data).GetAwaiter().GetResult(); }
+                catch (Exception ex) { Log.Debug(ex, "save (delayed) failed"); }
+                finally
+                {
+                    lock (_saveGate)
+                    {
+                        _lastSave = DateTimeOffset.Now;
+                        _saveRunning = false;
+                    }
+                }
+            });
+        }
+
+        lock (_saveGate)
+        {
+            var now = DateTimeOffset.Now;
+            var since = now - _lastSave;
+
+            if (!_saveRunning && since.TotalMilliseconds >= MIN_INTERVAL_MS)
+            {
+                _saveRunning = true;
+            }
+            else
+            {
+                ScheduleDelayed();
+                return;
+            }
+        }
+
         try { await AppStorage.SaveAsync(Data); }
         catch (Exception ex) { Log.Debug(ex, "save failed"); }
+        finally
+        {
+            lock (_saveGate)
+            {
+                _lastSave = DateTimeOffset.Now;
+                _saveRunning = false;
+            }
+        }
     }
+
+
 
     static void QuitApp()
     {

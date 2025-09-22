@@ -119,8 +119,21 @@ static class CommandRouter
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
 
-        var eps = data.Episodes
-            .Where(e => e.FeedId == feedId)
+        IEnumerable<Episode> baseList = data.Episodes;
+
+        // Virtuelle Feeds berücksichtigen (IDs aus Shell bekannt halten)
+        var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
+        var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
+        var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+
+        if (feedId == FEED_SAVED)
+            baseList = baseList.Where(e => e.Saved);
+        else if (feedId == FEED_DOWNLOADED)
+            baseList = baseList.Where(e => e.Downloaded);
+        else if (feedId != FEED_ALL)
+            baseList = baseList.Where(e => e.FeedId == feedId);
+
+        var eps = baseList
             .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
             .ToList();
 
@@ -142,10 +155,7 @@ static class CommandRouter
                 playback.Play(target);
                 ui.SetWindowTitle(target.Title);
                 ui.ShowDetails(target);
-
-                // >>> NEU: NowPlaying setzen, damit „▶ “ sofort erscheint
                 ui.SetNowPlaying(target.Id);
-
                 return;
             }
         }
