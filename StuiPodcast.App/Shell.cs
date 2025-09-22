@@ -7,6 +7,10 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    // Track der *rohen* Backend-Position (für Stall-Erkennung nach Seeks)
+    TimeSpan _lastRawPos = TimeSpan.Zero;
+    DateTimeOffset _lastRawAt = DateTimeOffset.MinValue;
+
     // --- Virtual feeds (stehen immer ganz oben) ---
     static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
     static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
@@ -549,7 +553,6 @@ sealed class Shell
 
     public void UpdatePlayerUI(PlayerState s)
 {
-    // Startanzeige nicht überschreiben, solange der State noch „leer“ ist
     if (_startupPinned)
     {
         bool meaningless = (s.Length == null || s.Length == TimeSpan.Zero)
@@ -561,68 +564,73 @@ sealed class Shell
 
     static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
 
-    var pos = s.Position;
-    var len = s.Length ?? TimeSpan.Zero;
+    var now    = DateTimeOffset.Now;
+    var rawPos = s.Position;
+    var len    = s.Length ?? TimeSpan.Zero;
+    var effLen = rawPos > len ? rawPos : len;
 
-    // Effektive Länge: nie kleiner als Position
-    var effLen = pos > len ? pos : len;
+    // --- Toleranzen ---
+    var forwardJumpTol = TimeSpan.FromMilliseconds(300); // echter großer Sprung (Seek etc.)
+    var backJitterTol  = TimeSpan.FromMilliseconds(200); // kleine Rücksprünge ignorieren
+    var stallWindow    = TimeSpan.FromMilliseconds(90);  // wenn raw so lange unverändert -> Stall
+    var endCapSlack    = TimeSpan.FromMilliseconds(120); // nahe Ende nicht überziehen
 
-    // === UI-Smoothing mit Sprung-Erkennung ===
-    var now = DateTimeOffset.Now;
-    var jumpBackThresh   = TimeSpan.FromMilliseconds(300);  // erkenne Rücksprung
-    var jumpForwardThresh= TimeSpan.FromMilliseconds(300);  // erkenne großen Vorsprung
-    var freezeThresh     = TimeSpan.FromMilliseconds(5);    // „steht“ ~ keine Bewegung
+    // detect RAW stall (unabhängig von *gerenderter* pos)
+    bool rawTicked = rawPos != _lastRawPos;
+    bool rawStall  = !rawTicked && (_lastRawAt != DateTimeOffset.MinValue) && (now - _lastRawAt) >= stallWindow;
+
+    // aus der *gerenderten* Position starten (monoton)
+    var pos = _lastUiPos;
 
     if (s.IsPlaying)
     {
-        if (_lastUiAt != DateTimeOffset.MinValue)
+        // 1) harter großer Sprung → direkt übernehmen & Monotonie danach neu beginnen
+        if (_lastUiAt != DateTimeOffset.MinValue &&
+            (rawPos - _lastUiPos >= forwardJumpTol || _lastUiPos - rawPos >= forwardJumpTol))
         {
-            var delta = pos - _lastUiPos;
-
-            // 1) Diskontinuität: deutlicher Sprung (zurück oder groß vor)
-            if (delta <= -jumpBackThresh || delta >= jumpForwardThresh)
-            {
-                _lastUiPos = pos;
-                _lastUiAt  = now;
-                // NICHT extrapolieren – sofort neue Realität anzeigen
-            }
-            // 2) „steht“ → extrapolieren
-            else if (delta <= freezeThresh)
-            {
-                var wall = now - _lastUiAt;
-                var proj = _lastUiPos + TimeSpan.FromMilliseconds(wall.TotalMilliseconds * s.Speed);
-                if (proj > pos) pos = proj;
-                _lastUiPos = pos;
-                _lastUiAt  = now;
-            }
-            // 3) normale Vorwärtsbewegung
-            else
-            {
-                _lastUiPos = pos;
-                _lastUiAt  = now;
-            }
+            pos = rawPos;
         }
         else
         {
-            _lastUiPos = pos;
-            _lastUiAt  = now;
+            if (rawStall)
+            {
+                // 2) Backend liefert keine neuen Times → mit Wallclock aus *gerenderter* pos weiter
+                var wall = now - _lastUiAt;
+                if (wall > TimeSpan.Zero)
+                    pos = _lastUiPos + TimeSpan.FromMilliseconds(wall.TotalMilliseconds * s.Speed);
+            }
+            else
+            {
+                // 3) normaler Tick da: übernehme raw, aber keine kleinen Rücksprünge
+                if (rawPos + backJitterTol < _lastUiPos)
+                    pos = _lastUiPos;      // nicht zurückfallen
+                else
+                    pos = rawPos;
+            }
         }
     }
     else
     {
-        _lastUiPos = pos;
-        _lastUiAt  = now;
+        // nicht spielend → harte Werte
+        pos = rawPos;
     }
 
-    // Effektive Länge ggf. an geglättete Position anpassen
+    // Monotonie: nie kleiner als zuletzt gerendert (wichtig nach Extrapolation)
+    if (pos < _lastUiPos) pos = _lastUiPos;
+
+    // nahe Ende nicht über Länge hinaus
+    if (effLen > TimeSpan.Zero && pos > effLen - endCapSlack)
+        pos = TimeSpan.FromMilliseconds(Math.Min(pos.TotalMilliseconds, effLen.TotalMilliseconds));
+
+    // effektive Länge ggf. an geglättete Position anpassen
     if (pos > effLen) effLen = pos;
 
+    // render
+    var icon   = s.IsPlaying ? "▶" : "⏸";
     var posStr = F(pos);
     var lenStr = effLen == TimeSpan.Zero ? "--:--" : F(effLen);
     var rem    = effLen == TimeSpan.Zero ? TimeSpan.Zero : (effLen - pos);
     if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
-
-    var icon   = s.IsPlaying ? "▶" : "⏸";
 
     timeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{F(rem)})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
     btnPlayPause.Text = s.IsPlaying ? "Pause ⏸" : "Play ⏵";
@@ -630,10 +638,13 @@ sealed class Shell
     progress.Fraction = (effLen.TotalMilliseconds > 0)
         ? Math.Clamp((float)(pos.TotalMilliseconds / effLen.TotalMilliseconds), 0f, 1f)
         : 0f;
+
+    // states fortschreiben (für nächste Runde)
+    _lastUiPos  = pos;
+    _lastUiAt   = now;
+    _lastRawPos = rawPos;
+    _lastRawAt  = now;
 }
-
-
-
 
 
     public void SetWindowTitle(string? subtitle)

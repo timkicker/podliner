@@ -270,10 +270,10 @@ class Program
         {
             try
             {
-                // 0) Nur UI updaten – KEIN Program-Smoothing mehr (liegt jetzt sauber in der UI)
+                // UI: rohe Werte -> UI glättet intern
                 UI.UpdatePlayerUI(s);
 
-                // 1) Fortschritt/Persistenz – wie gehabt
+                // Fortschritt/Persistenz
                 Playback!.PersistProgressTick(
                     s,
                     eps => {
@@ -282,40 +282,40 @@ class Program
                     },
                     Data.Episodes);
 
-                // 2) Mark-as-played ist im Program deaktiviert (Coordinator übernimmt)
-                // TryMarkPlayedOnce(s);  // bleibt NO-OP
-
-                // 3) Auto-Advance: robuste Transition + Debounce
-                bool endedTransition = IsEndedTransition(s);
-                if (endedTransition)
+                // ===== Auto-Advance OHNE Transition-Tracking =====
+                var effLen = GetEffectiveLength(s);
+                if (effLen > TimeSpan.Zero)
                 {
-                    var curId = UI.GetNowPlayingId();
-                    if (curId != null && TryFindNextForAutoAdvance(curId.Value, out var next))
+                    // „am Ende“ wenn nah an der Länge (großzügig) – unabhängig davon, ob VLC gerade flackert
+                    var nearEnd = (effLen - s.Position) <= TimeSpan.FromMilliseconds(500);
+
+                    // zusätzlich: nicht dauerfeuern (einfacher Debounce)
+                    var debounceOk = (DateTimeOffset.Now - _lastAutoAdvanceAt) > TimeSpan.FromMilliseconds(800);
+
+                    if (nearEnd && debounceOk)
                     {
-                        var list = Data.Episodes
-                            .Where(e => e.FeedId == next.FeedId)
-                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                            .ToList();
+                        var curId = UI.GetNowPlayingId();
+                        if (curId != null && TryFindNextForAutoAdvance(curId.Value, out var next))
+                        {
+                            // Auswahl mitziehen
+                            var list = Data.Episodes
+                                .Where(e => e.FeedId == next.FeedId)
+                                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                                .ToList();
 
-                        var i = list.FindIndex(e => e.Id == next.Id);
-                        if (i >= 0) UI.SelectEpisodeIndex(i);
+                            var i = list.FindIndex(e => e.Id == next.Id);
+                            if (i >= 0) UI.SelectEpisodeIndex(i);
 
-                        Playback!.Play(next);
-                        UI.SetWindowTitle(next.Title);
-                        UI.ShowDetails(next);
-                        UI.SetNowPlaying(next.Id);
+                            // abspielen & UI
+                            Playback!.Play(next);
+                            UI.SetWindowTitle(next.Title);
+                            UI.ShowDetails(next);
+                            UI.SetNowPlaying(next.Id);
 
-                        _lastAutoAdvanceAt = DateTimeOffset.Now;
-                        _playedMarkedForCurrent = false;
+                            _lastAutoAdvanceAt = DateTimeOffset.Now;
+                            _playedMarkedForCurrent = false;
+                        }
                     }
-                }
-
-                // Playing-Flag für Ended-Transition pflegen
-                if (s.IsPlaying) {
-                    _wasPlaying = true;
-                    _lastAutoFrom = null;
-                } else {
-                    if (_wasPlaying && !s.IsPlaying) _wasPlaying = false;
                 }
             }
             catch
@@ -323,6 +323,7 @@ class Program
                 // UI robust halten
             }
         });
+
 
 
         
@@ -544,19 +545,18 @@ class Program
         var effLen = GetEffectiveLength(s);
         if (effLen <= TimeSpan.Zero) return false;
 
-        // „nahe Ende“ gegen effektive Länge
-        bool nearEnd = s.Position >= effLen - EndSlack;
+        // „nahe Ende“ (entweder klassischer Slack oder großzügiger 2s-Guard)
+        var nearEnd = (effLen - s.Position) <= EndSlack
+                      || (effLen - s.Position) <= TimeSpan.FromSeconds(2);
 
-        // klassische Transition: vorher Playing → jetzt nicht + nahe Ende
-        bool transitioned = _wasPlaying && !s.IsPlaying && nearEnd;
+        // klassische Transition: vorher Playing → jetzt nicht
+        var flipped = _wasPlaying && !s.IsPlaying;
 
-        // Debounce gegen Doppelfeuer
-        if (transitioned && (DateTimeOffset.Now - _lastAutoAdvanceAt) > EndSlack)
-            return true;
+        // einfache Debounce gegen Doppelfeuer
+        var debounceOk = (DateTimeOffset.Now - _lastAutoAdvanceAt) > EndSlack;
 
-        return false;
+        return flipped && nearEnd && debounceOk;
     }
-
 
 
 
