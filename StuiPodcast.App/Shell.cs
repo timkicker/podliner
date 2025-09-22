@@ -424,7 +424,7 @@ sealed class Shell
         long lenMs = e.LengthMs ?? 0;
         long posMs = e.LastPosMs ?? 0;
 
-        // Effektive Länge: niemals kleiner als Fortschritt
+        // Effektive Länge: niemals kleiner als Fortschritt (nur für Progress-Icon)
         long effLenMs = Math.Max(lenMs, posMs);
         double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
 
@@ -437,8 +437,27 @@ sealed class Shell
                             : '●';
 
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
-        return $"{nowPrefix}{mark} {date,-10}  {e.Title}";
+
+        // NEU: Dauer-Spalte (rechtsbündig). "--:--" wenn unbekannt.
+        string dur = FormatDuration(lenMs);
+
+        // Layout:
+        // [▶ ] [Icon] [Datum(10)] [2 Leer] [Dauer(>=5, rechtsbündig auf 8)] [2 Leer] [Titel]
+        return $"{nowPrefix}{mark} {date,-10}  {dur,8}  {e.Title}";
     }
+
+    static string FormatDuration(long ms)
+    {
+        if (ms <= 0) return "--:--";
+        long totalSeconds = ms / 1000;
+        long h = totalSeconds / 3600;
+        long m = (totalSeconds % 3600) / 60;
+        long s = totalSeconds % 60;
+        return h > 0
+            ? $"{h}:{m:00}:{s:00}"   // z.B. 1:02:07
+            : $"{m:00}:{s:00}";      // z.B. 42:05
+    }
+
 
 
 
