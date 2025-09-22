@@ -7,6 +7,7 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    bool _showFeedColumn = false;
     TimeSpan _lastEffLenTs = TimeSpan.Zero;
     // Track der *rohen* Backend-Position (für Stall-Erkennung nach Seeks)
     TimeSpan _lastRawPos = TimeSpan.Zero;
@@ -420,20 +421,21 @@ sealed class Shell
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
+        // Flag für Podcast-Spalte setzen
+        _showFeedColumn = (feedId == FEED_ALL || feedId == FEED_SAVED || feedId == FEED_DOWNLOADED);
+
         var prevId = GetSelectedEpisode()?.Id;
 
         IEnumerable<Episode> src = episodes ?? Enumerable.Empty<Episode>();
 
         if (feedId == FEED_ALL)
         {
-            // Alle Episoden aus allen Feeds, neueste oben
             _episodes = src
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
                 .ToList();
         }
         else if (feedId == FEED_SAVED)
         {
-            // Platzhalter: leer, bis Saved-Flag existiert
             _episodes = src
                 .Where(IsSaved)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
@@ -441,7 +443,6 @@ sealed class Shell
         }
         else if (feedId == FEED_DOWNLOADED)
         {
-            // Platzhalter: leer, bis Download-Status existiert
             _episodes = src
                 .Where(IsDownloaded)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
@@ -449,7 +450,6 @@ sealed class Shell
         }
         else
         {
-            // Normaler Feed
             _episodes = src
                 .Where(e => e.FeedId == feedId)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
@@ -488,44 +488,83 @@ sealed class Shell
         RefreshListVisual(episodeList); // nutzt deine Helper aus dem letzten Fix
     }
 
-
     string EpisodeRow(Episode e)
+{
+    // fester linker Block (NowPlaying, Fortschritt, Datum, Dauer, Badges)
+    var now = (_nowPlayingId != null && e.Id == _nowPlayingId.Value);
+    var nowPrefix = now ? "▶ " : "  ";
+
+    long lenMs = e.LengthMs ?? 0;
+    long posMs = e.LastPosMs ?? 0;
+
+    long effLenMs = Math.Max(lenMs, posMs);
+    double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
+
+    char mark = e.Played
+        ? '✔'
+        : r <= 0.0 ? '○'
+            : r < 0.25 ? '◔'
+                : r < 0.50 ? '◑'
+                    : r < 0.75 ? '◕'
+                        : '●';
+
+    var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
+    string dur = FormatDuration(lenMs);
+
+    char savedCh = (e.Saved == true) ? '★' : ' ';
+    char downCh  = (e.Downloaded == true) ? '⬇' : ' ';
+    string badges = $"{savedCh}{downCh}";
+
+    string left = $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  ";
+
+    // Titel + optionale Feed-Spalte
+    string title = e.Title ?? "";
+    bool showFeedCol = _showFeedColumn; // gesetzt in SetEpisodesForFeed()
+
+    // feste Breiten für Spalte & Separator
+    const int FEED_COL_W = 24;                 // Breite der rechten Podcast-Spalte
+    const string SEP = "  │  ";                // Spaltentrenner
+
+    // Feed-Namen nur bei virtuellen Feeds
+    string feedName = "";
+    if (showFeedCol)
+        feedName = _feeds.FirstOrDefault(f => f.Id == e.FeedId)?.Title ?? "";
+
+    // verfügbare Zeilenbreite
+    int viewWidth = (episodeList?.Bounds.Width > 0) ? episodeList.Bounds.Width : 100;
+
+    // Platz für Titel berechnen (mit/ohne Feed-Spalte)
+    int reservedRight = showFeedCol ? (SEP.Length + FEED_COL_W) : 0;
+    int availTitle = Math.Max(6, viewWidth - left.Length - reservedRight); // mind. etwas Platz
+
+    // Kürzen
+    string titleTrunc = TruncateTo(title, availTitle);
+
+    if (!showFeedCol)
     {
-        // Now-Playing-Pfeil
-        var now = (_nowPlayingId != null && e.Id == _nowPlayingId.Value);
-        var nowPrefix = now ? "▶ " : "  ";
-
-        long lenMs = e.LengthMs ?? 0;
-        long posMs = e.LastPosMs ?? 0;
-
-        // Effektive Länge: niemals kleiner als Fortschritt (nur für Progress-Icon)
-        long effLenMs = Math.Max(lenMs, posMs);
-        double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
-
-        char mark = e.Played
-            ? '✔'
-            : r <= 0.0 ? '○'
-                : r < 0.25 ? '◔'
-                    : r < 0.50 ? '◑'
-                        : r < 0.75 ? '◕'
-                            : '●';
-
-        var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
-
-        // Dauer-Spalte (rechtsbündig). "--:--" wenn unbekannt.
-        string dur = FormatDuration(lenMs);
-
-        // Badges: feste 2-Zeichen-Spalte, damit die Titel-Spalte nicht springt.
-        // ★ = Saved, ⬇ = Downloaded; sonst Leerzeichen.
-        char savedCh = (e.Saved == true) ? '★' : ' ';
-        char downCh  = (e.Downloaded == true) ? '⬇' : ' ';
-        string badges = $"{savedCh}{downCh}";
-
-        // Layout:
-        // [▶ ] [Icon] [Datum(10)] [2 Leer] [Dauer(>=5, rechtsbündig auf 8)] [2 Leer] [Badges(2)] [2 Leer] [Titel]
-        return $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  {e.Title}";
+        // einfacher Modus (pro-Feed-Ansicht)
+        return left + titleTrunc;
     }
 
+    // Podcast-Spalte (rechts), fixbreit
+    string feedTrunc = TruncateTo(feedName, FEED_COL_W);
+
+    // Titel links ausrichten & auf verfügbare Breite auffüllen, damit die rechte Spalte sauber fluchtet
+    string paddedTitle = titleTrunc.PadRight(availTitle);
+
+    return left + paddedTitle + SEP + feedTrunc.PadRight(FEED_COL_W);
+}
+
+    
+static string TruncateTo(string? s, int max)
+{
+    if (max <= 0 || string.IsNullOrEmpty(s)) return "";
+    if (s.Length <= max) return s;
+    if (max <= 1) return "…";
+    return s.Substring(0, Math.Max(0, max - 1)) + "…";
+}
+
+    
     static string FormatDuration(long ms)
     {
         if (ms <= 0) return "--:--";
