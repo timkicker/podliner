@@ -170,7 +170,11 @@ sealed class Shell
     feedsFrame = new FrameView("Feeds") { X = 0, Y = 0, Width = 30, Height = Dim.Fill() };
     mainWin.Add(feedsFrame);
     feedList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-    feedList.OpenSelectedItem += _ => PlaySelected?.Invoke();
+
+    // ❗ FIX: Doppelklick auf einen Feed spielt NICHT mehr,
+    // sondern wechselt nur in die Episoden-Pane.
+    feedList.OpenSelectedItem += _ => FocusPane(Pane.Episodes);
+
     feedList.SelectedItemChanged += OnFeedListSelectedChanged;
     feedsFrame.Add(feedList);
 
@@ -204,7 +208,7 @@ sealed class Shell
     // --- Startfokus stabil erst NACH dem ersten Layout-Tick setzen ---
     Application.MainLoop.AddIdle(() =>
     {
-        FocusPane(Pane.Episodes); // setzt Fokus + Redraw
+        FocusPane(Pane.Episodes);
         return false; // einmalig
     });
 }
@@ -570,40 +574,48 @@ sealed class Shell
     var effLen = rawPos > len ? rawPos : len;
 
     // --- Toleranzen ---
-    var forwardJumpTol = TimeSpan.FromMilliseconds(300); // echter großer Sprung (Seek etc.)
-    var backJitterTol  = TimeSpan.FromMilliseconds(200); // kleine Rücksprünge ignorieren
-    var stallWindow    = TimeSpan.FromMilliseconds(90);  // wenn raw so lange unverändert -> Stall
+    var forwardJumpTol = TimeSpan.FromMilliseconds(300); // großer Sprung (Seek etc.)
+    var backJumpTol    = TimeSpan.FromMilliseconds(300); // großer Rücksprung (Seek -10s)
+    var backJitterTol  = TimeSpan.FromMilliseconds(180); // kleiner rückwärts-Jitter
+    var stallWindow    = TimeSpan.FromMilliseconds(90);  // keine Raw-Ticks -> Stall
     var endCapSlack    = TimeSpan.FromMilliseconds(120); // nahe Ende nicht überziehen
 
-    // detect RAW stall (unabhängig von *gerenderter* pos)
+    // RAW Stall erkennen
     bool rawTicked = rawPos != _lastRawPos;
     bool rawStall  = !rawTicked && (_lastRawAt != DateTimeOffset.MinValue) && (now - _lastRawAt) >= stallWindow;
 
-    // aus der *gerenderten* Position starten (monoton)
     var pos = _lastUiPos;
+    var haveBaseline = _lastUiAt != DateTimeOffset.MinValue;
 
     if (s.IsPlaying)
     {
-        // 1) harter großer Sprung → direkt übernehmen & Monotonie danach neu beginnen
-        if (_lastUiAt != DateTimeOffset.MinValue &&
-            (rawPos - _lastUiPos >= forwardJumpTol || _lastUiPos - rawPos >= forwardJumpTol))
+        var largeForward = haveBaseline && (rawPos - _lastUiPos) >= forwardJumpTol;
+        var largeBackward= haveBaseline && (_lastUiPos - rawPos) >= backJumpTol;
+
+        if (largeForward)
         {
+            // harter Vorwärts-Seek -> übernehmen
+            pos = rawPos;
+        }
+        else if (largeBackward)
+        {
+            // harter Rückwärts-Seek (z.B. :seek -10) -> rückwärts ausdrücklich zulassen
             pos = rawPos;
         }
         else
         {
             if (rawStall)
             {
-                // 2) Backend liefert keine neuen Times → mit Wallclock aus *gerenderter* pos weiter
+                // Backend steht kurz -> aus gerenderter Pos weiter extrapolieren
                 var wall = now - _lastUiAt;
                 if (wall > TimeSpan.Zero)
                     pos = _lastUiPos + TimeSpan.FromMilliseconds(wall.TotalMilliseconds * s.Speed);
             }
             else
             {
-                // 3) normaler Tick da: übernehme raw, aber keine kleinen Rücksprünge
-                if (rawPos + backJitterTol < _lastUiPos)
-                    pos = _lastUiPos;      // nicht zurückfallen
+                // normaler Tick: kleine Rücksprünge ignorieren (Jitter), sonst übernehmen
+                if (haveBaseline && rawPos + backJitterTol < _lastUiPos)
+                    pos = _lastUiPos; // Jitter nach hinten blocken
                 else
                     pos = rawPos;
             }
@@ -611,12 +623,9 @@ sealed class Shell
     }
     else
     {
-        // nicht spielend → harte Werte
+        // nicht spielend -> harte Werte übernehmen
         pos = rawPos;
     }
-
-    // Monotonie: nie kleiner als zuletzt gerendert (wichtig nach Extrapolation)
-    if (pos < _lastUiPos) pos = _lastUiPos;
 
     // nahe Ende nicht über Länge hinaus
     if (effLen > TimeSpan.Zero && pos > effLen - endCapSlack)
@@ -639,13 +648,12 @@ sealed class Shell
         ? Math.Clamp((float)(pos.TotalMilliseconds / effLen.TotalMilliseconds), 0f, 1f)
         : 0f;
 
-    // states fortschreiben (für nächste Runde)
+    // Zustände fortschreiben
     _lastUiPos  = pos;
     _lastUiAt   = now;
     _lastRawPos = rawPos;
     _lastRawAt  = now;
 }
-
 
     public void SetWindowTitle(string? subtitle)
     {
@@ -810,10 +818,7 @@ Misc:
     if (key == Key.F12) { ShowLogsOverlay(500); return true; }
     if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
     if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
-    // Shell.cs – HandleKeys(...) (ersetzt die alte u-Zeile)
     if (kv == 'u' || kv == 'U') { Command?.Invoke(":filter toggle"); return true; }
-
-
 
     if (BaseKey(key) == Key.J && Has(key, Key.ShiftMask)) { JumpToNextUnplayed(); return true; }
     if (BaseKey(key) == Key.K && Has(key, Key.ShiftMask)) { JumpToPrevUnplayed(); return true; }
@@ -854,8 +859,19 @@ Misc:
 
     if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads later (M5).", "OK"); return true; }
 
-    if (key == Key.Enter && rightTabs.SelectedTab?.Text.ToString() != "Details")
-    { PlaySelected?.Invoke(); return true; }
+    // ❗ FIX: Enter im Feeds-Pane startet NICHT mehr die Wiedergabe
+    if (key == Key.Enter)
+    {
+        if (_activePane == Pane.Feeds)
+        {
+            FocusPane(Pane.Episodes);
+        }
+        else if (rightTabs.SelectedTab?.Text.ToString() != "Details")
+        {
+            PlaySelected?.Invoke();
+        }
+        return true;
+    }
 
     if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch)) { SearchApplied?.Invoke(_lastSearch!); return true; }
 

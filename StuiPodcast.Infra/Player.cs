@@ -127,31 +127,31 @@ public sealed class LibVlcPlayer : IPlayer, IDisposable {
             var t = Math.Max(0, _mp.Time + (long)delta.TotalMilliseconds);
             _mp.Time = t;
 
-            // Force immediate UI refresh (do not wait for next VLC tick)
+            // Sofort UI aktualisieren
             try {
                 State.Position = TimeSpan.FromMilliseconds(t);
                 var len = _mp.Length;
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
                 StateChanged?.Invoke(State);
-            } catch { /* best-effort */ }
+            } catch { /* best effort */ }
         }
     }
 
-    
     public void SeekTo(TimeSpan position) {
         lock (_sync) {
             var ms = Math.Max(0, (long)position.TotalMilliseconds);
             _mp.Time = ms;
 
-            // Force immediate UI refresh
+            // Sofort UI aktualisieren
             try {
                 State.Position = TimeSpan.FromMilliseconds(ms);
                 var len = _mp.Length;
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
                 StateChanged?.Invoke(State);
-            } catch { /* best-effort */ }
+            } catch { /* best effort */ }
         }
     }
+
 
     public void SetVolume(int vol0to100) {
         lock (_sync) {
