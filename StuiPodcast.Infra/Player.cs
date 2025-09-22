@@ -41,25 +41,48 @@ public sealed class LibVlcPlayer : IPlayer, IDisposable {
             "--no-video-title-show",
             "--quiet","--verbose=0","--no-color",
             "--no-xlib",
-            "--input-fast-seek",          // schnelleres Seeking
+            "--input-fast-seek",
             "--file-caching=1000",
             "--network-caching=2000",
             "--file-logging", $"--logfile={logPath}"
         };
         _lib = new VLC.LibVLC(opts);
-        _mp = new VLC.MediaPlayer(_lib);
+        _mp  = new VLC.MediaPlayer(_lib);
 
-        _mp.Playing          += OnPlaying;     // sicherer Zeitpunkt für Resume
+        _mp.Playing          += OnPlaying;
         _mp.TimeChanged      += OnTimeChanged;
         _mp.LengthChanged    += OnLengthChanged;
-        _mp.EndReached       += (_,__) => { lock(_sync){ State.IsPlaying = false; StateChanged?.Invoke(State); } };
-        _mp.EncounteredError += (_,__) => { lock(_sync){ State.IsPlaying = false; StateChanged?.Invoke(State); } };
+        _mp.EndReached       += OnEndReached;
+        _mp.EncounteredError += OnEncounteredError;
         _mp.Stopped          += (_,__) => { lock(_sync){ _stoppedTcs?.TrySetResult(true); _stoppedTcs = null; } };
 
         _mp.Volume = State.Volume0_100;
         _mp.SetRate((float)State.Speed);
 
         Log.Debug("LibVLC initialized");
+    }
+    
+    private void OnEndReached(object? _, EventArgs __) {
+        lock (_sync) {
+            try {
+                var len = _mp.Length;
+                if (len > 0) {
+                    State.Length   = TimeSpan.FromMilliseconds(len);
+                    State.Position = TimeSpan.FromMilliseconds(len); // => „am Ende“
+                }
+                State.IsPlaying = false;
+                StateChanged?.Invoke(State);
+            } catch (Exception ex) { Log.Debug(ex, "OnEndReached"); }
+        }
+    }
+
+    private void OnEncounteredError(object? _, EventArgs __) {
+        lock (_sync) {
+            try {
+                State.IsPlaying = false;
+                StateChanged?.Invoke(State);
+            } catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
+        }
     }
 
     public void Play(string url, long? startMs = null) {
@@ -103,12 +126,30 @@ public sealed class LibVlcPlayer : IPlayer, IDisposable {
         lock (_sync) {
             var t = Math.Max(0, _mp.Time + (long)delta.TotalMilliseconds);
             _mp.Time = t;
+
+            // Force immediate UI refresh (do not wait for next VLC tick)
+            try {
+                State.Position = TimeSpan.FromMilliseconds(t);
+                var len = _mp.Length;
+                if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+                StateChanged?.Invoke(State);
+            } catch { /* best-effort */ }
         }
     }
 
+    
     public void SeekTo(TimeSpan position) {
         lock (_sync) {
-            _mp.Time = Math.Max(0, (long)position.TotalMilliseconds);
+            var ms = Math.Max(0, (long)position.TotalMilliseconds);
+            _mp.Time = ms;
+
+            // Force immediate UI refresh
+            try {
+                State.Position = TimeSpan.FromMilliseconds(ms);
+                var len = _mp.Length;
+                if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+                StateChanged?.Invoke(State);
+            } catch { /* best-effort */ }
         }
     }
 

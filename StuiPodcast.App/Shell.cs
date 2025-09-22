@@ -261,12 +261,14 @@ sealed class Shell
     
     public void SetUnplayedHint(bool on)
     {
-        if (episodesTabRef != null)
+        // Fix: benutze das tatsächlich gesetzte _episodesTab statt eines nie gesetzten episodesTabRef
+        if (_episodesTab != null && rightTabs != null)
         {
-            episodesTabRef.Text = on ? "Episodes (unplayed)" : "Episodes";
+            _episodesTab.Text = on ? "Episodes (unplayed)" : "Episodes";
             rightTabs.SetNeedsDisplay();
         }
     }
+
 
 
     public int GetSelectedEpisodeIndex()

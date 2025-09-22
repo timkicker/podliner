@@ -472,34 +472,8 @@ class Program
 
     static void TryMarkPlayedOnce(PlayerState s)
     {
-        var effLen = GetEffectiveLength(s);
-        if (effLen <= TimeSpan.Zero || _playedMarkedForCurrent) return;
-
-        var frac = s.Position.TotalMilliseconds / effLen.TotalMilliseconds;
-
-        // Sicherheits-Netz: zusätzlich frühestens ab (effLen >= 60s) und Position >= 30s,
-        // damit ultrakurze/kaputte Längen nicht sofort markieren.
-        var minRunGuard = effLen >= TimeSpan.FromSeconds(60) ? s.Position >= TimeSpan.FromSeconds(30) : s.Position >= TimeSpan.FromSeconds(5);
-        if (frac >= PlayedThresholdPercent / 100.0 && minRunGuard)
-        {
-            Episode? ep = null;
-            var curId = UI?.GetNowPlayingId();
-            if (curId != null)
-                ep = Data.Episodes.FirstOrDefault(x => x.Id == curId.Value);
-            ep ??= UI?.GetSelectedEpisode();
-
-            if (ep != null && !ep.Played)
-            {
-                ep.Played = true;
-                ep.LastPlayedAt = DateTimeOffset.Now;
-                ep.LastPosMs = ep.LengthMs ?? (long)effLen.TotalMilliseconds; // auf „Ende“
-                _ = SaveAsync();
-
-                var fid = UI!.GetSelectedFeedId();
-                if (fid != null) UI!.SetEpisodesForFeed(fid.Value, Data.Episodes);
-            }
-            _playedMarkedForCurrent = true;
-        }
+        // Deactivated to avoid double-marking (Coordinator handles marking).
+        // Intentionally left blank.
     }
 
 
