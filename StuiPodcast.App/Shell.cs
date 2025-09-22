@@ -7,6 +7,17 @@ using StuiPodcast.App.Debug;
 
 sealed class Shell
 {
+    // --- Virtual feeds (stehen immer ganz oben) ---
+    static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
+    static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
+    static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+
+// Hilfs-Predicates (vorerst: noch ohne echte Datenstützen)
+// vorher: static bool IsSaved(Episode e) => false;
+    static bool IsSaved(Episode e) => e?.Saved == true;
+
+    static bool IsDownloaded(Episode e) => false; // TODO: sobald Download-Status existiert
+
     // --- aktive Pane steuern (fix für j/k & Pfeile schon vor dem ersten Play) ---
     enum Pane { Feeds, Episodes }
     FrameView? _osdWin;
@@ -336,7 +347,18 @@ sealed class Shell
 
     public void SetFeeds(IEnumerable<Feed> feeds, Guid? selectId = null)
     {
-        _feeds = feeds.ToList();
+        // Virtuelle Feeds immer oben einsortieren
+        var virt = new List<Feed>
+        {
+            new Feed { Id = FEED_ALL,        Title = "All Episodes" },
+            new Feed { Id = FEED_SAVED,      Title = "★ Saved" },
+            new Feed { Id = FEED_DOWNLOADED, Title = "⬇ Downloaded" },
+        };
+
+        // Normale Feeds dahinter
+        _feeds = virt.Concat(feeds ?? Enumerable.Empty<Feed>()).ToList();
+
+        // Anzeige
         feedList.SetSource(_feeds.Select(f => f.Title).ToList());
 
         if (_feeds.Count == 0) return;
@@ -350,7 +372,7 @@ sealed class Shell
         feedList.SelectedItem = idx;
 
         if (_activePane == Pane.Feeds)
-            RefreshListVisual(feedList);   // << neu (sichtbares Highlight)
+            RefreshListVisual(feedList);
     }
 
     public Guid? GetSelectedFeedId()
@@ -377,10 +399,39 @@ sealed class Shell
     {
         var prevId = GetSelectedEpisode()?.Id;
 
-        _episodes = episodes
-            .Where(e => e.FeedId == feedId)
-            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-            .ToList();
+        IEnumerable<Episode> src = episodes ?? Enumerable.Empty<Episode>();
+
+        if (feedId == FEED_ALL)
+        {
+            // Alle Episoden aus allen Feeds, neueste oben
+            _episodes = src
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+        }
+        else if (feedId == FEED_SAVED)
+        {
+            // Platzhalter: leer, bis Saved-Flag existiert
+            _episodes = src
+                .Where(IsSaved)
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+        }
+        else if (feedId == FEED_DOWNLOADED)
+        {
+            // Platzhalter: leer, bis Download-Status existiert
+            _episodes = src
+                .Where(IsDownloaded)
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+        }
+        else
+        {
+            // Normaler Feed
+            _episodes = src
+                .Where(e => e.FeedId == feedId)
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+        }
 
         int sel = 0;
         if (prevId is Guid pid)
@@ -393,10 +444,10 @@ sealed class Shell
         episodeList.SetSource(items);
         episodeList.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
 
-        ShowDetailsForSelection();
         RefreshListVisual(episodeList);
+        ShowDetailsForSelection();
     }
-    
+
     public void SetNowPlaying(Guid? episodeId)
     {
         _nowPlayingId = episodeId;
@@ -438,12 +489,18 @@ sealed class Shell
 
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
 
-        // NEU: Dauer-Spalte (rechtsbündig). "--:--" wenn unbekannt.
+        // Dauer-Spalte (rechtsbündig). "--:--" wenn unbekannt.
         string dur = FormatDuration(lenMs);
 
+        // Badges: feste 2-Zeichen-Spalte, damit die Titel-Spalte nicht springt.
+        // ★ = Saved, ⬇ = Downloaded; sonst Leerzeichen.
+        char savedCh = (e.Saved == true) ? '★' : ' ';
+        char downCh  = (e.Downloaded == true) ? '⬇' : ' ';
+        string badges = $"{savedCh}{downCh}";
+
         // Layout:
-        // [▶ ] [Icon] [Datum(10)] [2 Leer] [Dauer(>=5, rechtsbündig auf 8)] [2 Leer] [Titel]
-        return $"{nowPrefix}{mark} {date,-10}  {dur,8}  {e.Title}";
+        // [▶ ] [Icon] [Datum(10)] [2 Leer] [Dauer(>=5, rechtsbündig auf 8)] [2 Leer] [Badges(2)] [2 Leer] [Titel]
+        return $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  {e.Title}";
     }
 
     static string FormatDuration(long ms)

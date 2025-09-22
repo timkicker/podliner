@@ -11,6 +11,8 @@ public class Feed {
 }
 
 public class Episode {
+    public bool Saved { get; set; } = false;
+    public bool Downloaded { get; set; } = false;
     // in Episode.cs (oder wo dein Episode-Modell liegt)
     public long? LastPosMs { get; set; }      // letzte Position
     public long? LengthMs  { get; set; }      // bekannte Länge

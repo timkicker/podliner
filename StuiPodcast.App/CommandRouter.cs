@@ -11,93 +11,90 @@ static class CommandRouter
     
 
     public static void Handle(string raw,
-                              IPlayer player,
-                              PlaybackCoordinator playback,
-                              Shell ui,
-                              MemoryLogSink mem,
-                              AppData data,
-                              Func<Task> persist) // <— SaveAsync aus Program
+                          IPlayer player,
+                          PlaybackCoordinator playback,
+                          Shell ui,
+                          MemoryLogSink mem,
+                          AppData data,
+                          Func<Task> persist)
+{
+    if (string.IsNullOrWhiteSpace(raw)) return;
+    var cmd = raw.Trim();
+
+    // --- quick commands via keys ---
+    if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase))
     {
-        if (string.IsNullOrWhiteSpace(raw)) return;
-        var cmd = raw.Trim();
-
-        // --- quick commands via keys ---
-        if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase))
-        {
-            player.TogglePause();
-            ui.UpdatePlayerUI(player.State);
-            return;
-        }
-        
-        // CommandRouter.cs – in Handle(...)
-        if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase))
-        {
-            var arg = cmd[7..].Trim().ToLowerInvariant();
-            if (arg == "toggle" || string.IsNullOrEmpty(arg))
-                ui.TogglePlayerPlacement();
-            return;
-        }
-
-        if (cmd.StartsWith(":vol",   StringComparison.OrdinalIgnoreCase)) { Volume(cmd[4..].Trim(), player, data, persist, ui); return; }
-        if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) { Speed (cmd[6..].Trim(), player, data, persist, ui); return; }
-
-        if (cmd.StartsWith(":seek",  StringComparison.OrdinalIgnoreCase)) { Seek(cmd[5..].Trim(), player); return; }
-        if (cmd.StartsWith(":logs",  StringComparison.OrdinalIgnoreCase)) { Logs(cmd[5..].Trim(), ui); return; }
-        if (cmd is ":h" or ":help") { ui.ShowKeysHelp(); return; }
-        if (cmd is ":q" or ":quit") { ui.RequestQuit(); return; }
-
-        // --- view / player placement ---
-        if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase))
-        {
-            var arg = cmd[7..].Trim().ToLowerInvariant();
-            if (arg is "toggle" or "" or null)
-            {
-                ui.TogglePlayerPlacement();
-                data.PlayerAtTop = !data.PlayerAtTop;
-                _ = persist();
-                return;
-            }
-            if (arg is "top")
-            {
-                ui.SetPlayerPlacement(true);
-                data.PlayerAtTop = true;
-                _ = persist();
-                return;
-            }
-            if (arg is "bottom" or "bot")
-            {
-                ui.SetPlayerPlacement(false);
-                data.PlayerAtTop = false;
-                _ = persist();
-                return;
-            }
-            return;
-        }
-
-        if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase))
-        {
-            var arg = cmd[7..].Trim().ToLowerInvariant();
-            if (arg is "unplayed" or "only") data.UnplayedOnly = true;
-            else if (arg is "all")           data.UnplayedOnly = false;
-            else if (arg is "toggle" or "" or null) data.UnplayedOnly = !data.UnplayedOnly;
-
-            ui.SetUnplayedFilterVisual(data.UnplayedOnly);
-            _ = persist();
-            ApplyList(ui, data);
-            return;
-        }
-
-
-
-        if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(+1, ui, playback, data); return; }
-        if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(-1, ui, playback, data); return; }
-
-        // --- add/refresh (nur Bequemlichkeit; Hauptfluss hängt an Program/Shell) ---
-        if (cmd.StartsWith(":add ", StringComparison.OrdinalIgnoreCase)) { ui.RequestAddFeed(cmd[5..].Trim()); return; }
-        if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase)) { ui.RequestRefresh(); return; }
-
-        // unknown → ignore
+        player.TogglePause();
+        ui.UpdatePlayerUI(player.State);
+        return;
     }
+
+    if (cmd.StartsWith(":vol",   StringComparison.OrdinalIgnoreCase)) { Volume(cmd[4..].Trim(), player, data, persist, ui); return; }
+    if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) { Speed (cmd[6..].Trim(), player, data, persist, ui); return; }
+
+    if (cmd.StartsWith(":seek",  StringComparison.OrdinalIgnoreCase)) { Seek(cmd[5..].Trim(), player); return; }
+    if (cmd.StartsWith(":logs",  StringComparison.OrdinalIgnoreCase)) { Logs(cmd[5..].Trim(), ui); return; }
+    if (cmd is ":h" or ":help") { ui.ShowKeysHelp(); return; }
+    if (cmd is ":q" or ":quit") { ui.RequestQuit(); return; }
+
+    // --- SAVE / UNSAVE ------------------------------------------------------
+    if (cmd.StartsWith(":save", StringComparison.OrdinalIgnoreCase))
+    {
+        var arg = cmd.Length > 5 ? cmd[5..].Trim().ToLowerInvariant() : "";
+        SaveToggle(arg, ui, data, persist);
+        return;
+    }
+
+    // --- view / player placement ---
+    if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase))
+    {
+        var arg = cmd[7..].Trim().ToLowerInvariant();
+        if (arg is "toggle" or "" or null)
+        {
+            ui.TogglePlayerPlacement();
+            data.PlayerAtTop = !data.PlayerAtTop;
+            _ = persist();
+            return;
+        }
+        if (arg is "top")
+        {
+            ui.SetPlayerPlacement(true);
+            data.PlayerAtTop = true;
+            _ = persist();
+            return;
+        }
+        if (arg is "bottom" or "bot")
+        {
+            ui.SetPlayerPlacement(false);
+            data.PlayerAtTop = false;
+            _ = persist();
+            return;
+        }
+        return;
+    }
+
+    if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase))
+    {
+        var arg = cmd[7..].Trim().ToLowerInvariant();
+        if (arg is "unplayed" or "only") data.UnplayedOnly = true;
+        else if (arg is "all")           data.UnplayedOnly = false;
+        else if (arg is "toggle" or "" or null) data.UnplayedOnly = !data.UnplayedOnly;
+
+        ui.SetUnplayedFilterVisual(data.UnplayedOnly);
+        _ = persist();
+        ApplyList(ui, data);
+        return;
+    }
+
+    if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(+1, ui, playback, data); return; }
+    if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) { JumpUnplayed(-1, ui, playback, data); return; }
+
+    // --- add/refresh (nur Bequemlichkeit; Hauptfluss hängt an Program/Shell) ---
+    if (cmd.StartsWith(":add ", StringComparison.OrdinalIgnoreCase)) { ui.RequestAddFeed(cmd[5..].Trim()); return; }
+    if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase)) { ui.RequestRefresh(); return; }
+
+    // unknown → ignore
+}
 
     // ---- helpers ------------------------------------------------------------
 
@@ -106,7 +103,10 @@ static class CommandRouter
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
 
-        var list = data.Episodes.Where(e => e.FeedId == feedId);
+        // Basis: alle Episoden aus den Daten
+        IEnumerable<Episode> list = data.Episodes;
+
+        // Unplayed-Filter anwenden (Feed-Filter übernimmt Shell.SetEpisodesForFeed)
         if (data.UnplayedOnly) list = list.Where(e => !e.Played);
 
         if (feedId is Guid fid)
@@ -149,6 +149,28 @@ static class CommandRouter
                 return;
             }
         }
+    }
+
+    static void SaveToggle(string arg, Shell ui, AppData data, Func<Task> persist)
+    {
+        var ep = ui.GetSelectedEpisode();
+        if (ep is null) return;
+
+        bool newVal = ep.Saved;
+
+        if (arg is "on" or "true" or "+")
+            newVal = true;
+        else if (arg is "off" or "false" or "-")
+            newVal = false;
+        else
+            newVal = !ep.Saved; // toggle default
+
+        ep.Saved = newVal;
+        _ = persist();
+
+        // UI aktualisieren (Liste neu aufbauen, damit "★ Saved" sofort greift)
+        ApplyList(ui, data);
+        ui.ShowOsd(newVal ? "Saved ★" : "Unsaved");
     }
 
 
