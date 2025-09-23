@@ -96,6 +96,15 @@ static class CommandRouter
             ApplyList(ui, data);
             return;
         }
+        
+        if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase) ||
+            cmd.Equals(":feed remove", StringComparison.OrdinalIgnoreCase))
+        {
+            RemoveSelectedFeed(ui, data, persist);
+            return;
+        }
+
 
 
         // --- view / player placement ---
@@ -144,8 +153,16 @@ static class CommandRouter
 
         // --- add/refresh (nur Bequemlichkeit; Hauptfluss hängt an Program/Shell) ---
         if (cmd.StartsWith(":add ", StringComparison.OrdinalIgnoreCase)) { ui.RequestAddFeed(cmd[5..].Trim()); return; }
-        if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase)) { ui.RequestRefresh(); return; }
 
+        if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase))
+        {
+            ui.ShowOsd("Refreshing…", 1500);   // kleines Overlay während der Aktualisierung
+            ui.RequestRefresh();                // feuert den eigentlichen Refresh (async)
+            return;
+        }
+        ui.ShowOsd("Refreshed ✓", 1200);
+        
+        
         // unknown → ignore
     }
 
@@ -228,6 +245,43 @@ static class CommandRouter
         // Fallback: kurze Hilfe
         ui.ShowOsd("sort: by pubdate|title|played|progress|feed [asc|desc]");
     }
+    
+    static void RemoveSelectedFeed(Shell ui, AppData data, Func<Task> persist)
+    {
+        var fid = ui.GetSelectedFeedId();
+        if (fid is null) { ui.ShowOsd("No feed selected"); return; }
+
+        // Virtuelle Feeds schützen (IDs wie in Shell)
+        var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
+        var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
+        var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+        if (fid == FEED_ALL || fid == FEED_SAVED || fid == FEED_DOWNLOADED)
+        {
+            ui.ShowOsd("Can't remove virtual feeds");
+            return;
+        }
+
+        var feed = data.Feeds.FirstOrDefault(f => f.Id == fid);
+        if (feed == null) { ui.ShowOsd("Feed not found"); return; }
+
+        // Episoden dieses Feeds entfernen
+        int removedEps = data.Episodes.RemoveAll(e => e.FeedId == fid);
+
+        // Feed entfernen
+        data.Feeds.RemoveAll(f => f.Id == fid);
+
+        // persistieren
+        _ = persist();
+
+        // UI aktualisieren: Feeds neu setzen (Shell fügt virtuelle wieder oben ein)
+        ui.SetFeeds(data.Feeds);
+
+        // Episodenliste neu anwenden (für neue Feed-Auswahl)
+        ApplyList(ui, data);
+
+        ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
+    }
+
 
 
     static List<Episode> BuildCurrentList(Shell ui, AppData data)

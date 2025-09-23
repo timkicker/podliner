@@ -14,7 +14,8 @@ sealed class Shell
     Label  speedLabel   = null!;
     SolidProgressBar volBar = null!;
     Label volPctLabel   = null!;
-    
+    Label emptyHint = null!;
+
 
 
 
@@ -269,11 +270,29 @@ sealed class Shell
 
         var epHost = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         episodeList = new ListView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        
+        emptyHint = new Label("") {
+            X = Pos.Center(),
+            Y = Pos.Center(),
+            AutoSize = true,
+            Visible = false,
+            TextAlignment = TextAlignment.Centered   // <- was Center
+        };
+
+        
+// ein wenig „Accent“-Look, damit's auffällt
+        emptyHint.ColorScheme = Colors.Menu;
+
+        epHost.Add(episodeList);
+        epHost.Add(emptyHint);   // << überlagert die Liste in der Mitte
+        
         episodeList.OpenSelectedItem += _ => PlaySelected?.Invoke();
         episodeList.SelectedItemChanged += _ => {
             ShowDetailsForSelection();
             EpisodeSelectionChanged?.Invoke();
         };
+        
+        
 
         epHost.Add(episodeList);
         epHost.KeyPress      += e => { if (HandleKeys(e)) e.Handled = true; };
@@ -318,6 +337,44 @@ sealed class Shell
         RefreshListVisual(episodeList);   // << neu
         ShowDetailsForSelection();
     }
+    
+    void UpdateEmptyHint(Guid feedId)
+    {
+        var isEmpty = (_episodes?.Count ?? 0) == 0;
+
+        if (!isEmpty)
+        {
+            emptyHint.Visible = false;
+            emptyHint.Text = "";
+            return;
+        }
+
+        // Text je Feed
+        if (feedId == FEED_SAVED)
+        {
+            emptyHint.Text = "No items saved\n(:h for help)";
+        }
+        else if (feedId == FEED_DOWNLOADED)
+        {
+            emptyHint.Text = "No items downloaded\n(:h for help)";
+        }
+        else if (feedId == FEED_ALL)
+        {
+            emptyHint.Text = "No episodes yet\nAdd one with: :add <rss-url>";
+        }
+        else
+        {
+            emptyHint.Text = "No episodes in this feed";
+        }
+
+        emptyHint.Visible = true;
+
+        // sauberes Redraw
+        emptyHint.SetNeedsDisplay();
+        rightPane?.SetNeedsDisplay();
+        rightTabs?.SetNeedsDisplay();
+    }
+
 
 
     void BuildPlayerBar()
@@ -530,10 +587,12 @@ sealed class Shell
 
         var items = _episodes.Select(EpisodeRow).ToList();
         episodeList.SetSource(items);
+        
         episodeList.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
 
         RefreshListVisual(episodeList);
         ShowDetailsForSelection();
+        UpdateEmptyHint(feedId);
     }
 
 
