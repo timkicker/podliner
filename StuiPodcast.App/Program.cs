@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Serilog;
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.UI;
 using Terminal.Gui;
 
 using StuiPodcast.Core;
