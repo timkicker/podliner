@@ -22,11 +22,13 @@ public sealed class Shell
     public event Action<string>? Command;
     public event Action<string>? SearchApplied;
     public event Action? SelectedFeedChanged;
-
+    
     // ---- Konstanten / virtuelle Feeds ----
     private static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
     private static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
     private static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+    private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157"); // ⏱ History (B157 ~ "HIST")
+
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
@@ -221,7 +223,7 @@ public sealed class Shell
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
         // Feed-Spaltenmodus setzen
-        _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED);
+        _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY);
 
         // aktuelle Auswahl + Scroll behalten
         var prevId  = _episodesPane.GetSelected()?.Id;
@@ -229,7 +231,7 @@ public sealed class Shell
 
         _episodesPane.SetEpisodes(
             episodes, feedId,
-            FEED_ALL, FEED_SAVED, FEED_DOWNLOADED,
+            FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY,
             EpisodeSorter, _lastSearch, prevId
         );
 
@@ -243,6 +245,7 @@ public sealed class Shell
             _episodesPane.List.TopItem = Math.Clamp(keepTop, 0, maxTop);
         }
     }
+
 
 
     public Episode? GetSelectedEpisode() => _episodesPane.GetSelected();
@@ -628,9 +631,11 @@ public sealed class Shell
             new Feed { Id = FEED_ALL,        Title = "All Episodes" },
             new Feed { Id = FEED_SAVED,      Title = "★ Saved" },
             new Feed { Id = FEED_DOWNLOADED, Title = "⬇ Downloaded" },
+            new Feed { Id = FEED_HISTORY,    Title = "⏱ History" },
         };
         return virt.Concat(feeds ?? Enumerable.Empty<Feed>());
     }
+
 
     // ---- Help & Logs (öffentliche API unverändert) ----
     public void ShowKeysHelp() => HelpBrowserDialog.Show();

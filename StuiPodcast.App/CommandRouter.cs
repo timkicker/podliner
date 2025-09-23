@@ -252,11 +252,12 @@ static class CommandRouter
         var fid = ui.GetSelectedFeedId();
         if (fid is null) { ui.ShowOsd("No feed selected"); return; }
 
-        // Virtuelle Feeds schützen (IDs wie in Shell)
+        // Virtuelle Feeds schützen
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-        if (fid == FEED_ALL || fid == FEED_SAVED || fid == FEED_DOWNLOADED)
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
+        if (fid == FEED_ALL || fid == FEED_SAVED || fid == FEED_DOWNLOADED || fid == FEED_HISTORY)
         {
             ui.ShowOsd("Can't remove virtual feeds");
             return;
@@ -265,35 +266,26 @@ static class CommandRouter
         var feed = data.Feeds.FirstOrDefault(f => f.Id == fid);
         if (feed == null) { ui.ShowOsd("Feed not found"); return; }
 
-        // Episoden dieses Feeds entfernen
         int removedEps = data.Episodes.RemoveAll(e => e.FeedId == fid);
-
-        // Feed entfernen
         data.Feeds.RemoveAll(f => f.Id == fid);
 
-        // persistieren
         _ = persist();
 
-        // UI aktualisieren: Feeds neu setzen (Shell fügt virtuelle wieder oben ein)
         ui.SetFeeds(data.Feeds);
-
-        // Episodenliste neu anwenden (für neue Feed-Auswahl)
         ApplyList(ui, data);
 
         ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
     }
-
-
 
     static List<Episode> BuildCurrentList(Shell ui, AppData data)
     {
         var feedId = ui.GetSelectedFeedId();
         IEnumerable<Episode> baseList = data.Episodes;
 
-        // Virtuelle Feeds berücksichtigen
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
 
         if (feedId == null) return new List<Episode>();
 
@@ -301,7 +293,7 @@ static class CommandRouter
 
         if (feedId == FEED_ALL)
         {
-            // alle Episoden
+            // alles
         }
         else if (feedId == FEED_SAVED)
         {
@@ -311,16 +303,24 @@ static class CommandRouter
         {
             baseList = baseList.Where(e => e.Downloaded);
         }
+        else if (feedId == FEED_HISTORY)
+        {
+            baseList = baseList.Where(e => e.LastPlayedAt != null);
+            return baseList
+                .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
+                .ThenByDescending(e => e.LastPosMs ?? 0)
+                .ToList();
+        }
         else
         {
             baseList = baseList.Where(e => e.FeedId == feedId);
         }
 
-        // gleiche Sortierung wie in der UI (PubDate desc als Default)
         return baseList
             .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
             .ToList();
     }
+
 
     static void SelectRelative(int dir, Shell ui, AppData data, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
     {
@@ -399,21 +399,34 @@ static class CommandRouter
 
         IEnumerable<Episode> baseList = data.Episodes;
 
-        // Virtuelle Feeds berücksichtigen (IDs aus Shell bekannt halten)
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
 
         if (feedId == FEED_SAVED)
             baseList = baseList.Where(e => e.Saved);
         else if (feedId == FEED_DOWNLOADED)
             baseList = baseList.Where(e => e.Downloaded);
+        else if (feedId == FEED_HISTORY)
+            baseList = baseList.Where(e => e.LastPlayedAt != null);
         else if (feedId != FEED_ALL)
             baseList = baseList.Where(e => e.FeedId == feedId);
 
-        var eps = baseList
-            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-            .ToList();
+        List<Episode> eps;
+        if (feedId == FEED_HISTORY)
+        {
+            eps = baseList
+                .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
+                .ThenByDescending(e => e.LastPosMs ?? 0)
+                .ToList();
+        }
+        else
+        {
+            eps = baseList
+                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                .ToList();
+        }
 
         if (eps.Count == 0) return;
 
@@ -438,6 +451,7 @@ static class CommandRouter
             }
         }
     }
+
 
     static void SaveToggle(string arg, Shell ui, AppData data, Func<Task> persist)
     {
