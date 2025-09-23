@@ -1219,112 +1219,157 @@ static string TruncateTo(string? s, int max)
 {
     var dlg = new Dialog("Help — Keys & Commands", 100, 32);
 
-    var tabs = new TabView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    var tabs = new TabView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
     dlg.Add(tabs);
 
-    // ------- KEYS TAB -------
-var keysHost   = new View() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
-var keyList    = new ListView()    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
-var keyDetails = new TextView()    { X = Pos.Right(keyList)+2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
+    // ---------------- KEYS TAB ----------------
+    var keysHost   = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+    var keyList    = new ListView    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
+    var keyDetails = new TextView    { X = Pos.Right(keyList) + 2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
 
-keysHost.Add(new Label("Search:"){ X=1, Y=0 }, keySearch, keyList, keyDetails);
-tabs.AddTab(new TabView.Tab("Keys", keysHost), true);
+    keysHost.Add(new Label("Search:") { X = 1, Y = 0 }, keySearch, keyList, keyDetails);
 
-List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
+    // ---------------- COMMANDS TAB ----------------
+    var cmdHost    = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+    var cmdList    = new ListView    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
+    var cmdDetails = new TextView    { X = Pos.Right(cmdList) + 2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
 
-// define AFTER controls exist, as a closure
-Action refreshKeyList = () =>
-{
-    var q = keySearch.Text.ToString() ?? "";
-    var filtered = string.IsNullOrWhiteSpace(q)
-        ? keyData
-        : keyData.Where(k =>
-            k.Key.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            k.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            (k.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+    cmdHost.Add(new Label("Search:") { X = 1, Y = 0 }, cmdSearch, cmdList, cmdDetails);
 
-    keyList.SetSource(filtered.Select(k => k.Key).ToList());
-    keyList.SelectedItem = 0;
-    keyList.SetNeedsDisplay();
-    keysHost.SetNeedsDisplay();
-};
+    // Tabs (now that both hosts exist)
+    var keysTab = new TabView.Tab("Keys", keysHost);
+    var cmdsTab = new TabView.Tab("Commands", cmdHost);
+    tabs.AddTab(keysTab, true);
+    tabs.AddTab(cmdsTab, false);
 
-// refresh on typing (portable across TUI versions)
-keySearch.KeyPress += (View.KeyEventEventArgs _) =>
-{
-    Application.MainLoop.AddIdle(() => { refreshKeyList(); return false; });
-};
+    // ---------- helpers ----------
+    static int Clamp(int v, int lo, int hi) => Math.Max(lo, Math.Min(hi, v));
 
-keyList.SelectedItemChanged += _ =>
-{
-    var src = keyList.Source?.ToList() ?? new List<object>();
-    var idx = Math.Clamp(keyList.SelectedItem, 0, src.Count - 1);
-    if (src.Count == 0) { keyDetails.Text = ""; return; }
+    void MoveList(ListView lv, int delta)
+    {
+        var count = lv.Source?.Count ?? 0;
+        if (count <= 0) return;
+        lv.SelectedItem = Clamp(lv.SelectedItem + delta, 0, count - 1);
+    }
+    void GoTop(ListView lv)    { var c = lv.Source?.Count ?? 0; if (c > 0) lv.SelectedItem = 0; }
+    void GoBottom(ListView lv) { var c = lv.Source?.Count ?? 0; if (c > 0) lv.SelectedItem = c - 1; }
 
-    var name  = src[idx].ToString();
-    var item  = HelpCatalog.Keys.FirstOrDefault(k => k.Key == name) ?? keyData.First();
-    var notes = string.IsNullOrWhiteSpace(item.Notes) ? "" : $"\n\nNotes: {item.Notes}";
-    keyDetails.Text = $"{item.Key}\n\n{item.Description}{notes}";
-};
+    void FocusKeysTab() { tabs.SelectedTab = keysTab; keyList.SetFocus(); }
+    void FocusCmdsTab() { tabs.SelectedTab = cmdsTab; cmdList.SetFocus(); }
 
-// ------- COMMANDS TAB -------
-var cmdHost    = new View() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
-var cmdList    = new ListView()    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
-var cmdDetails = new TextView()    { X = Pos.Right(cmdList)+2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
+    // ---------- data + filtering ----------
+    List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
+    List<CmdHelp> cmdData = HelpCatalog.Commands.ToList();
 
-cmdHost.Add(new Label("Search:"){ X=1, Y=0 }, cmdSearch, cmdList, cmdDetails);
-tabs.AddTab(new TabView.Tab("Commands", cmdHost), false);
+    Action refreshKeyList = () =>
+    {
+        var q = keySearch.Text.ToString() ?? "";
+        var filtered = string.IsNullOrWhiteSpace(q)
+            ? keyData
+            : keyData.Where(k =>
+                    k.Key.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    k.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    (k.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
+                .ToList();
 
-List<CmdHelp> cmdData = HelpCatalog.Commands.ToList();
+        keyList.SetSource(filtered.Select(k => k.Key).ToList());
+        keyList.SelectedItem = 0;
+        keyList.SetNeedsDisplay();
+        keysHost.SetNeedsDisplay();
+    };
 
-Action refreshCmdList = () =>
-{
-    var q = cmdSearch.Text.ToString() ?? "";
-    var filtered = string.IsNullOrWhiteSpace(q)
-        ? cmdData
-        : cmdData.Where(c =>
-            c.Command.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            c.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            (c.Args?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            (c.Aliases?.Any(a => a.Contains(q, StringComparison.OrdinalIgnoreCase)) ?? false)).ToList();
+    Action refreshCmdList = () =>
+    {
+        var q = cmdSearch.Text.ToString() ?? "";
+        var filtered = string.IsNullOrWhiteSpace(q)
+            ? cmdData
+            : cmdData.Where(c =>
+                    c.Command.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    c.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    (c.Args?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (c.Aliases?.Any(a => a.Contains(q, StringComparison.OrdinalIgnoreCase)) ?? false))
+                .ToList();
 
-    cmdList.SetSource(filtered.Select(c => c.Command).ToList());
-    cmdList.SelectedItem = 0;
-    cmdList.SetNeedsDisplay();
-    cmdHost.SetNeedsDisplay();
-};
+        cmdList.SetSource(filtered.Select(c => c.Command).ToList());
+        cmdList.SelectedItem = 0;
+        cmdList.SetNeedsDisplay();
+        cmdHost.SetNeedsDisplay();
+    };
 
-cmdSearch.KeyPress += (View.KeyEventEventArgs _) =>
-{
-    Application.MainLoop.AddIdle(() => { refreshCmdList(); return false; });
-};
+    // refresh on typing (portable across TUI versions)
+    keySearch.KeyPress += (View.KeyEventEventArgs _) =>
+        Application.MainLoop.AddIdle(() => { refreshKeyList(); return false; });
+    cmdSearch.KeyPress += (View.KeyEventEventArgs _) =>
+        Application.MainLoop.AddIdle(() => { refreshCmdList(); return false; });
 
-cmdList.SelectedItemChanged += _ =>
-{
-    var src = cmdList.Source?.ToList() ?? new List<object>();
-    var idx = Math.Clamp(cmdList.SelectedItem, 0, src.Count - 1);
-    if (src.Count == 0) { cmdDetails.Text = ""; return; }
+    keyList.SelectedItemChanged += _ =>
+    {
+        var src = keyList.Source?.ToList() ?? new List<object>();
+        var idx = Math.Clamp(keyList.SelectedItem, 0, src.Count - 1);
+        if (src.Count == 0) { keyDetails.Text = ""; return; }
 
-    var name = src[idx].ToString();
-    var item = HelpCatalog.Commands.FirstOrDefault(c => c.Command == name) ?? cmdData.First();
+        var name  = src[idx].ToString();
+        var item  = HelpCatalog.Keys.FirstOrDefault(k => k.Key == name) ?? keyData.First();
+        var notes = string.IsNullOrWhiteSpace(item.Notes) ? "" : $"\n\nNotes: {item.Notes}";
+        keyDetails.Text = $"{item.Key}\n\n{item.Description}{notes}";
+    };
 
-    string aliases  = (item.Aliases is { Length: >0 }) ? $"Aliases: {string.Join(", ", item.Aliases)}\n" : "";
-    string args     = string.IsNullOrWhiteSpace(item.Args) ? "" : $"Args: {item.Args}\n";
-    string examples = (item.Examples is { Length: >0 }) ? $"Examples:\n  - {string.Join("\n  - ", item.Examples)}\n" : "";
+    cmdList.SelectedItemChanged += _ =>
+    {
+        var src = cmdList.Source?.ToList() ?? new List<object>();
+        var idx = Math.Clamp(cmdList.SelectedItem, 0, src.Count - 1);
+        if (src.Count == 0) { cmdDetails.Text = ""; return; }
 
-    cmdDetails.Text = $"{item.Command}\n\n{item.Description}\n\n{aliases}{args}{examples}".TrimEnd();
-};
+        var name = src[idx].ToString();
+        var item = HelpCatalog.Commands.FirstOrDefault(c => c.Command == name) ?? cmdData.First();
 
-// initial fill AFTER everything is wired
-refreshKeyList();
-refreshCmdList();
+        string aliases  = (item.Aliases is { Length: > 0 }) ? $"Aliases: {string.Join(", ", item.Aliases)}\n" : "";
+        string args     = string.IsNullOrWhiteSpace(item.Args) ? "" : $"Args: {item.Args}\n";
+        string examples = (item.Examples is { Length: > 0 }) ? $"Examples:\n  - {string.Join("\n  - ", item.Examples)}\n" : "";
 
+        cmdDetails.Text = $"{item.Command}\n\n{item.Description}\n\n{aliases}{args}{examples}".TrimEnd();
+    };
 
-    // close keys
+    // ---------- Vim-style navigation ----------
+    keyList.KeyPress += e =>
+    {
+        if (keySearch.HasFocus) return;
+        var key = e.KeyEvent.Key;
+        var ch  = e.KeyEvent.KeyValue;
+
+        if (ch == 'j' || key == Key.CursorDown) { MoveList(keyList, +1); e.Handled = true; return; }
+        if (ch == 'k' || key == Key.CursorUp)   { MoveList(keyList, -1); e.Handled = true; return; }
+        if (ch == 'g' && (key & Key.ShiftMask) == 0) { GoTop(keyList); e.Handled = true; return; }
+        if (ch == 'G') { GoBottom(keyList); e.Handled = true; return; }
+        if (ch == '/') { keySearch.SetFocus(); e.Handled = true; return; }
+        if (ch == 'h') { FocusKeysTab(); e.Handled = true; return; }
+        if (ch == 'l') { FocusCmdsTab(); e.Handled = true; return; }
+    };
+
+    cmdList.KeyPress += e =>
+    {
+        if (cmdSearch.HasFocus) return;
+        var key = e.KeyEvent.Key;
+        var ch  = e.KeyEvent.KeyValue;
+
+        if (ch == 'j' || key == Key.CursorDown) { MoveList(cmdList, +1); e.Handled = true; return; }
+        if (ch == 'k' || key == Key.CursorUp)   { MoveList(cmdList, -1); e.Handled = true; return; }
+        if (ch == 'g' && (key & Key.ShiftMask) == 0) { GoTop(cmdList); e.Handled = true; return; }
+        if (ch == 'G') { GoBottom(cmdList); e.Handled = true; return; }
+        if (ch == '/') { cmdSearch.SetFocus(); e.Handled = true; return; }
+        if (ch == 'h') { FocusKeysTab(); e.Handled = true; return; }
+        if (ch == 'l') { FocusCmdsTab(); e.Handled = true; return; }
+    };
+
+    // Also allow h/l at dialog level in case focus is on a TextView, etc.
     dlg.KeyPress += e =>
     {
+        var ch = e.KeyEvent.KeyValue;
+        if (ch == 'h') { FocusKeysTab(); e.Handled = true; return; }
+        if (ch == 'l') { FocusCmdsTab(); e.Handled = true; return; }
+
         if (e.KeyEvent.Key == Key.Esc || e.KeyEvent.Key == Key.F12)
         {
             Application.RequestStop();
@@ -1332,7 +1377,12 @@ refreshCmdList();
         }
     };
 
+    // initial fill
+    refreshKeyList();
+    refreshCmdList();
+
     Application.Run(dlg);
 }
+
 
 }
