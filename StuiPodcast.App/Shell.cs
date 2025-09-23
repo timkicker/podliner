@@ -644,36 +644,44 @@ Application.Top.Add(menu);
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
-        // Flag für Podcast-Spalte (virtuelle Feeds)
+        // show right-side feed column for virtual feeds
         _showFeedColumn = (feedId == FEED_ALL || feedId == FEED_SAVED || feedId == FEED_DOWNLOADED);
 
         var prevId = GetSelectedEpisode()?.Id;
 
         IEnumerable<Episode> src = episodes ?? Enumerable.Empty<Episode>();
 
-        // Feed-Filter
-        if (feedId == FEED_ALL)
-        {
-            // alle Episoden
-        }
-        else if (feedId == FEED_SAVED)
-        {
+        // ---- feed filter (as before) ----
+        if (feedId == FEED_ALL) {
+            // no extra filter
+        } else if (feedId == FEED_SAVED) {
             src = src.Where(IsSaved);
-        }
-        else if (feedId == FEED_DOWNLOADED)
-        {
+        } else if (feedId == FEED_DOWNLOADED) {
             src = src.Where(IsDownloaded);
-        }
-        else
-        {
+        } else {
             src = src.Where(e => e.FeedId == feedId);
         }
 
-        // --- Sort anwenden (vom Program geliefert) ---
+        // ---- NEW: apply current search query locally ----
+        if (!string.IsNullOrWhiteSpace(_lastSearch))
+        {
+            var q = _lastSearch!;
+            src = src.Where(e =>
+                (!string.IsNullOrEmpty(e.Title) &&
+                 e.Title.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                (!string.IsNullOrEmpty(e.DescriptionText) &&
+                 e.DescriptionText.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                // also match feed name when on "All"/virtual feeds
+                (_showFeedColumn && _feeds.FirstOrDefault(f => f.Id == e.FeedId)?
+                    .Title?.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
+            );
+        }
+
+        // ---- sort (as before) ----
         if (EpisodeSorter != null)
             src = EpisodeSorter(src);
         else
-            src = src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue); // Fallback wie bisher
+            src = src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
 
         _episodes = src.ToList();
 
@@ -686,8 +694,16 @@ Application.Top.Add(menu);
 
         var items = _episodes.Select(EpisodeRow).ToList();
         episodeList.SetSource(items);
-        
+
+        // --- FIX: make sure new data is actually visible now ---
         episodeList.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
+        episodeList.TopItem      = 0;                             // reset viewport
+        episodeList.SetNeedsDisplay();                            // force repaint
+        episodeList.SuperView?.SetNeedsDisplay();
+        rightTabs?.SetNeedsDisplay();
+        rightPane?.SetNeedsDisplay();
+        Application.Top?.SetNeedsDisplay();
+        // -------------------------------------------------------
 
         RefreshListVisual(episodeList);
         ShowDetailsForSelection();
@@ -708,8 +724,18 @@ Application.Top.Add(menu);
         var sel = Math.Clamp(episodeList.SelectedItem, 0, Math.Max(0, (_episodes.Count - 1)));
         var items = _episodes.Select(EpisodeRow).ToList();
         episodeList.SetSource(items);
+
+        // --- FIX: same as above, but keep selection if possible ---
         episodeList.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
-        RefreshListVisual(episodeList); // nutzt deine Helper aus dem letzten Fix
+        episodeList.TopItem      = 0;
+        episodeList.SetNeedsDisplay();
+        episodeList.SuperView?.SetNeedsDisplay();
+        rightTabs?.SetNeedsDisplay();
+        rightPane?.SetNeedsDisplay();
+        Application.Top?.SetNeedsDisplay();
+        // ----------------------------------------------------------
+
+        RefreshListVisual(episodeList);
     }
 
     string EpisodeRow(Episode e)
@@ -1047,7 +1073,11 @@ static string TruncateTo(string? s, int max)
                 _lastSearch = q;
                 searchBox!.SuperView?.Remove(searchBox);
                 searchBox = null;
+
+                // Notify app logic AND force a refresh for the currently selected feed.
                 SearchApplied?.Invoke(q);
+                SelectedFeedChanged?.Invoke();   // <-- ensures immediate reload in All Episodes
+
                 k.Handled = true;
             }
             else if (k.KeyEvent.Key == Key.Esc)
@@ -1172,7 +1202,12 @@ static string TruncateTo(string? s, int max)
         return true;
     }
 
-    if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch)) { SearchApplied?.Invoke(_lastSearch!); return true; }
+
+    if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch)) {
+        SearchApplied?.Invoke(_lastSearch!);
+        SelectedFeedChanged?.Invoke();   // <-- force refresh now
+        return true;
+    }
 
     return false;
 }
