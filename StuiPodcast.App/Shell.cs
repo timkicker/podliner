@@ -985,8 +985,47 @@ static string TruncateTo(string? s, int max)
     if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
 
     // --- aktive Pane & Bewegung ---
-    if (key == (Key)('h')) { FocusPane(Pane.Feeds);    return true; }
-    if (key == (Key)('l')) { FocusPane(Pane.Episodes); return true; }
+    // --- active pane & movement ---
+// Vim-style left/right cycling across Feeds <-> Episodes <-> Details
+    if (key == (Key)('h'))
+    {
+        // If we're on Details tab, go back to Episodes
+        if (rightTabs?.SelectedTab?.Text.ToString() == "Details")
+        {
+            rightTabs.SelectedTab = rightTabs.Tabs.First(); // "Episodes"
+            episodeList.SetFocus();
+        }
+        else
+        {
+            // Otherwise go left to Feeds
+            FocusPane(Pane.Feeds);
+        }
+        return true;
+    }
+
+    if (key == (Key)('l'))
+    {
+        // If we're in Feeds, go to Episodes
+        if (_activePane == Pane.Feeds)
+        {
+            FocusPane(Pane.Episodes);
+        }
+        else
+        {
+            // We're already in Episodes area: go right to Details
+            if (rightTabs?.SelectedTab?.Text.ToString() != "Details")
+            {
+                rightTabs.SelectedTab = rightTabs.Tabs.Last(); // "Details"
+                detailsView.SetFocus();
+            }
+            else
+            {
+                // (Optional) if already on Details and user presses 'l' again, stay.
+            }
+        }
+        return true;
+    }
+
     if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
     if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
 
