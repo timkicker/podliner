@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using StuiPodcast.App;
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
@@ -862,30 +863,7 @@ static string TruncateTo(string? s, int max)
         if (progress != null) progress.ColorScheme = MakeProgressScheme();
     }
 
-    public void ShowKeysHelp()
-    {
-        // Shell.cs – ShowKeysHelp() (Ausschnitt)
-        MessageBox.Query("Keys",
-            @"Vim-like keys:
-  m mark played/unplayed
-  u toggle unplayed filter
-  h/l focus pane     j/k move
-  Enter play
-  / search (Enter apply, n repeat)
-  : commands (:add URL, :refresh, :q, :h, :logs, :seek, :vol, :speed, :filter)
-  J/K next/prev unplayed (play)
-Playback:
-  Space toggle
-  ←/→ -10s/+10s   H/L -60s/+60s
-  g/G start/end
-  -/+ volume
-  [/] slower/faster (= reset 1.0×; 1/2/3 presets)
-Misc:
-  F12 logs
-  t theme toggle
-  q quit", "OK");
-
-    }
+    public void ShowKeysHelp() => ShowHelpBrowser();
 
     public void ShowError(string title, string msg) => MessageBox.ErrorQuery(title, msg, "OK");
 
@@ -1236,4 +1214,125 @@ Misc:
         mainWin?.SetNeedsDisplay();
         Application.Top?.SetNeedsDisplay();
     }
+    
+    public void ShowHelpBrowser()
+{
+    var dlg = new Dialog("Help — Keys & Commands", 100, 32);
+
+    var tabs = new TabView() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+    dlg.Add(tabs);
+
+    // ------- KEYS TAB -------
+var keysHost   = new View() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+var keyList    = new ListView()    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
+var keyDetails = new TextView()    { X = Pos.Right(keyList)+2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
+
+keysHost.Add(new Label("Search:"){ X=1, Y=0 }, keySearch, keyList, keyDetails);
+tabs.AddTab(new TabView.Tab("Keys", keysHost), true);
+
+List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
+
+// define AFTER controls exist, as a closure
+Action refreshKeyList = () =>
+{
+    var q = keySearch.Text.ToString() ?? "";
+    var filtered = string.IsNullOrWhiteSpace(q)
+        ? keyData
+        : keyData.Where(k =>
+            k.Key.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            k.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            (k.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    keyList.SetSource(filtered.Select(k => k.Key).ToList());
+    keyList.SelectedItem = 0;
+    keyList.SetNeedsDisplay();
+    keysHost.SetNeedsDisplay();
+};
+
+// refresh on typing (portable across TUI versions)
+keySearch.KeyPress += (View.KeyEventEventArgs _) =>
+{
+    Application.MainLoop.AddIdle(() => { refreshKeyList(); return false; });
+};
+
+keyList.SelectedItemChanged += _ =>
+{
+    var src = keyList.Source?.ToList() ?? new List<object>();
+    var idx = Math.Clamp(keyList.SelectedItem, 0, src.Count - 1);
+    if (src.Count == 0) { keyDetails.Text = ""; return; }
+
+    var name  = src[idx].ToString();
+    var item  = HelpCatalog.Keys.FirstOrDefault(k => k.Key == name) ?? keyData.First();
+    var notes = string.IsNullOrWhiteSpace(item.Notes) ? "" : $"\n\nNotes: {item.Notes}";
+    keyDetails.Text = $"{item.Key}\n\n{item.Description}{notes}";
+};
+
+// ------- COMMANDS TAB -------
+var cmdHost    = new View() { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+var cmdList    = new ListView()    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
+var cmdDetails = new TextView()    { X = Pos.Right(cmdList)+2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
+
+cmdHost.Add(new Label("Search:"){ X=1, Y=0 }, cmdSearch, cmdList, cmdDetails);
+tabs.AddTab(new TabView.Tab("Commands", cmdHost), false);
+
+List<CmdHelp> cmdData = HelpCatalog.Commands.ToList();
+
+Action refreshCmdList = () =>
+{
+    var q = cmdSearch.Text.ToString() ?? "";
+    var filtered = string.IsNullOrWhiteSpace(q)
+        ? cmdData
+        : cmdData.Where(c =>
+            c.Command.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            c.Description.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            (c.Args?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            (c.Aliases?.Any(a => a.Contains(q, StringComparison.OrdinalIgnoreCase)) ?? false)).ToList();
+
+    cmdList.SetSource(filtered.Select(c => c.Command).ToList());
+    cmdList.SelectedItem = 0;
+    cmdList.SetNeedsDisplay();
+    cmdHost.SetNeedsDisplay();
+};
+
+cmdSearch.KeyPress += (View.KeyEventEventArgs _) =>
+{
+    Application.MainLoop.AddIdle(() => { refreshCmdList(); return false; });
+};
+
+cmdList.SelectedItemChanged += _ =>
+{
+    var src = cmdList.Source?.ToList() ?? new List<object>();
+    var idx = Math.Clamp(cmdList.SelectedItem, 0, src.Count - 1);
+    if (src.Count == 0) { cmdDetails.Text = ""; return; }
+
+    var name = src[idx].ToString();
+    var item = HelpCatalog.Commands.FirstOrDefault(c => c.Command == name) ?? cmdData.First();
+
+    string aliases  = (item.Aliases is { Length: >0 }) ? $"Aliases: {string.Join(", ", item.Aliases)}\n" : "";
+    string args     = string.IsNullOrWhiteSpace(item.Args) ? "" : $"Args: {item.Args}\n";
+    string examples = (item.Examples is { Length: >0 }) ? $"Examples:\n  - {string.Join("\n  - ", item.Examples)}\n" : "";
+
+    cmdDetails.Text = $"{item.Command}\n\n{item.Description}\n\n{aliases}{args}{examples}".TrimEnd();
+};
+
+// initial fill AFTER everything is wired
+refreshKeyList();
+refreshCmdList();
+
+
+    // close keys
+    dlg.KeyPress += e =>
+    {
+        if (e.KeyEvent.Key == Key.Esc || e.KeyEvent.Key == Key.F12)
+        {
+            Application.RequestStop();
+            e.Handled = true;
+        }
+    };
+
+    Application.Run(dlg);
+}
+
 }
