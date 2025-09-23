@@ -400,109 +400,97 @@ static class CommandRouter
     // CommandRouter.cs
 // Neue öffentliche Hilfsmethode komplett einfügen (in die CommandRouter-Klasse)
 
-// CommandRouter.cs
-public static bool HandleQueue(string raw, Shell ui, AppData data, Func<Task> persist)
-{
-    if (string.IsNullOrWhiteSpace(raw)) return false;
-    var cmd = raw.Trim();
-    if (!cmd.StartsWith(":queue", StringComparison.OrdinalIgnoreCase))
-        return false;
 
-    // helper: UI syncen (Order + Liste refreshen)
-    void SyncUi()
+
+    public static bool HandleQueue(string cmd, Shell ui, AppData data, Func<Task> saveAsync)
+{
+    if (string.IsNullOrWhiteSpace(cmd)) return false;
+    var t = cmd.Trim();
+
+    // Nur Kommandos, die mit ":queue" beginnen, werden hier behandelt
+    if (!t.StartsWith(":queue", StringComparison.OrdinalIgnoreCase) &&
+        !t.Equals("q", StringComparison.OrdinalIgnoreCase)) return false;
+
+    // Kurzformen:
+    if (t.Equals("q", StringComparison.OrdinalIgnoreCase)) t = ":queue add";
+
+    string[] parts = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    string sub = parts.Length >= 2 ? parts[1].ToLowerInvariant() : "add";
+
+    // Helpers
+    void Refresh()
     {
-        ui.SetQueueOrder(data.Queue);                // Reihenfolge für Queue-Tab
-        ui.RefreshEpisodesForSelectedFeed(data.Episodes); // aktuelle Ansicht neu befüllen
+        ui.SetQueueOrder(data.Queue);
+        ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+    }
+    async Task Persist()
+    {
+        try { await saveAsync(); } catch { }
     }
 
-    var rest  = cmd.Length > 6 ? cmd[6..].Trim() : "";
-    var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    var sub   = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+    // Aktuell selektierte Episode
+    var ep = ui.GetSelectedEpisode();
 
     switch (sub)
     {
         case "add":
-        {
-            Episode? target = null;
-
-            // Optionaler Index in der aktuellen Liste
-            if (parts.Length >= 2 && int.TryParse(parts[1], out var idxFromList))
-            {
-                var fid = ui.GetSelectedFeedId();
-                if (fid != null)
-                {
-                    var list = data.Episodes.Where(e => e.FeedId == fid.Value)
-                                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                                            .ToList();
-                    if (idxFromList >= 0 && idxFromList < list.Count)
-                        target = list[idxFromList];
-                }
-            }
-
-            target ??= ui.GetSelectedEpisode();
-            if (target == null) { ui.ShowOsd("queue: nothing to add"); return true; }
-
-            if (!data.Queue.Contains(target.Id))
-            {
-                data.Queue.Add(target.Id);
-                _ = persist();
-                ui.ShowOsd($"queued: {target.Title}");
-                SyncUi();
-            }
-            else
-            {
-                ui.ShowOsd("already in queue");
-            }
+        case "toggle":
+            if (ep == null) return true;
+            if (data.Queue.Contains(ep.Id)) data.Queue.Remove(ep.Id);
+            else data.Queue.Add(ep.Id);
+            Refresh();
+            _ = Persist();
             return true;
-        }
 
-        case "remove":
         case "rm":
-        {
-            Episode? target = ui.GetSelectedEpisode();
-
-            // Optional: explicit GUID entfernen
-            if (parts.Length >= 2 && Guid.TryParse(parts[1], out var gid))
-                target = data.Episodes.FirstOrDefault(e => e.Id == gid);
-
-            if (target == null) { ui.ShowOsd("queue: nothing to remove"); return true; }
-
-            var removed = data.Queue.Remove(target.Id);
-            if (!removed) { ui.ShowOsd("not in queue"); return true; }
-
-            _ = persist();
-            ui.ShowOsd($"dequeued: {target.Title}");
-            SyncUi();
+        case "remove":
+            if (ep == null) return true;
+            data.Queue.Remove(ep.Id);
+            Refresh();
+            _ = Persist();
             return true;
-        }
 
         case "clear":
-        {
-            var n = data.Queue.Count;
             data.Queue.Clear();
-            _ = persist();
-            ui.ShowOsd($"queue cleared ({n})");
-            SyncUi();
+            Refresh();
+            _ = Persist();
             return true;
-        }
 
-        case "show":
-        {
-            if (data.Queue.Count == 0) { ui.ShowOsd("queue: (empty)"); return true; }
+        case "move":
+            {
+                // :queue move <up|down|top|bottom>
+                var dir = (parts.Length >= 3 ? parts[2].ToLowerInvariant() : "down");
+                var sel = ui.GetSelectedEpisode();
+                if (sel == null) return true;
 
-            var names = data.Queue
-                .Select(id => data.Episodes.FirstOrDefault(e => e.Id == id)?.Title ?? id.ToString("N")[..8])
-                .Take(6);
-            ui.ShowOsd("queue → " + string.Join(" | ", names));
-            // Anzeige reicht; kein Refresh nötig
-            return true;
-        }
+                int idx = data.Queue.FindIndex(id => id == sel.Id);
+                if (idx < 0) return true; // Selektion ist kein Queue-Item
+
+                int last = data.Queue.Count - 1;
+                int target = idx;
+                if (dir == "up")      target = Math.Max(0, idx - 1);
+                else if (dir == "down")   target = Math.Min(last, idx + 1);
+                else if (dir == "top")    target = 0;
+                else if (dir == "bottom") target = last;
+
+                if (target != idx)
+                {
+                    var id = data.Queue[idx];
+                    data.Queue.RemoveAt(idx);
+                    data.Queue.Insert(target, id);
+                    Refresh();
+                    _ = Persist();
+                    ui.ShowOsd(target < idx ? "Moved ↑" : "Moved ↓");
+                }
+                return true;
+            }
 
         default:
-            ui.ShowOsd("queue: add [idx], remove|rm [guid], clear, show");
+            // Unbekannt → ignorieren, aber als "behandelt" zählen, damit es nicht woanders landet
             return true;
     }
 }
+
 
 
 

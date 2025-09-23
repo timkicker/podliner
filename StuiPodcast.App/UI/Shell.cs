@@ -463,95 +463,107 @@ public sealed class Shell
         }
     }
 
-
     private bool HandleKeys(View.KeyEventEventArgs e)
+{
+    var key = e.KeyEvent.Key;
+    var kv  = e.KeyEvent.KeyValue;
+
+    // Ctrl-C/V/X unterdrücken (Terminal.Gui kopiert sonst intern)
+    if ((key & Key.CtrlMask) != 0)
     {
-        var key = e.KeyEvent.Key;
-        var kv  = e.KeyEvent.KeyValue;
-
-        if ((key & Key.CtrlMask) != 0)
-        {
-            var baseKey = key & ~Key.CtrlMask;
-            if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
-        }
-
-        if (kv == 'm' || kv == 'M') { TogglePlayedRequested?.Invoke(); return true; }
-        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
-        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
-        if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
-        if (kv == 'u' || kv == 'U') { Command?.Invoke(":filter toggle"); return true; }
-
-        if (BaseKey(key) == Key.J && Has(key, Key.ShiftMask)) { JumpToUnplayed(+1); return true; }
-        if (BaseKey(key) == Key.K && Has(key, Key.ShiftMask)) { JumpToUnplayed(-1); return true; }
-        if (kv == 'J') { JumpToUnplayed(+1); return true; }
-        if (kv == 'K') { JumpToUnplayed(-1); return true; }
-
-        if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
-        if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
-
-        // pane cycle / details
-        if (key == (Key)('h'))
-        {
-            if (_episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
-            { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); }
-            else FocusPane(Pane.Feeds);
-            return true;
-        }
-        if (key == (Key)('l'))
-        {
-            if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
-            else
-            {
-                if (_episodesPane.Tabs.SelectedTab?.Text.ToString() != "Details")
-                { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); }
-            }
-            return true;
-        }
-
-        if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
-        if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
-
-        if (kv == 'i' || kv == 'I') { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); return true; }
-        if (key == Key.Esc && _episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
-        { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); return true; }
-
-        if (key == Key.Space) { Command?.Invoke(":toggle"); return true; }
-        if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
-        if (key == Key.CursorRight|| key == (Key)('L')) { Command?.Invoke(":seek +10"); return true; }
-        if (kv == 'H') { Command?.Invoke(":seek -60"); return true; }
-        if (kv == 'L') { Command?.Invoke(":seek +60"); return true; }
-
-        if (kv == 'g') { Command?.Invoke(":seek 0:00"); return true; }
-        if (kv == 'G') { Command?.Invoke(":seek 100%"); return true; }
-
-        if (key == (Key)('-')) { Command?.Invoke(":vol -5"); return true; }
-        if (key == (Key)('+')) { Command?.Invoke(":vol +5"); return true; }
-
-        if (key == (Key)('[')) { Command?.Invoke(":speed -0.1"); return true; }
-        if (key == (Key)(']')) { Command?.Invoke(":speed +0.1"); return true; }
-        if (key == (Key)('=')) { Command?.Invoke(":speed 1.0"); return true; }
-        if (kv == '1') { Command?.Invoke(":speed 1.0");  return true; }
-        if (kv == '2') { Command?.Invoke(":speed 1.25"); return true; }
-        if (kv == '3') { Command?.Invoke(":speed 1.5");  return true; }
-
-        if (kv == 'd' || kv == 'D') { Command?.Invoke(":dl toggle"); return true; }
-
-        if (key == Key.Enter)
-        {
-            if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
-            else if (_episodesPane.Tabs.SelectedTab?.Text.ToString() != "Details") PlaySelected?.Invoke();
-            return true;
-        }
-
-        if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch))
-        {
-            SearchApplied?.Invoke(_lastSearch!);
-            SelectedFeedChanged?.Invoke();
-            return true;
-        }
-
-        return false;
+        var baseKey = key & ~Key.CtrlMask;
+        if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
     }
+
+    // --- Queue-Reorder: Terminal.Gui sendet bei Shift-J/K schlicht 'J'/'K' ---
+    bool inQueue = GetSelectedFeedId() is Guid fid && fid == QueueFeedId;
+    if (kv == 'J')
+    {
+        if (inQueue) { Command?.Invoke(":queue move down"); return true; }
+        JumpToUnplayed(+1); return true;
+    }
+    if (kv == 'K')
+    {
+        if (inQueue) { Command?.Invoke(":queue move up"); return true; }
+        JumpToUnplayed(-1); return true;
+    }
+    // -------------------------------------------------------------------------
+
+    if (kv == 'm' || kv == 'M') { TogglePlayedRequested?.Invoke(); return true; }
+    if (key == Key.F12) { ShowLogsOverlay(500); return true; }
+    if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
+    if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
+    if (kv == 'u' || kv == 'U') { Command?.Invoke(":filter toggle"); return true; }
+
+    if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
+    if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
+
+    // pane cycle / details
+    if (key == (Key)('h'))
+    {
+        if (_episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
+        { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); }
+        else FocusPane(Pane.Feeds);
+        return true;
+    }
+    if (key == (Key)('l'))
+    {
+        if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
+        else
+        {
+            if (_episodesPane.Tabs.SelectedTab?.Text.ToString() != "Details")
+            { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); }
+        }
+        return true;
+    }
+
+    if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
+    if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
+
+    if (kv == 'i' || kv == 'I') { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); return true; }
+    if (key == Key.Esc && _episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
+    { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); return true; }
+
+    if (key == Key.Space) { Command?.Invoke(":toggle"); return true; }
+    if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
+    if (key == Key.CursorRight|| key == (Key)('L')) { Command?.Invoke(":seek +10"); return true; }
+    if (kv == 'H') { Command?.Invoke(":seek -60"); return true; }
+    if (kv == 'L') { Command?.Invoke(":seek +60"); return true; }
+
+    if (kv == 'g') { Command?.Invoke(":seek 0:00"); return true; }
+    if (kv == 'G') { Command?.Invoke(":seek 100%"); return true; }
+
+    if (key == (Key)('-')) { Command?.Invoke(":vol -5"); return true; }
+    if (key == (Key)('+')) { Command?.Invoke(":vol +5"); return true; }
+
+    if (key == (Key)('[')) { Command?.Invoke(":speed -0.1"); return true; }
+    if (key == (Key)(']')) { Command?.Invoke(":speed +0.1"); return true; }
+    if (key == (Key)('=')) { Command?.Invoke(":speed 1.0"); return true; }
+    if (kv == '1') { Command?.Invoke(":speed 1.0");  return true; }
+    if (kv == '2') { Command?.Invoke(":speed 1.25"); return true; }
+    if (kv == '3') { Command?.Invoke(":speed 1.5");  return true; }
+
+    if (kv == 'd' || kv == 'D') { Command?.Invoke(":dl toggle"); return true; }
+
+    if (key == Key.Enter)
+    {
+        if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
+        else if (_episodesPane.Tabs.SelectedTab?.Text.ToString() != "Details") PlaySelected?.Invoke();
+        return true;
+    }
+
+    if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch))
+    {
+        SearchApplied?.Invoke(_lastSearch!);
+        SelectedFeedChanged?.Invoke();
+        return true;
+    }
+
+    return false;
+}
+
+
+    public Guid QueueFeedId => FEED_QUEUE;
 
     private void MoveList(int delta)
     {

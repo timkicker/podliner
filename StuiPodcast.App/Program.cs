@@ -175,16 +175,31 @@ class Program
             var ep = UI.GetSelectedEpisode();
             if (ep == null) return;
 
-            // Verlauf sofort stempeln → hilft beim Restore
+            var curFeed = UI.GetSelectedFeedId();
+
+            // Verlauf stempeln → hilft beim Restore
             ep.LastPlayedAt = DateTimeOffset.Now;
             _ = SaveAsync();
 
+            // Wenn wir im Queue-Feed sind: alles bis inkl. diesem entfernen
+            if (curFeed is Guid fid && fid == UI.QueueFeedId)
+            {
+                int ix = Data.Queue.FindIndex(id => id == ep.Id);
+                if (ix >= 0)
+                {
+                    // alle davor + sich selbst raus
+                    Data.Queue.RemoveRange(0, ix + 1);
+                    UI.SetQueueOrder(Data.Queue);
+                    UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
+                    _ = SaveAsync();
+                }
+            }
+
             Playback!.Play(ep);
             UI.SetWindowTitle(ep.Title);
-
-            // NowPlaying für Pfeil/Status
             UI.SetNowPlaying(ep.Id);
         };
+
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
 

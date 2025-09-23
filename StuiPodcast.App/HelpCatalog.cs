@@ -32,6 +32,7 @@ namespace StuiPodcast.App
             new("i", "Open Shownotes tab"),
             new("Esc (in Shownotes)", "Back to Episodes"),
             new("J / K", "Play next / previous unplayed"),
+            new("⇧J / ⇧K ","  Move item down / up (only in ⧉ Queue)"),
 
             new("m", "Toggle played/unplayed flag"),
             new("u", "Toggle unplayed filter"),
