@@ -122,35 +122,64 @@ public sealed class LibVlcPlayer : IPlayer, IDisposable {
         }
     }
 
-    public void SeekRelative(TimeSpan delta) {
-        lock (_sync) {
-            var t = Math.Max(0, _mp.Time + (long)delta.TotalMilliseconds);
-            _mp.Time = t;
+    public void SeekRelative(TimeSpan delta)
+    {
+        lock (_sync)
+        {
+            var len = _mp.Length; // -1 oder >=0
+            var cur = _mp.Time;
+            long target = Math.Max(0, cur + (long)delta.TotalMilliseconds);
 
-            // Sofort UI aktualisieren
-            try {
-                State.Position = TimeSpan.FromMilliseconds(t);
-                var len = _mp.Length;
+            // Nie „hinter“ die Länge springen; wenn Länge bekannt, kurz vor Ende klemmen
+            if (len > 0)
+                target = Math.Min(target, Math.Max(0, len - 5)); // 5ms Puffer
+
+            _mp.Time = target;
+
+            // Sofort UI-State aktualisieren
+            try
+            {
+                State.Position = TimeSpan.FromMilliseconds(target);
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+
+                // WICHTIG: Wenn wir ans/nahe Ende gesprungen sind, aktiv „stalled @ end“ signalisieren
+                if (len > 0 && target >= Math.Max(0, len - 250))
+                    State.IsPlaying = false;
+
                 StateChanged?.Invoke(State);
-            } catch { /* best effort */ }
+            }
+            catch { /* best effort */ }
         }
     }
 
-    public void SeekTo(TimeSpan position) {
-        lock (_sync) {
-            var ms = Math.Max(0, (long)position.TotalMilliseconds);
+
+    public void SeekTo(TimeSpan position)
+    {
+        lock (_sync)
+        {
+            var len = _mp.Length; // -1 oder >=0
+            long ms = Math.Max(0, (long)position.TotalMilliseconds);
+
+            if (len > 0)
+                ms = Math.Min(ms, Math.Max(0, len - 5)); // nie hinter Ende
+
             _mp.Time = ms;
 
-            // Sofort UI aktualisieren
-            try {
+            try
+            {
                 State.Position = TimeSpan.FromMilliseconds(ms);
-                var len = _mp.Length;
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+
+                // „near end“ → als „stopped“ melden, damit Auto-Advance triggert
+                if (len > 0 && ms >= Math.Max(0, len - 250))
+                    State.IsPlaying = false;
+
                 StateChanged?.Invoke(State);
-            } catch { /* best effort */ }
+            }
+            catch { /* best effort */ }
         }
     }
+
 
 
     public void SetVolume(int vol0to100) {
@@ -251,6 +280,11 @@ public sealed class LibVlcPlayer : IPlayer, IDisposable {
                 State.Position = TimeSpan.FromMilliseconds(e.Time);
                 var len = _mp.Length;
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+
+// NEU: End-Stall auch hier hart signalisieren, falls VLC „stoppt“ ohne Event
+                if (len > 0 && e.Time >= Math.Max(0, len - 100))
+                    State.IsPlaying = false;
+
                 StateChanged?.Invoke(State);
             } catch (Exception ex) {
                 Log.Debug(ex, "OnTimeChanged");

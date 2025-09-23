@@ -24,10 +24,13 @@ public sealed class Shell
     public event Action? SelectedFeedChanged;
     
     // ---- Konstanten / virtuelle Feeds ----
+    // ---- Konstanten / virtuelle Feeds ----
     private static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
     private static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
     private static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
     private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157"); // ⏱ History (B157 ~ "HIST")
+    private static readonly Guid FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE"); // ⧉ Queue
+
 
 
     // ---- State ----
@@ -69,6 +72,12 @@ public sealed class Shell
         _useMenuAccent = !_useMenuAccent;
         ApplyTheme();
     }
+    
+    public void SetQueueLookup(Func<Guid, bool> isQueued)
+    {
+        _episodesPane?.SetQueueLookup(isQueued);
+    }
+
 
     public void RequestAddFeed(string url) => _ = AddFeedRequested?.Invoke(url);
     public void RequestRefresh()           => _ = RefreshRequested?.Invoke();
@@ -173,6 +182,8 @@ public sealed class Shell
         _episodesPane?.Details    // <- was missing: allow Esc, ':', '/' inside details TextView
     );
 
+    
+
 
     // Player initial unten
     SetPlayerPlacement(false);
@@ -186,6 +197,8 @@ public sealed class Shell
     
  
 
+    
+    
 }
 
 
@@ -222,8 +235,8 @@ public sealed class Shell
 
     public void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes)
     {
-        // Feed-Spaltenmodus setzen
-        _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY);
+        // Feed-Spaltenmodus setzen (Queue soll die Feed-Spalte auch zeigen)
+        _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE);
 
         // aktuelle Auswahl + Scroll behalten
         var prevId  = _episodesPane.GetSelected()?.Id;
@@ -231,7 +244,7 @@ public sealed class Shell
 
         _episodesPane.SetEpisodes(
             episodes, feedId,
-            FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY,
+            FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE,
             EpisodeSorter, _lastSearch, prevId
         );
 
@@ -631,10 +644,18 @@ public sealed class Shell
             new Feed { Id = FEED_ALL,        Title = "All Episodes" },
             new Feed { Id = FEED_SAVED,      Title = "★ Saved" },
             new Feed { Id = FEED_DOWNLOADED, Title = "⬇ Downloaded" },
+            new Feed { Id = FEED_QUEUE,      Title = "⧉ Queue" },
             new Feed { Id = FEED_HISTORY,    Title = "⏱ History" },
         };
         return virt.Concat(feeds ?? Enumerable.Empty<Feed>());
     }
+    
+    public void SetQueueOrder(IReadOnlyList<Guid> ids)
+    {
+        _episodesPane?.SetQueueOrder(ids);
+    }
+
+
 
 
     // ---- Help & Logs (öffentliche API unverändert) ----

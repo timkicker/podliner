@@ -396,6 +396,115 @@ static class CommandRouter
             ui.SetNowPlaying(ep.Id);
         }
     }
+    
+    // CommandRouter.cs
+// Neue öffentliche Hilfsmethode komplett einfügen (in die CommandRouter-Klasse)
+
+// CommandRouter.cs
+public static bool HandleQueue(string raw, Shell ui, AppData data, Func<Task> persist)
+{
+    if (string.IsNullOrWhiteSpace(raw)) return false;
+    var cmd = raw.Trim();
+    if (!cmd.StartsWith(":queue", StringComparison.OrdinalIgnoreCase))
+        return false;
+
+    // helper: UI syncen (Order + Liste refreshen)
+    void SyncUi()
+    {
+        ui.SetQueueOrder(data.Queue);                // Reihenfolge für Queue-Tab
+        ui.RefreshEpisodesForSelectedFeed(data.Episodes); // aktuelle Ansicht neu befüllen
+    }
+
+    var rest  = cmd.Length > 6 ? cmd[6..].Trim() : "";
+    var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var sub   = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+
+    switch (sub)
+    {
+        case "add":
+        {
+            Episode? target = null;
+
+            // Optionaler Index in der aktuellen Liste
+            if (parts.Length >= 2 && int.TryParse(parts[1], out var idxFromList))
+            {
+                var fid = ui.GetSelectedFeedId();
+                if (fid != null)
+                {
+                    var list = data.Episodes.Where(e => e.FeedId == fid.Value)
+                                            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+                                            .ToList();
+                    if (idxFromList >= 0 && idxFromList < list.Count)
+                        target = list[idxFromList];
+                }
+            }
+
+            target ??= ui.GetSelectedEpisode();
+            if (target == null) { ui.ShowOsd("queue: nothing to add"); return true; }
+
+            if (!data.Queue.Contains(target.Id))
+            {
+                data.Queue.Add(target.Id);
+                _ = persist();
+                ui.ShowOsd($"queued: {target.Title}");
+                SyncUi();
+            }
+            else
+            {
+                ui.ShowOsd("already in queue");
+            }
+            return true;
+        }
+
+        case "remove":
+        case "rm":
+        {
+            Episode? target = ui.GetSelectedEpisode();
+
+            // Optional: explicit GUID entfernen
+            if (parts.Length >= 2 && Guid.TryParse(parts[1], out var gid))
+                target = data.Episodes.FirstOrDefault(e => e.Id == gid);
+
+            if (target == null) { ui.ShowOsd("queue: nothing to remove"); return true; }
+
+            var removed = data.Queue.Remove(target.Id);
+            if (!removed) { ui.ShowOsd("not in queue"); return true; }
+
+            _ = persist();
+            ui.ShowOsd($"dequeued: {target.Title}");
+            SyncUi();
+            return true;
+        }
+
+        case "clear":
+        {
+            var n = data.Queue.Count;
+            data.Queue.Clear();
+            _ = persist();
+            ui.ShowOsd($"queue cleared ({n})");
+            SyncUi();
+            return true;
+        }
+
+        case "show":
+        {
+            if (data.Queue.Count == 0) { ui.ShowOsd("queue: (empty)"); return true; }
+
+            var names = data.Queue
+                .Select(id => data.Episodes.FirstOrDefault(e => e.Id == id)?.Title ?? id.ToString("N")[..8])
+                .Take(6);
+            ui.ShowOsd("queue → " + string.Join(" | ", names));
+            // Anzeige reicht; kein Refresh nötig
+            return true;
+        }
+
+        default:
+            ui.ShowOsd("queue: add [idx], remove|rm [guid], clear, show");
+            return true;
+    }
+}
+
+
 
     static void SelectAbsolute(int index, Shell ui, AppData data)
     {

@@ -93,6 +93,8 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
+        
+        UI.SetQueueLookup(id => Data.Queue.Contains(id));
 
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
 
@@ -210,8 +212,23 @@ class Program
             UI.ShowDetails(ep);
         };
 
-        // Commands via Router (mit Persist)
-        UI.Command += cmd => CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data, SaveAsync);
+        // Program.cs
+// Ersetzt den kompletten UI.Command-Handler
+        UI.Command += cmd =>
+        {
+            // 1) Queue-Commands zuerst
+            if (CommandRouter.HandleQueue(cmd, UI!, Data, SaveAsync))
+            {
+                UI.SetQueueOrder(Data.Queue);                 // sicherheitshalber
+                UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
+                return;
+            }
+
+            // 2) Restliche Commands wie gehabt
+            CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data, SaveAsync);
+        };
+
+
 
         UI.SearchApplied += query =>
         {

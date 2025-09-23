@@ -28,6 +28,9 @@ internal sealed class EpisodesPane
     private const int FEED_COL_W = 24;
     private const string SEP = "  │  ";
 
+    private Func<Guid, bool>? _isQueued;           // Badge-Lookup
+    private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
+
     public event Action? SelectionChanged;
     public event Action? OpenSelected;
 
@@ -66,83 +69,98 @@ internal sealed class EpisodesPane
         _feedTitleMap = _feeds.GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First().Title ?? "");
     }
 
-    public void ConfigureFeedColumn(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHistory)
+    public void SetQueueLookup(Func<Guid, bool> isQueued) => _isQueued = isQueued ?? (_ => false);
+
+    public void SetQueueOrder(IReadOnlyList<Guid> ids)
     {
-        // Im All/Saved/Downloaded/History-Tab wollen wir die Feed-Spalte zeigen.
-        _showFeedColumn = (feedId == vAll || feedId == vSaved || feedId == vDown || feedId == vHistory);
+        _queueOrder.Clear();
+        if (ids != null) _queueOrder.AddRange(ids);
+    }
+
+    public void ConfigureFeedColumn(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHistory, Guid vQueue)
+    {
+        // In All/Saved/Downloaded/History/Queue wollen wir die Feed-Spalte zeigen.
+        _showFeedColumn = (feedId == vAll || feedId == vSaved || feedId == vDown || feedId == vHistory || feedId == vQueue);
     }
 
     public void SetEpisodes(
-    IEnumerable<Episode> baseEpisodes,
-    Guid feedId,
-    Guid FEED_ALL, Guid FEED_SAVED, Guid FEED_DOWNLOADED, Guid FEED_HISTORY,
-    Func<IEnumerable<Episode>, IEnumerable<Episode>>? sorter,
-    string? search,
-    Guid? preferSelectId)
-{
-    // Auswahl & Scroll vor Rebuild sichern
-    var keepTop = List?.TopItem ?? 0;
-    var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
-
-    IEnumerable<Episode> src = baseEpisodes ?? Enumerable.Empty<Episode>();
-
-    if (feedId == FEED_HISTORY)
+        IEnumerable<Episode> baseEpisodes,
+        Guid feedId,
+        Guid FEED_ALL, Guid FEED_SAVED, Guid FEED_DOWNLOADED, Guid FEED_HISTORY, Guid FEED_QUEUE,
+        Func<IEnumerable<Episode>, IEnumerable<Episode>>? sorter,
+        string? search,
+        Guid? preferSelectId)
     {
-        // HISTORY: strikt nach LastPlayedAt desc, Sort & Search bewusst ignorieren
-        src = src.Where(e => e.LastPlayedAt != null)
-                 .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue);
-    }
-    else
-    {
-        // 1) Feed-Filter
-        if (feedId == FEED_SAVED)             src = src.Where(e => e.Saved);
-        else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => e.Downloaded);
-        else if (feedId != FEED_ALL)          src = src.Where(e => e.FeedId == feedId);
+        // Auswahl & Scroll vor Rebuild sichern
+        var keepTop = List?.TopItem ?? 0;
+        var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
-        // 2) Suche
-        if (!string.IsNullOrWhiteSpace(search))
+        IEnumerable<Episode> src = baseEpisodes ?? Enumerable.Empty<Episode>();
+
+        if (feedId == FEED_HISTORY)
         {
-            var q = search!;
-            src = src.Where(e =>
-                (!string.IsNullOrEmpty(e.Title)           && e.Title.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrEmpty(e.DescriptionText) && e.DescriptionText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                (_showFeedColumn && _feedTitleMap.TryGetValue(e.FeedId, out var ft) &&
-                    !string.IsNullOrEmpty(ft) && ft.Contains(q, StringComparison.OrdinalIgnoreCase))
-            );
+            // HISTORY: strikt nach LastPlayedAt desc, Sort & Search bewusst ignorieren
+            src = src.Where(e => e.LastPlayedAt != null)
+                     .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
+                     .Take(_historyLimit);
+        }
+        else if (feedId == FEED_QUEUE)
+        {
+            // QUEUE: FIFO anhand _queueOrder, Suche/Sort bewusst ignoriert
+            _showFeedColumn = true; // Queue listet versch. Feeds → Spalte macht Sinn
+            var map = src.ToDictionary(e => e.Id, e => e);
+            src = _queueOrder.Where(map.ContainsKey).Select(id => map[id]);
+        }
+        else
+        {
+            // 1) Feed-Filter
+            if (feedId == FEED_SAVED)             src = src.Where(e => e.Saved);
+            else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => e.Downloaded);
+            else if (feedId != FEED_ALL)          src = src.Where(e => e.FeedId == feedId);
+
+            // 2) Suche
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var q = search!;
+                src = src.Where(e =>
+                    (!string.IsNullOrEmpty(e.Title)           && e.Title.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(e.DescriptionText) && e.DescriptionText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    (_showFeedColumn && _feedTitleMap.TryGetValue(e.FeedId, out var ft) &&
+                        !string.IsNullOrEmpty(ft) && ft.Contains(q, StringComparison.OrdinalIgnoreCase))
+                );
+            }
+
+            // 3) Sort – GANZ AM ENDE (falls gesetzt), sonst Default pubdate desc
+            src = (sorter != null)
+                ? sorter(src)
+                : src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
         }
 
-        // 3) Sort – GANZ AM ENDE (falls gesetzt), sonst Default pubdate desc
-        src = (sorter != null)
-            ? sorter(src)
-            : src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
+        _episodes = src.ToList();
+
+        // Zielauswahl bestimmen
+        int sel = 0;
+        if (preferSelectId is Guid pid)
+        {
+            var i = _episodes.FindIndex(e => e.Id == pid);
+            if (i >= 0) sel = i;
+        }
+        else
+        {
+            sel = Math.Clamp(keepSel, 0, Math.Max(0, _episodes.Count - 1));
+        }
+
+        // Items setzen
+        var items = _episodes.Select(RowFor).ToList();
+        List.SetSource(items);
+        List.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
+
+        // Scroll wiederherstellen
+        var maxTop = Math.Max(0, items.Count - 1);
+        List.TopItem = Math.Clamp(keepTop, 0, maxTop);
+
+        UpdateEmptyHint(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE, search);
     }
-
-    _episodes = src.ToList();
-
-    // Zielauswahl bestimmen
-    int sel = 0;
-    if (preferSelectId is Guid pid)
-    {
-        var i = _episodes.FindIndex(e => e.Id == pid);
-        if (i >= 0) sel = i;
-    }
-    else
-    {
-        sel = Math.Clamp(keepSel, 0, Math.Max(0, _episodes.Count - 1));
-    }
-
-    // Items setzen
-    var items = _episodes.Select(RowFor).ToList();
-    List.SetSource(items);
-    List.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
-
-    // Scroll wiederherstellen
-    var maxTop = Math.Max(0, items.Count - 1);
-    List.TopItem = Math.Clamp(keepTop, 0, maxTop);
-
-    UpdateEmptyHint(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, search);
-}
-
 
     public Episode? GetSelected()
         => _episodes.Count == 0 ? null : _episodes[Math.Clamp(List.SelectedItem, 0, _episodes.Count - 1)];
@@ -152,7 +170,6 @@ internal sealed class EpisodesPane
         if (List?.Source?.Count > 0)
         {
             List.SelectedItem = Math.Clamp(index, 0, List.Source.Count - 1);
-            // TopItem NICHT ändern – Scroll stabil lassen
         }
     }
 
@@ -183,7 +200,7 @@ internal sealed class EpisodesPane
         Details.Text = sb.ToString();
     }
 
-    private void UpdateEmptyHint(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHist, string? search)
+    private void UpdateEmptyHint(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHist, Guid vQueue, string? search)
     {
         bool isEmpty = (_episodes?.Count ?? 0) == 0;
 
@@ -195,18 +212,34 @@ internal sealed class EpisodesPane
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(search))
+        if (feedId == vQueue)
+        {
+            EmptyHint.Text = "Queue is empty\n(:queue add / q)";
+        }
+        else if (!string.IsNullOrWhiteSpace(search))
+        {
             EmptyHint.Text = $"No matches for “{search}”";
+        }
         else if (feedId == vSaved)
+        {
             EmptyHint.Text = "No items saved\n(:h for help)";
+        }
         else if (feedId == vDown)
+        {
             EmptyHint.Text = "No items downloaded\n(:h for help)";
+        }
         else if (feedId == vHist)
+        {
             EmptyHint.Text = "No listening history yet";
+        }
         else if (feedId == vAll)
+        {
             EmptyHint.Text = "No episodes yet\nAdd one with: :add <rss-url>";
+        }
         else
+        {
             EmptyHint.Text = "No episodes in this feed";
+        }
 
         EmptyHint.Visible = true;
         Tabs.SetNeedsDisplay();
@@ -235,7 +268,8 @@ internal sealed class EpisodesPane
 
         char savedCh = (e.Saved == true) ? '★' : ' ';
         char downCh  = (e.Downloaded == true) ? '⬇' : ' ';
-        string badges = $"{savedCh}{downCh}";
+        char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' '; // ⧉ zeigt Queue an
+        string badges = $"{savedCh}{downCh}{queueCh}";
 
         string left = $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  ";
 
