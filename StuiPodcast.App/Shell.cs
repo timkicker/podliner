@@ -9,6 +9,16 @@ sealed class Shell
 {
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     
+    Button btnSpeedDown = null!;
+    Button btnSpeedUp   = null!;
+    Label  speedLabel   = null!;
+    SolidProgressBar volBar = null!;
+    Label volPctLabel   = null!;
+    
+
+
+
+    
     bool _showFeedColumn = false;
     TimeSpan _lastEffLenTs = TimeSpan.Zero;
     // Track der *rohen* Backend-Position (für Stall-Erkennung nach Seeks)
@@ -316,34 +326,66 @@ sealed class Shell
 
     // Zeile 0: Titel & Zeit
     titleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
-    timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)  Vol 0%  1.0×")
+    timeLabel  = new Label("⏸ 00:00 / --:--  (-:--)")
     {
         X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
     };
 
-    // Zeile 1: bewusst frei
+    // Zeile 1: frei
 
-    // Zeile 2: Buttons
-    btnBack10    = new Button("«10s")       { X = 2, Y = 2 };
-    btnPlayPause = new Button("Play ⏵")     { X = Pos.Right(btnBack10) + 2, Y = 2 };
-    btnFwd10     = new Button("10s»")       { X = Pos.Right(btnPlayPause) + 2, Y = 2 };
-    btnVolDown   = new Button("Vol−")       { X = Pos.Right(btnFwd10) + 4, Y = 2 };
-    btnVolUp     = new Button("Vol+")       { X = Pos.Right(btnVolDown) + 2, Y = 2 };
-    btnDownload  = new Button("⬇ Download") { X = Pos.Right(btnVolUp) + 4, Y = 2 };
+    // --- Zeile 2: Controls ---------------------------------------------------
+    // LINKS: [ «10s ] [ Play ⏵ ] [ 10s» ] [ ⬇ Download ]  — mit sauberem Gap
+    const int gapL = 2;
+    btnBack10    = new Button("«10s")      { X = 2, Y = 2 };
+    btnPlayPause = new Button("Play ⏵")    { X = Pos.Right(btnBack10) + gapL, Y = 2 };
+    btnFwd10     = new Button("10s»")      { X = Pos.Right(btnPlayPause) + gapL, Y = 2 };
+    btnDownload  = new Button("⬇ Download"){ X = Pos.Right(btnFwd10) + gapL, Y = 2 };
 
-    // Zeile 3: weitere Leerzeile (Spacing vor Progress)
+    // MITTE: [ Speed-Label ][ +spd ][ -spd ]
+    const int midGap = 2;
+    speedLabel   = new Label("1.0×") { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
+    btnSpeedDown = new Button("-spd"){ Y = 0, X = Pos.Right(speedLabel) + midGap };
+    btnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(btnSpeedDown) + midGap };
 
-    // Zeile 4: solide Progressbar in Accent-Foreground + Mouse-Seek
+    var midWidth = 6 + midGap + 6 + midGap + 6;
+    var mid = new View {
+        Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false
+    };
+    mid.Add(speedLabel, btnSpeedUp, btnSpeedDown);
+
+    // RECHTS: [ Vol− ][ Vol+ ] [ Vol% ] [ Vol-Bar ]  (Bar ganz rechts)
+    const int rightPad = 2;
+    const int gap = 2;
+    int r = rightPad;
+
+    // Vol-Bar (ganz rechts)
+    volBar = new SolidProgressBar {
+        Y = 2, Height = 1, Width = 16, X = Pos.AnchorEnd(r + 16)
+    };
+    volBar.ColorScheme = MakeProgressScheme();
+    r += 16 + gap - 2;
+
+    // Vol%-Label links neben Bar
+    volPctLabel = new Label("0%") {
+        Y = 2, Width = 4, X = Pos.AnchorEnd(r + 4), TextAlignment = TextAlignment.Left
+    };
+    r += 4 + gap + 1;
+
+    // Vol+ / Vol−
+    btnVolUp = new Button("Vol+")   { Y = 2, X = Pos.AnchorEnd(r + 6) };
+    r += 6 + gap;
+    btnVolDown = new Button("Vol−") { Y = 2, X = Pos.AnchorEnd(r + 6) };
+    r += 6 + gap;
+
+    // --- Zeile 4: Progressbar (unten, Mouse-Seek) ---------------------------
     progress = new SolidProgressBar { X = 2, Y = 4, Width = Dim.Fill(2), Height = 1 };
     progress.ColorScheme = MakeProgressScheme();
 
-    // Klick/Drag auf die Progressbar -> :seek <pct>%
+    // Mouse-Seek → Playback-Position
     progress.SeekRequested += frac =>
     {
         var pct = (int)Math.Round(Math.Clamp(frac, 0f, 1f) * 100);
         Command?.Invoke($":seek {pct}%");
-
-        // OSD mit Zielzeit, wenn Länge bekannt
         if (_lastEffLenTs > TimeSpan.Zero)
         {
             var target = TimeSpan.FromMilliseconds(_lastEffLenTs.TotalMilliseconds * frac);
@@ -351,17 +393,39 @@ sealed class Shell
         }
     };
 
+    // >>> NEU: Vol-Bar klickbar → absolute Lautstärke setzen
+    volBar.SeekRequested += frac =>
+    {
+        var vol = (int)Math.Round(Math.Clamp(frac, 0f, 1f) * 100);
+        Command?.Invoke($":vol {vol}");
+        ShowOsd($"Vol {vol}%");
+    };
+
+    // Click-Handler
     btnBack10.Clicked    += () => Command?.Invoke(":seek -10");
     btnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
     btnPlayPause.Clicked += () => Command?.Invoke(":toggle");
     btnVolDown.Clicked   += () => Command?.Invoke(":vol -5");
     btnVolUp.Clicked     += () => Command?.Invoke(":vol +5");
-    btnDownload.Clicked  += () => MessageBox.Query("Download", "Downloads later (M5).", "OK");
+    btnSpeedDown.Clicked += () => Command?.Invoke(":speed -0.1");
+    btnSpeedUp.Clicked   += () => Command?.Invoke(":speed +0.1");
 
-    statusFrame.Add(titleLabel, timeLabel,
-                    btnBack10, btnPlayPause, btnFwd10, btnVolDown, btnVolUp, btnDownload,
-                    progress);
+    // >>> NEU: wie Taste 'd' – Download-Flag togglen
+    btnDownload.Clicked  += () => Command?.Invoke(":dl toggle");
+
+    statusFrame.Add(
+        titleLabel, timeLabel,
+        btnBack10, btnPlayPause, btnFwd10, btnDownload,
+        mid,
+        btnVolDown, btnVolUp, volPctLabel, volBar,
+        progress
+    );
 }
+
+
+
+
+
 
     // Track = Base.Normal (Hintergrund), Fill = Menu.HotNormal (Accent-FOREGROUND!)
     ColorScheme MakeProgressScheme() => new ColorScheme {
@@ -684,12 +748,19 @@ static string TruncateTo(string? s, int max)
     var rem    = effLen == TimeSpan.Zero ? TimeSpan.Zero : (effLen - pos);
     if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
 
-    timeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{F(rem)})  Vol {s.Volume0_100}%  {s.Speed:0.0}×";
+    timeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{F(rem)})";
     btnPlayPause.Text = s.IsPlaying ? "Pause ⏸" : "Play ⏵";
 
     progress.Fraction = (effLen.TotalMilliseconds > 0)
         ? Math.Clamp((float)(pos.TotalMilliseconds / effLen.TotalMilliseconds), 0f, 1f)
         : 0f;
+
+    // --- rechts: Volume-UI live ---
+    volBar.Fraction  = Math.Clamp(s.Volume0_100 / 100f, 0f, 1f);
+    volPctLabel.Text = $"{s.Volume0_100}%";
+
+    // --- mitte: Speed-Label live ---
+    if (speedLabel != null) speedLabel.Text = $"{s.Speed:0.0}×";
 
     // Zustände fortschreiben
     _lastUiPos  = pos;
@@ -697,9 +768,11 @@ static string TruncateTo(string? s, int max)
     _lastRawPos = rawPos;
     _lastRawAt  = now;
 
-    // >>> für OSD beim Klick: effektive Länge merken
+    // für OSD beim Klick: effektive Länge merken
     _lastEffLenTs = effLen;
 }
+
+
 
     public void SetWindowTitle(string? subtitle)
     {
@@ -986,14 +1059,13 @@ Misc:
 
     // -------- Solide Progressbar: Track = Background, Fill = Accent-FG mit '█' --------
     // -------- Solide Progressbar mit Mouse-Seek --------
+    // -------- Solide Progressbar mit Mouse-Seek --------
     sealed class SolidProgressBar : View {
         float _fraction;
         public float Fraction {
             get => _fraction;
             set { _fraction = Math.Clamp(value, 0f, 1f); SetNeedsDisplay(); }
         }
-
-        // Event: angeforderter Seek als Fraction [0..1]
         public event Action<float>? SeekRequested;
 
         public SolidProgressBar() {
@@ -1003,17 +1075,15 @@ Misc:
         }
 
         public override void Redraw(Rect bounds) {
-            // Track (leer, Hintergrundfarbe der Normal-Attribute)
             Driver.SetAttribute(ColorScheme?.Normal ?? Colors.Base.Normal);
             Move(0, 0);
             for (int i = 0; i < bounds.Width; i++) Driver.AddRune(' ');
 
-            // Fill – volle Blöcke in Accent-FG
             var accent = ColorScheme?.HotNormal ?? Colors.Menu.HotNormal;
             Driver.SetAttribute(accent);
             int filled = (int)Math.Round(bounds.Width * Math.Clamp(Fraction, 0f, 1f));
             Move(0, 0);
-            for (int i = 0; i < filled; i++) Driver.AddRune('█'); // Foreground = Accent
+            for (int i = 0; i < filled; i++) Driver.AddRune('█');
         }
 
         public override bool MouseEvent(MouseEvent me)
@@ -1023,7 +1093,6 @@ Misc:
                 me.Flags.HasFlag(MouseFlags.Button1DoubleClicked) ||
                 me.Flags.HasFlag(MouseFlags.ReportMousePosition) && me.Flags.HasFlag(MouseFlags.Button1Pressed))
             {
-                // X relativ zu dieser View
                 var localX = me.X;
                 var width  = Bounds.Width > 0 ? Bounds.Width : 1;
                 localX = Math.Clamp(localX, 0, Math.Max(0, width - 1));
@@ -1032,10 +1101,10 @@ Misc:
                 SeekRequested?.Invoke(frac);
                 return true;
             }
-
             return base.MouseEvent(me);
         }
     }
+
 
     // Startanzeige beim App-Start (ohne Auto-Play)
     public void ShowStartupEpisode(Episode ep, int? volume = null, double? speed = null)
@@ -1056,7 +1125,7 @@ Misc:
         var remStr = len == 0 ? "--:--" : F((lenTs - posTs) < TimeSpan.Zero ? TimeSpan.Zero : (lenTs - posTs));
         var vol   = Math.Clamp(volume ?? 0, 0, 100);
         var spd   = (speed is > 0 ? speed!.Value : 1.0);
-        timeLabel.Text = $"⏸ {posStr} / {lenStr}  (-{remStr})  Vol {vol}%  {spd:0.0}×";
+        timeLabel.Text = $"⏸ {posStr} / {lenStr}  (-{remStr})";
 
         RebuildEpisodeListPreserveSelection(); // <— damit der „▶ “ sichtbar wird
     }
