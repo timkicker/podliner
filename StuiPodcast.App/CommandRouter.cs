@@ -88,15 +88,15 @@ static class CommandRouter
         if (cmd.Equals(":zb", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":L", StringComparison.OrdinalIgnoreCase))
         { SelectAbsolute(int.MaxValue, ui, data); return; }
         
-        // --- sort ------------------------------------------------------
         if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase))
         {
             var arg = cmd.Length > 5 ? cmd[5..].Trim() : "";
             HandleSort(arg, ui, data, persist);
-            // Liste neu anwenden (Shell holt Sortierer aus Program)
+            // Liste neu anwenden -> Shell ruft SetEpisodesForFeed(...), dort greift der Sorter.
             ApplyList(ui, data);
             return;
         }
+
         
         if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) ||
             cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase) ||

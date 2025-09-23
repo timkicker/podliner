@@ -63,9 +63,10 @@ internal sealed class EpisodesPane
         _feedTitleMap = _feeds.GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First().Title ?? "");
     }
 
-    public void ConfigureFeedColumn(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHist)
+    public void ConfigureFeedColumn(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHistory)
     {
-        _showFeedColumn = (feedId == vAll || feedId == vSaved || feedId == vDown || feedId == vHist);
+        // Im All/Saved/Downloaded/History-Tab wollen wir die Feed-Spalte zeigen.
+        _showFeedColumn = (feedId == vAll || feedId == vSaved || feedId == vDown || feedId == vHistory);
     }
 
     public void SetEpisodes(
@@ -76,38 +77,38 @@ internal sealed class EpisodesPane
     string? search,
     Guid? preferSelectId)
 {
-    // Scroll vor Rebuild sichern
+    // Auswahl & Scroll vor Rebuild sichern
     var keepTop = List?.TopItem ?? 0;
+    var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
-    // --- Filtern (virtuelle Feeds + Suche) ---
     IEnumerable<Episode> src = baseEpisodes ?? Enumerable.Empty<Episode>();
 
-    if (feedId == FEED_SAVED)              src = src.Where(e => e.Saved);
-    else if (feedId == FEED_DOWNLOADED)    src = src.Where(e => e.Downloaded);
-    else if (feedId == FEED_HISTORY)       src = src.Where(e => e.LastPlayedAt != null);
-    else if (feedId != FEED_ALL)           src = src.Where(e => e.FeedId == feedId);
-
-    if (!string.IsNullOrWhiteSpace(search))
-    {
-        var q = search!;
-        src = src.Where(e =>
-            (!string.IsNullOrEmpty(e.Title)           && e.Title.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-            (!string.IsNullOrEmpty(e.DescriptionText) && e.DescriptionText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-            (_showFeedColumn && _feedTitleMap.TryGetValue(e.FeedId, out var ft) &&
-                !string.IsNullOrEmpty(ft) && ft.Contains(q, StringComparison.OrdinalIgnoreCase))
-        );
-    }
-
-    // --- Sortieren ---
     if (feedId == FEED_HISTORY)
     {
-        // History: zuletzt gehört zuerst; bei Gleichstand nach Fortschritt/zuletzt positioniert sortieren
-        src = src
-            .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
-            .ThenByDescending(e => e.LastPosMs ?? 0);
+        // HISTORY: strikt nach LastPlayedAt desc, Sort & Search bewusst ignorieren
+        src = src.Where(e => e.LastPlayedAt != null)
+                 .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue);
     }
     else
     {
+        // 1) Feed-Filter
+        if (feedId == FEED_SAVED)             src = src.Where(e => e.Saved);
+        else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => e.Downloaded);
+        else if (feedId != FEED_ALL)          src = src.Where(e => e.FeedId == feedId);
+
+        // 2) Suche
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var q = search!;
+            src = src.Where(e =>
+                (!string.IsNullOrEmpty(e.Title)           && e.Title.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(e.DescriptionText) && e.DescriptionText.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                (_showFeedColumn && _feedTitleMap.TryGetValue(e.FeedId, out var ft) &&
+                    !string.IsNullOrEmpty(ft) && ft.Contains(q, StringComparison.OrdinalIgnoreCase))
+            );
+        }
+
+        // 3) Sort – GANZ AM ENDE (falls gesetzt), sonst Default pubdate desc
         src = (sorter != null)
             ? sorter(src)
             : src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
@@ -115,39 +116,41 @@ internal sealed class EpisodesPane
 
     _episodes = src.ToList();
 
-    // Auswahl bestimmen: bevorzugt preferSelectId, sonst aktuelle Auswahl
+    // Zielauswahl bestimmen
     int sel = 0;
     if (preferSelectId is Guid pid)
     {
         var i = _episodes.FindIndex(e => e.Id == pid);
         if (i >= 0) sel = i;
     }
-    else if (List?.Source?.Count > 0)
+    else
     {
-        sel = Math.Clamp(List.SelectedItem, 0, Math.Max(0, _episodes.Count - 1));
+        sel = Math.Clamp(keepSel, 0, Math.Max(0, _episodes.Count - 1));
     }
 
-    // Items bauen & setzen
+    // Items setzen
     var items = _episodes.Select(RowFor).ToList();
     List.SetSource(items);
     List.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
 
-    // Scroll-Position restaurieren (sicher geclamped)
+    // Scroll wiederherstellen
     var maxTop = Math.Max(0, items.Count - 1);
     List.TopItem = Math.Clamp(keepTop, 0, maxTop);
 
-    UpdateEmptyHint(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, search);
+    UpdateEmptyHint(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, search);
 }
 
 
     public Episode? GetSelected()
         => _episodes.Count == 0 ? null : _episodes[Math.Clamp(List.SelectedItem, 0, _episodes.Count - 1)];
 
-    public void SelectIndex(int idx)
+    public void SelectIndex(int index)
     {
-        if (_episodes.Count == 0) return;
-        // Nur Auswahl setzen – TopItem NICHT anfassen
-        List.SelectedItem = Math.Clamp(idx, 0, _episodes.Count - 1);
+        if (List?.Source?.Count > 0)
+        {
+            List.SelectedItem = Math.Clamp(index, 0, List.Source.Count - 1);
+            // TopItem NICHT ändern – Scroll stabil lassen
+        }
     }
 
     public int GetSelectedIndex()
@@ -169,13 +172,15 @@ internal sealed class EpisodesPane
         sb.AppendLine($"Date: {date}");
         if (!string.IsNullOrWhiteSpace(e.AudioUrl))
             sb.AppendLine($"Audio: {e.AudioUrl}");
+        if (e.LastPlayedAt != null)
+            sb.AppendLine($"Last played: {e.LastPlayedAt:yyyy-MM-dd HH:mm}");
         sb.AppendLine();
         var notes = e.DescriptionText?.Trim();
         sb.AppendLine(string.IsNullOrWhiteSpace(notes) ? "(no shownotes)" : notes);
         Details.Text = sb.ToString();
     }
 
-    private void UpdateEmptyHint(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, string? search)
+    private void UpdateEmptyHint(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHist, string? search)
     {
         bool isEmpty = (_episodes?.Count ?? 0) == 0;
 
@@ -193,6 +198,8 @@ internal sealed class EpisodesPane
             EmptyHint.Text = "No items saved\n(:h for help)";
         else if (feedId == vDown)
             EmptyHint.Text = "No items downloaded\n(:h for help)";
+        else if (feedId == vHist)
+            EmptyHint.Text = "No listening history yet";
         else if (feedId == vAll)
             EmptyHint.Text = "No episodes yet\nAdd one with: :add <rss-url>";
         else
@@ -204,7 +211,7 @@ internal sealed class EpisodesPane
 
     private string RowFor(Episode e)
     {
-        // (Pfeil „▶“ wird in InjectNowPlaying injiziert)
+        // Pfeil („▶“) kommt über InjectNowPlaying – hier nur neutrales Prefix
         var nowPrefix = "  ";
 
         long lenMs = e.LengthMs ?? 0;
@@ -264,24 +271,23 @@ internal sealed class EpisodesPane
 
     public void InjectNowPlaying(Guid? nowId)
     {
-        // Scroll + Selektion sichern
-        int oldSel = Math.Max(0, List.SelectedItem);
-        int oldTop = Math.Max(0, List.TopItem);
-
         var items = _episodes.Select(e =>
         {
             var row = RowFor(e);
-            if (nowId != null && e.Id == nowId.Value && row.Length >= 2)
-                row = "▶ " + row.Substring(2); // ersetzt die zwei führenden Spaces
+            if (nowId != null && e.Id == nowId.Value)
+                row = "▶ " + row.Substring(2);
             return row;
         }).ToList();
 
+        // Auswahl & Scroll beibehalten
+        var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
+        var keepTop = List?.TopItem ?? 0;
+
         List.SetSource(items);
 
-        // Restore selection + scroll, geclamped
-        List.SelectedItem = (items.Count > 0) ? Math.Clamp(oldSel, 0, items.Count - 1) : 0;
-        int maxTop = Math.Max(0, (items.Count - 1));
-        List.TopItem = Math.Clamp(oldTop, 0, maxTop);
+        var maxSel = Math.Max(0, items.Count - 1);
+        List.SelectedItem = Math.Clamp(keepSel, 0, maxSel);
+        List.TopItem = Math.Clamp(keepTop, 0, Math.Max(0, items.Count - 1));
 
         Tabs.SetNeedsDisplay();
     }
