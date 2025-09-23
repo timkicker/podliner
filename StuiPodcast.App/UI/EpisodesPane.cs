@@ -8,6 +8,9 @@ namespace StuiPodcast.App.UI;
 
 internal sealed class EpisodesPane
 {
+    private int _historyLimit = 200;
+    public void SetHistoryLimit(int n) => _historyLimit = Math.Clamp(n, 10, 10000);
+    
     public TabView Tabs { get; }
     public TabView.Tab EpisodesTab { get; }
     public TextView Details { get; }

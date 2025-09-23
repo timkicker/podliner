@@ -661,4 +661,8 @@ public sealed class Shell
             Application.Run(dlg);
         } catch { }
     }
+    
+    
+    public void SetHistoryLimit(int n) => _episodesPane?.SetHistoryLimit(n);
+
 }

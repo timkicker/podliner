@@ -34,6 +34,11 @@ sealed class PlaybackCoordinator
     public void Play(Episode ep)
     {
         _current = ep;
+        
+        _current.LastPlayedAt = DateTimeOffset.Now;
+        _ = _saveAsync(); // leichtes Throttle existiert in SaveAsync
+
+        
         CancelResume();
 
         long? startMs = ep.LastPosMs;

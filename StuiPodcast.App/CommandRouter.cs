@@ -163,29 +163,48 @@ static class CommandRouter
         }
         ui.ShowOsd("Refreshed ✓", 1200);
         
-        // --- History ---------------------------------------------------------------
+        // --- HISTORY --------------------------------------------------------------
         if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase))
         {
             var arg = cmd.Length > 8 ? cmd[8..].Trim().ToLowerInvariant() : "";
-            if (arg == "clear")
+
+            if (arg.StartsWith("clear"))
             {
-                // Nur Verlauf leeren: LastPlayedAt -> null. Played bleibt wie es ist.
+                // Nur Verlauf leeren: LastPlayedAt=null, Played bleibt unberührt
+                int count = 0;
                 foreach (var e in data.Episodes)
-                    e.LastPlayedAt = null;
-
+                {
+                    if (e.LastPlayedAt != null) { e.LastPlayedAt = null; count++; }
+                }
                 _ = persist();
-
-                // Falls aktuell der virtuelle "History"-Feed aktiv ist,
-                // Liste neu anwenden, damit sie sofort leer erscheint.
                 ApplyList(ui, data);
-                ui.ShowOsd("History cleared");
+                ui.ShowOsd($"History cleared ({count})");
                 return;
             }
 
-            // Unbekannter :history-Subcommand -> kleine Hilfe
-            ui.ShowOsd("usage: :history clear");
+            if (arg.StartsWith("size"))
+            {
+                // :history size <n>
+                var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2 && int.TryParse(parts[1], out var n) && n > 0)
+                {
+                    data.HistorySize = Math.Clamp(n, 10, 10000);
+                    _ = persist();
+
+                    // UI direkt aktualisieren (auch wenn der User gerade im History-Tab steht)
+                    ui.SetHistoryLimit(data.HistorySize);
+                    ApplyList(ui, data);
+                    ui.ShowOsd($"History size = {data.HistorySize}");
+                    return;
+                }
+                ui.ShowOsd("usage: :history size <n>");
+                return;
+            }
+
+            ui.ShowOsd("history: clear | size <n>");
             return;
         }
+
 
         
         

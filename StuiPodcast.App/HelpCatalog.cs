@@ -107,9 +107,10 @@ namespace StuiPodcast.App
                 "[N]",
                 Examples: new[]{ ":replay", ":replay 30" }),
             
-            new(":history", "Manage listening history.",
-                "clear",
-                Examples: new[]{ ":history clear" }),
+            new(":history", "History actions (view-only feed)",
+                "clear | size <n>",
+                Examples: new[]{ ":history clear", ":history size 300" }),
+
 
 
             new(":goto", "Select absolute list position.",

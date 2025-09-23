@@ -40,6 +40,10 @@ public class PlayerState {
 public class AppData {
     
     // --- Sortierung (global) ---
+    
+    public List<Guid> PlayQueue { get; set; } = new();
+    
+    public int HistorySize { get; set; } = 200;
     public string SortBy  { get; set; } = "pubdate"; // pubdate|title|played|progress|feed
     public string SortDir { get; set; } = "desc";    // asc|desc
 

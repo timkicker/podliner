@@ -96,6 +96,10 @@ class Program
 
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
 
+        
+        UI.SetHistoryLimit(Data.HistorySize);
+
+        
         // >> Restore Player-Bar position & Filter
         UI.SetPlayerPlacement(Data.PlayerAtTop);
         UI.SetUnplayedFilterVisual(Data.UnplayedOnly);
