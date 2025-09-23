@@ -162,23 +162,121 @@ sealed class Shell
             return false; // one-shot
         });
     }
+    
+    public void IndicateRefresh(bool done = false)
+    {
+        ShowOsd(done ? "Refreshed ✓" : "Refreshing…");
+    }
+
 
     public void Build()
 {
-    var menu = new MenuBar(new MenuBarItem[] {
-        new("_File", new MenuItem[]{
-            new("_Add Feed (:add URL)", "", () => ShowCommandBox(":add ")),
-            new("_Refresh All (:refresh)", "", async () => { if (RefreshRequested != null) await RefreshRequested(); }),
-            new("_Quit (Q)", "Q", () => QuitRequested?.Invoke())
+    // ---- TOP MENU --------------------------------------------------------------
+MenuItem Cmd(string text, string help, string cmd)
+    => new MenuItem(text, help, () => Command?.Invoke(cmd));
+
+MenuItem Act(string text, string help, Action act)
+    => new MenuItem(text, help, act);
+
+var menu = new MenuBar(new[]
+{
+    // FILE: feeds & app lifecycle
+    new MenuBarItem("_File", new[]
+    {
+        Act("_Add Feed… (:add URL)", "open command",
+            () => ShowCommandBox("::add ")),               // <-- ensures ':add ' (with space)
+        Act("_Refresh All (:refresh)", "Refresh all feeds", async () =>
+        {
+            IndicateRefresh(false); // "Refreshing…"
+            if (RefreshRequested != null)
+                await RefreshRequested();
+            IndicateRefresh(true);  // "Refreshed ✓"
         }),
-        new("_View", new MenuItem[]{
-            new("_Toggle Player Position (Ctrl+P)", "", () => Command?.Invoke(":player toggle"))
+        new MenuItem("-", "", null), // separator
+        Act("_Quit (Q)", "Quit application", () => QuitRequested?.Invoke()),
+    }),
+
+    // FEEDS: selection-centric helpers
+    new MenuBarItem("_Feeds", new[]
+    {
+        Cmd("_All Episodes",              "", ":feed all"),
+        Cmd("_Saved ★",                   "", ":feed saved"),
+        Cmd("_Downloaded ⬇",              "", ":feed downloaded"),
+    }),
+
+    // PLAYBACK: transport, seek, speed, volume, download flag
+    new MenuBarItem("_Playback", new[]
+    {
+        Cmd("_Play/Pause (Space)",        "", ":toggle"),
+        new MenuItem("-", "", null),
+        Cmd("Seek _-10s (← / h/H)",       "", ":seek -10"),
+        Cmd("Seek _+10s (→ / l/L)",       "", ":seek +10"),
+        Cmd("Seek _-60s (H)",             "", ":seek -60"),
+        Cmd("Seek _+60s (L)",             "", ":seek +60"),
+        Cmd("Seek _Start (g)",            "", ":seek 0:00"),
+        Cmd("Seek _End (G)",              "", ":seek 100%"),
+        new MenuItem("-", "", null),
+        Cmd("_Speed −0.1 ([)",            "", ":speed -0.1"),
+        Cmd("S_peed +0.1 (])",            "", ":speed +0.1"),
+        Cmd("Speed _1.0 (= / 1)",         "", ":speed 1.0"),
+        Cmd("Speed _1.25 (2)",            "", ":speed 1.25"),
+        Cmd("Speed _1.5 (3)",             "", ":speed 1.5"),
+        new MenuItem("-", "", null),
+        Cmd("_Volume −5 (-)",             "", ":vol -5"),
+        Cmd("Volu_me +5 (+)",             "", ":vol +5"),
+        new MenuItem("-", "", null),
+        Cmd("_Toggle Download Flag (d)",  "", ":dl toggle"),
+        Act("Toggle _Played (m)",         "Mark/Unmark played", () => TogglePlayedRequested?.Invoke()),
+    }),
+
+    // VIEW: theme, player position, filters
+    new MenuBarItem("_View", new[]
+    {
+        Act("Toggle _Player Position (Ctrl+P)", "Move player bar to top/bottom",
+            () => Command?.Invoke(":player toggle")),
+        Act("Toggle _Theme (t)", "Switch between base/menu accent",
+            () => ToggleThemeRequested?.Invoke()),
+        Cmd("Filter: _Unplayed (u)", "", ":filter toggle"),
+    }),
+
+    // NAVIGATE: panes & unplayed jumps, search/command bar
+    new MenuBarItem("_Navigate", new[]
+    {
+        Act("Focus _Feeds (h)",     "Move focus to feeds list",    () => FocusPane(Pane.Feeds)),
+        Act("Focus _Episodes (l)",  "Move focus to episodes list", () => FocusPane(Pane.Episodes)),
+        Act("Open _Details (i)",    "Switch to details tab",       () =>
+        {
+            rightTabs.SelectedTab = rightTabs.Tabs.Last(); // "Details"
+            detailsView.SetFocus();
         }),
-        new("_Help", new MenuItem[]{
-            new("_Keys (:h)", "", () => ShowKeysHelp())
-        })
-    });
-    Application.Top.Add(menu);
+        Act("_Back from Details (Esc)", "Return to episode list",  () =>
+        {
+            if (rightTabs.SelectedTab?.Text.ToString() == "Details")
+            {
+                rightTabs.SelectedTab = rightTabs.Tabs.First(); // "Episodes"
+                episodeList.SetFocus();
+            }
+        }),
+        new MenuItem("-", "", null),
+        Act("Next _Unplayed (J / Shift+j)", "Jump to next unplayed episode", () => JumpToNextUnplayed()),
+        Act("Prev _Unplayed (K / Shift+k)", "Jump to previous unplayed episode", () => JumpToPrevUnplayed()),
+        new MenuItem("-", "", null),
+        Act("Open _Command Line (:)", "Open command box", () => ShowCommandBox(":")),
+        Act("_Search (/)",            "Open search box",  () => ShowSearchBox("/")),
+    }),
+
+    // HELP: cheatsheet & logs
+    new MenuBarItem("_Help", new[]
+    {
+        Act("_Keys & Commands (:h)", "Open inline help browser", () => ShowKeysHelp()),
+        Act("_Logs (F12)",           "Show in-memory log tail",  () => ShowLogsOverlay(500)),
+        Act("_About",                "",          () =>
+            MessageBox.Query("About", "StuiPodcast: TUI podcast player", "OK")),
+    }),
+});
+
+Application.Top.Add(menu);
+
 
     mainWin = new Window { X = 0, Y = 1, Width = Dim.Fill(), Height = Dim.Fill(PlayerFrameH) };
     mainWin.Border.BorderStyle = BorderStyle.None;
@@ -913,6 +1011,11 @@ static string TruncateTo(string? s, int max)
             if (k.KeyEvent.Key == Key.Enter)
             {
                 var cmd = commandBox!.Text.ToString() ?? "";
+
+                // NEW: show OSD when the user triggers :refresh manually
+                if (cmd.Trim().StartsWith(":refresh", StringComparison.OrdinalIgnoreCase))
+                    IndicateRefresh(false);
+
                 commandBox!.SuperView?.Remove(commandBox);
                 commandBox = null;
                 Command?.Invoke(cmd);
