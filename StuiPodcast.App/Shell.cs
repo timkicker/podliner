@@ -24,8 +24,9 @@ sealed class Shell
 // vorher: static bool IsSaved(Episode e) => false;
     static bool IsSaved(Episode e) => e?.Saved == true;
 
-    static bool IsDownloaded(Episode e) => false; // TODO: sobald Download-Status existiert
 
+    static bool IsDownloaded(Episode e) => e?.Downloaded == true; // statt: false
+    
     // --- aktive Pane steuern (fix für j/k & Pfeile schon vor dem ersten Play) ---
     enum Pane { Feeds, Episodes }
     FrameView? _osdWin;
@@ -902,9 +903,10 @@ Misc:
     if (kv == '2') { Command?.Invoke(":speed 1.25"); return true; }
     if (kv == '3') { Command?.Invoke(":speed 1.5");  return true; }
 
-    if (kv == 'd' || kv == 'D') { MessageBox.Query("Download", "Downloads later (M5).", "OK"); return true; }
+    // NEU: Download-Flag togglen
+    if (kv == 'd' || kv == 'D') { Command?.Invoke(":dl toggle"); return true; }
 
-    // ❗ FIX: Enter im Feeds-Pane startet NICHT mehr die Wiedergabe
+    // Enter: nur in Episodenliste abspielen (nicht im Feeds-Pane)
     if (key == Key.Enter)
     {
         if (_activePane == Pane.Feeds)
@@ -922,6 +924,7 @@ Misc:
 
     return false;
 }
+
 
 
     int CurrentEpisodeIndex()

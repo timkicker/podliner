@@ -43,6 +43,19 @@ static class CommandRouter
             SaveToggle(arg, ui, data, persist);
             return;
         }
+        
+        // --- DOWNLOAD FLAG ----------------------------------------------------------
+        if (cmd.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
+            cmd.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd.Contains(' ')
+                ? cmd[(cmd.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
+                : "";
+            DlToggle(arg, ui, data, persist);
+            ApplyList(ui, data); // damit Virtual-Feed „Downloaded“ sofort aktualisiert
+            return;
+        }
+
 
         // --- Navigation / Playback helpers -------------------------------------
         if (cmd.Equals(":next", StringComparison.OrdinalIgnoreCase))      { SelectRelative(+1, ui, data); return; }
@@ -493,4 +506,26 @@ static class CommandRouter
         if (int.TryParse(arg, out var n) && n > 0) tail = Math.Min(n, 5000);
         ui.ShowLogsOverlay(tail);
     }
+    
+    static void DlToggle(string arg, Shell ui, AppData data, Func<Task> persist)
+    {
+        var ep = ui.GetSelectedEpisode();
+        if (ep is null) return;
+
+        bool newVal = ep.Downloaded;
+
+        if (arg is "on" or "true" or "+")
+            newVal = true;
+        else if (arg is "off" or "false" or "-")
+            newVal = false;
+        else
+            newVal = !ep.Downloaded; // toggle default
+
+        ep.Downloaded = newVal;
+        _ = persist();
+
+        ApplyList(ui, data);
+        ui.ShowOsd(newVal ? "Marked ⬇ Downloaded" : "Removed ⬇");
+    }
+
 }
