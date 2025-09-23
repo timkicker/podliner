@@ -6,6 +6,7 @@ namespace StuiPodcast.App.UI;
 /// <summary>Eine solide Progressbar (Track=BG, Fill=Accent-FG) mit Mouse-Seek.</summary>
 internal sealed class SolidProgressBar : View
 {
+    private DateTime _lastEmit = DateTime.MinValue;
     private float _fraction;
     public float Fraction
     {
@@ -37,16 +38,25 @@ internal sealed class SolidProgressBar : View
 
     public override bool MouseEvent(MouseEvent me)
     {
-        bool down = me.Flags.HasFlag(MouseFlags.Button1Clicked)
-                    || me.Flags.HasFlag(MouseFlags.Button1Pressed)
-                    || me.Flags.HasFlag(MouseFlags.Button1DoubleClicked)
-                    || (me.Flags.HasFlag(MouseFlags.ReportMousePosition) && me.Flags.HasFlag(MouseFlags.Button1Pressed));
-        if (!down) return base.MouseEvent(me);
+        bool isDownLike =
+            me.Flags.HasFlag(MouseFlags.Button1Clicked) ||
+            me.Flags.HasFlag(MouseFlags.Button1Pressed) ||
+            me.Flags.HasFlag(MouseFlags.Button1DoubleClicked) ||
+            me.Flags.HasFlag(MouseFlags.Button1Released);
 
-        var localX = Math.Clamp(me.X, 0, Math.Max(0, Bounds.Width - 1));
-        var width  = Bounds.Width > 1 ? Bounds.Width - 1 : 1;
-        var frac   = width <= 0 ? 0f : (float)localX / (float)width;
+        // Optional: kontinuierliches Draggen nur leicht drosseln
+        bool isDrag = me.Flags.HasFlag(MouseFlags.ReportMousePosition) && me.Flags.HasFlag(MouseFlags.Button1Pressed);
+        if (!(isDownLike || isDrag)) return base.MouseEvent(me);
 
+        // Drossel: max. alle 90 ms bei Drag
+        if (isDrag && (DateTime.UtcNow - _lastEmit) < TimeSpan.FromMilliseconds(90))
+            return true;
+
+        int width = Math.Max(1, Bounds.Width - 1);
+        int localX = Math.Clamp(me.X, 0, Math.Max(0, Bounds.Width - 1));
+        float frac = width <= 0 ? 0f : (float)localX / width;
+
+        _lastEmit = DateTime.UtcNow;
         SeekRequested?.Invoke(frac);
         return true;
     }

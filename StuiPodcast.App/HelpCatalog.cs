@@ -106,6 +106,11 @@ namespace StuiPodcast.App
             new(":replay", "Replay from 0:00 or jump back N seconds.",
                 "[N]",
                 Examples: new[]{ ":replay", ":replay 30" }),
+            
+            new(":history", "Manage listening history.",
+                "clear",
+                Examples: new[]{ ":history clear" }),
+
 
             new(":goto", "Select absolute list position.",
                 "top|start|bottom|end",

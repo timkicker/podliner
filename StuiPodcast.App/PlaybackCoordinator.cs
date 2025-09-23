@@ -18,6 +18,9 @@ sealed class PlaybackCoordinator
     CancellationTokenSource? _resumeCts;
     DateTime _lastUiRefresh = DateTime.MinValue;
     DateTime _lastPeriodicSave = DateTime.MinValue;
+    
+    public event Action<Episode>? AutoAdvanceSuggested;
+    DateTimeOffset _lastAutoAdvanceAt = DateTimeOffset.MinValue;
 
     public PlaybackCoordinator(AppData data, IPlayer player, Func<Task> saveAsync, MemoryLogSink mem)
     {
@@ -79,6 +82,50 @@ sealed class PlaybackCoordinator
             catch { /* ignore */ }
         });
     }
+    
+    bool TryFindNext(Episode current, out Episode next)
+    {
+        next = null!;
+        var list = _data.Episodes
+            .Where(e => e.FeedId == current.FeedId)
+            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+            .ToList();
+
+        var idx = list.FindIndex(e => e.Id == current.Id);
+        if (idx < 0) return false;
+
+        for (int i = idx + 1; i < list.Count; i++)
+        {
+            var cand = list[i];
+            if (_data.UnplayedOnly)
+            {
+                if (!cand.Played) { next = cand; return true; }
+            }
+            else
+            {
+                next = cand; return true;
+            }
+        }
+
+        if (_data.WrapAdvance)
+        {
+            for (int i = 0; i < idx; i++)
+            {
+                var cand = list[i];
+                if (_data.UnplayedOnly)
+                {
+                    if (!cand.Played) { next = cand; return true; }
+                }
+                else
+                {
+                    next = cand; return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
 
     void CancelResume()
     {
@@ -111,7 +158,16 @@ sealed class PlaybackCoordinator
                     _current.Played = true;
                     _current.LastPlayedAt = DateTimeOffset.Now;
                     _ = _saveAsync(); // quick save when marking played
+
+                    if (_data.AutoAdvance &&
+                        (DateTimeOffset.Now - _lastAutoAdvanceAt) > TimeSpan.FromMilliseconds(800) &&
+                        TryFindNext(_current, out var nxt))
+                    {
+                        _lastAutoAdvanceAt = DateTimeOffset.Now;
+                        try { AutoAdvanceSuggested?.Invoke(nxt); } catch { /* best effort */ }
+                    }
                 }
+
             }
         }
 

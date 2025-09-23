@@ -163,6 +163,31 @@ static class CommandRouter
         }
         ui.ShowOsd("Refreshed ✓", 1200);
         
+        // --- History ---------------------------------------------------------------
+        if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd.Length > 8 ? cmd[8..].Trim().ToLowerInvariant() : "";
+            if (arg == "clear")
+            {
+                // Nur Verlauf leeren: LastPlayedAt -> null. Played bleibt wie es ist.
+                foreach (var e in data.Episodes)
+                    e.LastPlayedAt = null;
+
+                _ = persist();
+
+                // Falls aktuell der virtuelle "History"-Feed aktiv ist,
+                // Liste neu anwenden, damit sie sofort leer erscheint.
+                ApplyList(ui, data);
+                ui.ShowOsd("History cleared");
+                return;
+            }
+
+            // Unbekannter :history-Subcommand -> kleine Hilfe
+            ui.ShowOsd("usage: :history clear");
+            return;
+        }
+
+        
         
         // unknown → ignore
     }
@@ -256,7 +281,8 @@ static class CommandRouter
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
+
         if (fid == FEED_ALL || fid == FEED_SAVED || fid == FEED_DOWNLOADED || fid == FEED_HISTORY)
         {
             ui.ShowOsd("Can't remove virtual feeds");
@@ -285,7 +311,8 @@ static class CommandRouter
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
+
 
         if (feedId == null) return new List<Episode>();
 
@@ -402,7 +429,7 @@ static class CommandRouter
         var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
         var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
         var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000H15T");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
 
         if (feedId == FEED_SAVED)
             baseList = baseList.Where(e => e.Saved);
