@@ -11,6 +11,12 @@ internal sealed class EpisodesPane
     private int _historyLimit = 200;
     public void SetHistoryLimit(int n) => _historyLimit = Math.Clamp(n, 10, 10000);
     
+    private Func<Guid, DownloadState>? _dlStateLookup;
+    private Func<bool>? _isOffline;
+
+    public void SetOfflineLookup(Func<bool> fn) => _isOffline = fn;
+
+    
     public TabView Tabs { get; }
     public TabView.Tab EpisodesTab { get; }
     public TextView Details { get; }
@@ -30,6 +36,10 @@ internal sealed class EpisodesPane
 
     private Func<Guid, bool>? _isQueued;           // Badge-Lookup
     private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
+    
+
+    public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
+        => _dlStateLookup = fn ?? (_ => StuiPodcast.Core.DownloadState.None);
 
     public event Action? SelectionChanged;
     public event Action? OpenSelected;
@@ -267,9 +277,34 @@ internal sealed class EpisodesPane
         string dur = FormatDuration(lenMs);
 
         char savedCh = (e.Saved == true) ? '★' : ' ';
-        char downCh  = (e.Downloaded == true) ? '⬇' : ' ';
-        char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' '; // ⧉ zeigt Queue an
-        string badges = $"{savedCh}{downCh}{queueCh}";
+
+// Download-Zustand (nur Unicode, keine Emojis)
+        var ds = _dlStateLookup?.Invoke(e.Id) ?? StuiPodcast.Core.DownloadState.None;
+        char dlCh = ds switch {
+            StuiPodcast.Core.DownloadState.Running   => '⇣', // lädt
+            StuiPodcast.Core.DownloadState.Verifying => '≈', // prüft
+            StuiPodcast.Core.DownloadState.Done      => '⬇', // lokal
+            StuiPodcast.Core.DownloadState.Failed    => '!', // Fehler
+            StuiPodcast.Core.DownloadState.Queued    => '⌵', // markiert
+            _                                        => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
+        };
+
+        char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' ';
+
+// Offline-Badge: nur zeigen, wenn global offline UND Episode nicht wirklich lokal fertig
+        char offCh = ' ';
+        bool offline = _isOffline?.Invoke() == true;
+        bool hasLocal =
+            (_dlStateLookup?.Invoke(e.Id) == DownloadState.Done) // via DownloadManager bekannt
+            || e.Downloaded;                                     // Legacy-Fallback
+
+        if (offline && !hasLocal)
+            offCh = '∅';
+
+// jetzt 4. Badge anhängen
+        string badges = $"{savedCh}{dlCh}{queueCh}{offCh}";
+
+
 
         string left = $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  ";
 

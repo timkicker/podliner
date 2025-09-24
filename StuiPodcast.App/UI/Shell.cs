@@ -89,52 +89,19 @@ public sealed class Shell
     // ---- Build ----
     public void Build()
 {
-    // Menü bauen
-    var menu = MenuBarFactory.Build(new MenuBarFactory.Callbacks(
-        Command: (cmd) => Command?.Invoke(cmd),
-        RefreshRequested: RefreshRequested,
-        AddFeed: () => ShowCommandBox(":add "),
-        Quit: () => QuitRequested?.Invoke(),
-        FocusFeeds: () => FocusPane(Pane.Feeds),
-        FocusEpisodes: () => FocusPane(Pane.Episodes),
-        OpenDetails: () =>
-        {
-            _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last();
-            _episodesPane.Details.SetFocus();
-        },
-        BackFromDetails: () =>
-        {
-            if (_episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
-            {
-                _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First();
-                _episodesPane.List.SetFocus();
-            }
-        },
-        JumpNextUnplayed: () => JumpToUnplayed(+1),
-        JumpPrevUnplayed: () => JumpToUnplayed(-1),
-        ShowCommand: () => ShowCommandBox(":"),
-        ShowSearch:  () => ShowSearchBox("/"),
-        ToggleTheme: () => ToggleThemeRequested?.Invoke()
-    ));
 
-    // Menü hinzufügen
-    Application.Top.Add(menu);
-
-    // WICHTIG: globalen Key-Router AUCH auf Top & Menu hängen
-    BindKeys(Application.Top, menu);
-
-    // Main Window
+    // --- Main Window zuerst ---
     _mainWin = new Window
     {
         X = 0,
-        Y = 1, // unter der Menüleiste
+        Y = 1, // Platz für Menü
         Width = Dim.Fill(),
-        Height = Dim.Fill(PlayerPanel.PlayerFrameH)
+        Height = Dim.Fill(PlayerPanel.PlayerFrameH),
+        Border = { BorderStyle = BorderStyle.None }
     };
-    _mainWin.Border.BorderStyle = BorderStyle.None;
     Application.Top.Add(_mainWin);
 
-    // Feeds
+    // --- Feeds-Pane ---
     _feedsPane = new FeedsPane();
     _mainWin.Add(_feedsPane.Frame);
 
@@ -146,7 +113,7 @@ public sealed class Shell
     };
     _feedsPane.OpenRequested += () => FocusPane(Pane.Episodes);
 
-    // Right Root + Episodes/Details Tabs
+    // --- Right Root + EpisodesPane ---
     _rightRoot = new View { X = Pos.Right(_feedsPane.Frame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
     _mainWin.Add(_rightRoot);
 
@@ -161,29 +128,60 @@ public sealed class Shell
         EpisodeSelectionChanged?.Invoke();
     };
 
-    // Player
+    // --- Player ---
     _player = new PlayerPanel();
     _player.ProgressSchemeProvider = MakeProgressScheme;
     _player.WireSeeks(cmd => Command?.Invoke(cmd), () => _lastEffLenTs, s => ShowOsd(s));
     Application.Top.Add(_player);
 
+    // --- Menü ERST JETZT bauen (weil Callbacks _episodesPane nutzen) ---
+    var menu = MenuBarFactory.Build(new MenuBarFactory.Callbacks(
+        Command: (cmd) => Command?.Invoke(cmd),
+        RefreshRequested: RefreshRequested,
+        AddFeed: () => ShowCommandBox(":add "),
+        Quit: () => QuitRequested?.Invoke(),
+        FocusFeeds: () => FocusPane(Pane.Feeds),
+        FocusEpisodes: () => FocusPane(Pane.Episodes),
+        OpenDetails: () =>
+        {
+            if (_episodesPane?.Tabs is { } tv)
+            {
+                tv.SelectedTab = tv.Tabs.Last();
+                _episodesPane.Details.SetFocus();
+            }
+        },
+        BackFromDetails: () =>
+        {
+            if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
+            {
+                _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First();
+                _episodesPane.List.SetFocus();
+            }
+        },
+        JumpNextUnplayed: () => JumpToUnplayed(+1),
+        JumpPrevUnplayed: () => JumpToUnplayed(-1),
+        ShowCommand: () => ShowCommandBox(":"),
+        ShowSearch:  () => ShowSearchBox("/"),
+        ToggleTheme: () => ToggleThemeRequested?.Invoke()
+    ));
+    Application.Top.Add(menu);
+
+    // --- Theme ---
     ApplyTheme();
 
-// IMPORTANT: bind at top-level too, and bind *all* focusable children we use
+    // --- Keys überall binden (null-safe in BindKeys) ---
     BindKeys(
-        Application.Top,          // global fallback (was present in your monolith)
+        Application.Top,
+        menu,
         _mainWin,
         _rightRoot,
         _player,
         _feedsPane?.Frame,
         _feedsPane?.List,
         _episodesPane?.Tabs,
-        _episodesPane?.List,      // <- was missing: when the list has focus, we want vim keys + ':'
-        _episodesPane?.Details    // <- was missing: allow Esc, ':', '/' inside details TextView
+        _episodesPane?.List,
+        _episodesPane?.Details
     );
-
-    
-
 
     // Player initial unten
     SetPlayerPlacement(false);
@@ -194,12 +192,8 @@ public sealed class Shell
         FocusPane(Pane.Episodes);
         return false;
     });
-    
- 
-
-    
-    
 }
+
 
 
     // ---- Feeds/Episodes (API) ----
@@ -454,14 +448,15 @@ public sealed class Shell
     /// <summary>
     /// Attach our key handler to every view passed in (ignores nulls).
     /// </summary>
-    private void BindKeys(params View[] views)
+    private void BindKeys(params View?[] views)
     {
         foreach (var v in views)
         {
-            if (v == null) continue;
+            if (v is null) continue;
             v.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
         }
     }
+
 
     private bool HandleKeys(View.KeyEventEventArgs e)
 {
@@ -499,20 +494,29 @@ public sealed class Shell
     if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
 
     // pane cycle / details
+    // h
     if (key == (Key)('h'))
     {
-        if (_episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
-        { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); }
+        if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
+        {
+            _episodesPane!.Tabs.SelectedTab = _episodesPane!.Tabs.Tabs.First();
+            _episodesPane!.List.SetFocus();
+        }
         else FocusPane(Pane.Feeds);
         return true;
     }
+
+// l
     if (key == (Key)('l'))
     {
         if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
         else
         {
-            if (_episodesPane.Tabs.SelectedTab?.Text.ToString() != "Details")
-            { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); }
+            if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() != "Details")
+            {
+                _episodesPane!.Tabs.SelectedTab = _episodesPane!.Tabs.Tabs.Last();
+                _episodesPane!.Details.SetFocus();
+            }
         }
         return true;
     }
@@ -520,9 +524,22 @@ public sealed class Shell
     if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
     if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
 
-    if (kv == 'i' || kv == 'I') { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last(); _episodesPane.Details.SetFocus(); return true; }
-    if (key == Key.Esc && _episodesPane.Tabs.SelectedTab?.Text.ToString() == "Details")
-    { _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First(); _episodesPane.List.SetFocus(); return true; }
+    
+// i
+    if (kv == 'i' || kv == 'I')
+    {
+        _episodesPane!.Tabs.SelectedTab = _episodesPane!.Tabs.Tabs.Last();
+        _episodesPane!.Details.SetFocus();
+        return true;
+    }
+
+// Esc aus Details
+    if (key == Key.Esc && _episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
+    {
+        _episodesPane!.Tabs.SelectedTab = _episodesPane!.Tabs.Tabs.First();
+        _episodesPane!.List.SetFocus();
+        return true;
+    }
 
     if (key == Key.Space) { Command?.Invoke(":toggle"); return true; }
     if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
@@ -562,6 +579,11 @@ public sealed class Shell
     return false;
 }
 
+    public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
+    {
+        _episodesPane?.SetDownloadStateLookup(fn);
+    }
+
 
     public Guid QueueFeedId => FEED_QUEUE;
 
@@ -589,6 +611,12 @@ public sealed class Shell
             RefreshListVisual(_feedsPane.List);
         }
     }
+    
+    public void SetOfflineLookup(Func<bool> isOffline)
+    {
+        _episodesPane?.SetOfflineLookup(isOffline);
+    }
+
 
     private void JumpToUnplayed(int direction)
     {

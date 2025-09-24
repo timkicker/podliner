@@ -10,6 +10,9 @@ using StuiPodcast.Infra;
 
 static class CommandRouter
 {
+    
+    static void OSD(Shell ui, string text, int ms = 600) => ui.ShowOsd(text, ms);
+    
     public static void Handle(string raw,
                               IPlayer player,
                               PlaybackCoordinator playback,
@@ -20,6 +23,71 @@ static class CommandRouter
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
         var cmd = raw.Trim();
+        
+        // play-source
+        if (cmd.StartsWith(":play-source", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd.Length > 12 ? cmd[12..].Trim().ToLowerInvariant() : "";
+            if (arg is "auto" or "local" or "remote")
+            {
+                data.PlaySource = arg;
+                _ = persist();
+                ui.ShowOsd($"play-source: {arg}");
+            }
+            else
+            {
+                ui.ShowOsd("usage: :play-source auto|local|remote");
+            }
+            return;
+        }
+
+// net (online/offline toggeln)
+        // net (online/offline toggeln)
+        if (cmd.StartsWith(":net", StringComparison.OrdinalIgnoreCase))
+        {
+            var arg = cmd.Length > 4 ? cmd[4..].Trim().ToLowerInvariant() : "";
+            if (arg is "online" or "on")
+            {
+                data.NetworkOnline = true;
+                _ = persist();
+                ui.ShowOsd("Online", 600);
+            }
+            else if (arg is "offline" or "off")
+            {
+                data.NetworkOnline = false;
+                _ = persist();
+                ui.ShowOsd("Offline", 600);
+            }
+            else if (string.IsNullOrEmpty(arg) || arg == "toggle")
+            {
+                data.NetworkOnline = !data.NetworkOnline;
+                _ = persist();
+                ui.ShowOsd(data.NetworkOnline ? "Online" : "Offline", 600);
+            }
+            else
+            {
+                ui.ShowOsd("usage: :net online|offline|toggle", 1200);
+            }
+
+            // sofort neu zeichnen (Badges/Spalte/Filter)
+            ApplyList(ui, data);
+            
+            // Force-Refresh der aktuell sichtbaren Items (Badge „∅“/„⬇“ etc. sofort sichtbar machen)
+            ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+
+// Wenn etwas läuft, Titel ggf. mit [OFFLINE] Präfix aktualisieren
+            var nowId = ui.GetNowPlayingId();
+            if (nowId != null)
+            {
+                var playing = data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                if (playing != null)
+                    ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (playing.Title ?? "—"));
+            }
+
+            return;
+        }
+
+
 
         // --- quick commands via keys ---
         if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase))
@@ -157,11 +225,12 @@ static class CommandRouter
 
         if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase))
         {
-            ui.ShowOsd("Refreshing…", 1500);   // kleines Overlay während der Aktualisierung
-            ui.RequestRefresh();                // feuert den eigentlichen Refresh (async)
+            ui.ShowOsd("Refreshing…", 600);   // kurz halten
+            ui.RequestRefresh();               // macht den eigentlichen Refresh (async)
             return;
         }
-        ui.ShowOsd("Refreshed ✓", 1200);
+// <-- hier KEIN "Refreshed ✓" stehen lassen!
+
         
         // --- HISTORY --------------------------------------------------------------
         if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase))
@@ -490,6 +559,64 @@ static class CommandRouter
             return true;
     }
 }
+    
+    public static bool HandleDownloads(
+        string cmd,
+        Shell ui,
+        AppData data,
+        DownloadManager dlm,
+        Func<Task> saveAsync)
+    {
+        cmd = (cmd ?? "").Trim();
+        if (!cmd.StartsWith(":dl", StringComparison.OrdinalIgnoreCase)
+            && !cmd.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var ep = ui.GetSelectedEpisode();
+        if (ep == null) return true;
+
+        // parse args (":dl", ":dl start", ":dl cancel")
+        var parts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var arg = (parts.Length > 1 ? parts[1].ToLowerInvariant() : "");
+
+        switch (arg)
+        {
+            case "start":
+                dlm.ForceFront(ep.Id);
+                dlm.EnsureRunning();
+                ui.ShowOsd("Forced ⇣");
+                break;
+
+            case "cancel":
+                dlm.Cancel(ep.Id);
+                data.DownloadMap.Remove(ep.Id);
+                data.DownloadQueue.RemoveAll(x => x == ep.Id);
+                ui.ShowOsd("Canceled");
+                break;
+
+            default:
+                // Toggle mark
+                var st = dlm.GetState(ep.Id);
+                if (st == DownloadState.None || st == DownloadState.Canceled || st == DownloadState.Failed)
+                {
+                    dlm.Enqueue(ep.Id);
+                    ui.ShowOsd("Queued ⌵");
+                }
+                else
+                {
+                    // unmark (auch wenn gerade Done → lediglich Badge wegnehmen? hier: nur Queue-bezogen)
+                    dlm.Cancel(ep.Id);
+                    data.DownloadMap.Remove(ep.Id);
+                    data.DownloadQueue.RemoveAll(x => x == ep.Id);
+                    ui.ShowOsd("Unqueued");
+                }
+                break;
+        }
+
+        _ = saveAsync();
+        ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+        return true;
+    }
 
 
 

@@ -6,6 +6,9 @@ using Serilog;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
 using Terminal.Gui;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+
 
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
@@ -16,7 +19,159 @@ class Program
     static readonly object _saveGate = new();
     static DateTimeOffset _lastSave = DateTimeOffset.MinValue;
     static bool _savePending = false;
+    
     static bool _saveRunning = false;
+    static object? _netTimerToken;   
+    
+    static readonly System.Collections.Generic.Dictionary<Guid, DownloadState> _dlLast = new();
+    static DateTime _dlLastUiPulse = DateTime.MinValue;
+    
+    static object? _netTimer;
+
+    static volatile bool _netProbeRunning = false;
+    static int _netConsecOk = 0, _netConsecFail = 0;
+    const int FAILS_FOR_OFFLINE = 4;
+    const int SUCC_FOR_ONLINE   = 3;
+    static DateTimeOffset _netLastFlip = DateTimeOffset.MinValue;
+    static readonly TimeSpan _netMinDwell = TimeSpan.FromSeconds(15);
+
+    static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
+    
+    static void LogNicsSnapshot()
+{
+    try
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            var ip = nic.GetIPProperties();
+            var ipv4 = string.Join(",", ip.UnicastAddresses
+                                     .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                                     .Select(a => a.Address.ToString()));
+            var gw   = string.Join(",", ip.GatewayAddresses.Select(g => g.Address?.ToString() ?? ""));
+            var dns  = string.Join(",", ip.DnsAddresses.Select(d => d.ToString()));
+            Log.Information("net/nic name={Name} type={Type} op={Op} spd={Speed} ipv4=[{IPv4}] gw=[{Gw}] dns=[{Dns}]",
+                nic.Name, nic.NetworkInterfaceType, nic.OperationalStatus, nic.Speed, ipv4, gw, dns);
+        }
+    } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
+}
+
+static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
+{
+    try
+    {
+        using var cts = new CancellationTokenSource(timeoutMs);
+        using var sock = new System.Net.Sockets.Socket(
+            System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Stream,
+            System.Net.Sockets.ProtocolType.Tcp);
+        var start = DateTime.UtcNow;
+        var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
+        await task.ConfigureAwait(false);
+        var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
+        Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
+        return false;
+    }
+}
+
+static async Task<bool> HttpProbeAsync(string url)
+{
+    try
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var req = new HttpRequestMessage(HttpMethod.Head, url);
+        using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+        sw.Stop();
+        Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
+        return ((int)resp.StatusCode) is >= 200 and < 400;
+    }
+    catch (Exception exHead)
+    {
+        try
+        {
+            var sw2 = System.Diagnostics.Stopwatch.StartNew();
+            using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            sw2.Stop();
+            Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
+                url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
+            return ((int)resp.StatusCode) is >= 200 and < 400;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "net/probe http fail {Url}", url);
+            return false;
+        }
+    }
+}
+
+
+    
+static async Task<bool> QuickNetCheckAsync()
+{
+    var swAll = System.Diagnostics.Stopwatch.StartNew();
+
+    bool anyUp = false;
+    try
+    {
+        anyUp = NetworkInterface.GetIsNetworkAvailable();
+        Log.Debug("net/probe nics-available={Avail}", anyUp);
+    } catch { }
+
+    // Low-level TCP first (DNS-frei)
+    var tcpOk =
+        await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
+        await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
+
+    // HTTP (mit möglicher Captive-Portal-Redirect)
+    // HTTP (ohne TLS) vermeidet Zertifikat-Mismatch bei IP-Literals
+    var httpOk =
+        await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
+        await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
+
+    swAll.Stop();
+    Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
+        tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
+
+    // Heuristik:
+    // - mind. TCP oder HTTP ok ⇒ online
+    // - wenn KEIN Interface up ⇒ offline (hart)
+    // - wenn nur Interfaces up, aber weder TCP noch HTTP ⇒ offline
+    var online = (tcpOk || httpOk) && anyUp;
+    return online;
+}
+
+
+static void OnNetworkChanged(bool online)
+{
+    var prev = Data.NetworkOnline;
+    Data.NetworkOnline = online;
+
+    Application.MainLoop?.Invoke(() =>
+    {
+        CommandRouter.ApplyList(UI!, Data);
+        UI!.RefreshEpisodesForSelectedFeed(Data.Episodes);
+
+        var nowId = UI!.GetNowPlayingId();
+        if (nowId != null)
+        {
+            var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
+            if (ep != null)
+                UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+        }
+
+        if (!online) UI.ShowOsd("net: offline", 800); // online → keine OSD
+    });
+
+    _ = SaveAsync();
+}
+
+
+
+
 
     static AppData Data = new();
     static FeedService? Feeds;
@@ -28,6 +183,8 @@ class Program
 
     static object? _uiTimer;
     static int _exitOnce = 0;
+    
+    static DownloadManager? Downloader;
 
     static async Task Main()
     {
@@ -36,6 +193,16 @@ class Program
 
         Data  = await AppStorage.LoadAsync();
         Feeds = new FeedService(Data);
+        
+        _ = Task.Run(async () =>
+        {
+            bool online = await QuickNetCheckAsync();
+            _netConsecOk   = online ? 1 : 0;
+            _netConsecFail = online ? 0 : 1;
+            _netLastFlip   = DateTimeOffset.UtcNow; // Dwell startet jetzt
+            OnNetworkChanged(online);
+        });
+
 
         // Default-Feed beim allerersten Start
         if (Data.Feeds.Count == 0)
@@ -43,6 +210,7 @@ class Program
             try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
             catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
         }
+        
 
         // Anchor-Feed nur hinzufügen, wenn noch nicht da
         var anchorUrl = "https://anchor.fm/s/fc0e8c18/podcast/rss";
@@ -55,6 +223,9 @@ class Program
 
         Player   = new LibVlcPlayer();
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
+        Downloader = new DownloadManager(Data);
+
+      
 
         // Auto-Advance: EINZIGE Quelle ist der Coordinator
         Playback.AutoAdvanceSuggested += next =>
@@ -70,7 +241,7 @@ class Program
 
             // Abspielen & UI aktualisieren
             Playback!.Play(next);
-            UI!.SetWindowTitle(next.Title);
+            UI!.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + next.Title);
             UI!.ShowDetails(next);
             UI!.SetNowPlaying(next.Id);
         };
@@ -94,7 +265,99 @@ class Program
         UI = new Shell(MemLog);
         UI.Build();
         
+        // sofort einmal prüfen – nichts zuweisen, einfach ausführen
+        Task.Run(async () =>
+        {
+            var online = await QuickNetCheckAsync();
+            OnNetworkChanged(online);
+        });
+
+        
+        try
+        {
+            NetworkChange.NetworkAvailabilityChanged += (s, e) =>
+            {
+                // OS-Event ist nur ein Hint → echte Entscheidung trifft die Probe + Hysterese
+                TriggerNetProbe();
+            };
+
+        }
+        catch { /* kann auf manchen Plattformen fehlen → egal */ }
+        
+        _netTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(3), _ =>
+        {
+            TriggerNetProbe();
+            return true; // weiterlaufen
+        });
+
+
+
+
+
+
+
+
+
+
+// Lookups
         UI.SetQueueLookup(id => Data.Queue.Contains(id));
+        UI.SetDownloadStateLookup(id => Data.DownloadMap.TryGetValue(id, out var s) ? s.State : DownloadState.None);
+
+        UI.SetOfflineLookup(() => !Data.NetworkOnline); // true = offline
+        
+// Download-Status → UI
+        Downloader.StatusChanged += (id, st) =>
+        {
+            var prev = _dlLast.TryGetValue(id, out var p) ? p : DownloadState.None;
+            _dlLast[id] = st.State;
+
+            // Nur wenn sich der STATE ändert, die UI refreshen (Badge wechselt)
+            if (prev != st.State)
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
+
+                    // Ultra-kurze OSDs, nur bei Übergängen – nie bei jedem Chunk
+                    switch (st.State)
+                    {
+                        case DownloadState.Queued:
+                            UI.ShowOsd("⌵", 300);     // "Queued"
+                            break;
+                        case DownloadState.Running:
+                            UI.ShowOsd("⇣", 300);     // einmalig beim Start
+                            break;
+                        case DownloadState.Verifying:
+                            UI.ShowOsd("≈", 300);
+                            break;
+                        case DownloadState.Done:
+                            UI.ShowOsd("⬇", 500);
+                            break;
+                        case DownloadState.Failed:
+                            UI.ShowOsd("!", 900);
+                            break;
+                        case DownloadState.Canceled:
+                            UI.ShowOsd("×", 400);
+                            break;
+                    }
+                });
+                _ = SaveAsync();
+                return;
+            }
+
+            // Gleicher State (z.B. viele Running-Updates):
+            // NUR ganz dezent die Liste alle ~500ms pulsen lassen (damit Bytes/Badges smooth bleiben),
+            // KEIN OSD, um Jank zu vermeiden.
+            if (st.State == DownloadState.Running && (DateTime.UtcNow - _dlLastUiPulse) > TimeSpan.FromMilliseconds(500))
+            {
+                _dlLastUiPulse = DateTime.UtcNow;
+                Application.MainLoop?.Invoke(() => UI.RefreshEpisodesForSelectedFeed(Data.Episodes));
+            }
+        };
+
+// Worker starten (kann hier bleiben)
+        Downloader.EnsureRunning();
+
 
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
 
@@ -177,17 +440,16 @@ class Program
 
             var curFeed = UI.GetSelectedFeedId();
 
-            // Verlauf stempeln → hilft beim Restore
+            // Verlauf stempeln
             ep.LastPlayedAt = DateTimeOffset.Now;
             _ = SaveAsync();
 
-            // Wenn wir im Queue-Feed sind: alles bis inkl. diesem entfernen
+            // Queue-Feed: alle davor + diese entfernen
             if (curFeed is Guid fid && fid == UI.QueueFeedId)
             {
                 int ix = Data.Queue.FindIndex(id => id == ep.Id);
                 if (ix >= 0)
                 {
-                    // alle davor + sich selbst raus
                     Data.Queue.RemoveRange(0, ix + 1);
                     UI.SetQueueOrder(Data.Queue);
                     UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
@@ -195,10 +457,94 @@ class Program
                 }
             }
 
-            Playback!.Play(ep);
-            UI.SetWindowTitle(ep.Title);
+            // === Quelle bestimmen (ohne DownloadManager-API) ===
+            string? localPath = null;
+            if (Data.DownloadMap.TryGetValue(ep.Id, out var st)
+                && st.State == DownloadState.Done
+                && !string.IsNullOrWhiteSpace(st.LocalPath)
+                && System.IO.File.Exists(st.LocalPath))
+            {
+                localPath = st.LocalPath;
+            }
+
+            var mode   = (Data.PlaySource ?? "auto").Trim().ToLowerInvariant();
+            var online = Data.NetworkOnline;
+
+            string? source = mode switch
+            {
+                "local"  => localPath,
+                "remote" => ep.AudioUrl,
+                _        => localPath ?? (online ? ep.AudioUrl : null) // auto: lokal bevorzugt, sonst remote wenn online
+            };
+
+            if (string.IsNullOrWhiteSpace(source))
+            {
+                var msg = (localPath == null)
+                    ? "∅ Offline: not downloaded"
+                    : "No playable source";
+                UI.ShowOsd(msg, 1500);
+                return;
+            }
+
+
+            // Wenn lokale Datei → in file:// umwandeln
+            //if (localPath != null && source == localPath)
+              //  source = new Uri(localPath).AbsoluteUri;
+
+            // Minimale Injektion: ep.AudioUrl kurz auf gewählte Quelle setzen
+            var oldUrl = ep.AudioUrl;
+            try
+            {
+                ep.AudioUrl = source;
+                Playback!.Play(ep);
+            }
+            finally
+            {
+                ep.AudioUrl = oldUrl;
+            }
+
+            UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + ep.Title);
             UI.SetNowPlaying(ep.Id);
+            
+            // Einmaliger Retry für lokale Dateien, falls der Start „hängt“.
+            if (localPath != null)
+            {
+                Application.MainLoop?.AddTimeout(TimeSpan.FromMilliseconds(600), _ =>
+                {
+                    try
+                    {
+                        var s = Player.State;
+                        // Wenn nach ~600ms immer noch nicht spielend und Position 0 → nochmal probieren.
+                        if (!s.IsPlaying && s.Position == TimeSpan.Zero)
+                        {
+                            try { Player.Stop(); } catch { /* best effort */ }
+
+                            // 1. Versuch: nackter Pfad (haben wir schon probiert)
+                            // 2. Fallback: einmal mit file:// probieren
+                            var fileUri = new Uri(localPath).AbsoluteUri;
+
+                            var oldUrl = ep.AudioUrl;
+                            try
+                            {
+                                ep.AudioUrl = fileUri;   // nur für den Start
+                                Playback!.Play(ep);
+                                UI.ShowOsd("Retry (file://)");
+                            }
+                            finally
+                            {
+                                ep.AudioUrl = oldUrl;    // wieder zurück
+                            }
+                        }
+                    }
+                    catch { /* robust bleiben */ }
+
+                    return false; // one-shot
+                });
+            }
+
+            
         };
+
 
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
@@ -229,19 +575,25 @@ class Program
 
         // Program.cs
 // Ersetzt den kompletten UI.Command-Handler
+        // Program.cs
         UI.Command += cmd =>
         {
             // 1) Queue-Commands zuerst
             if (CommandRouter.HandleQueue(cmd, UI!, Data, SaveAsync))
             {
-                UI.SetQueueOrder(Data.Queue);                 // sicherheitshalber
+                UI.SetQueueOrder(Data.Queue);
                 UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
                 return;
             }
 
-            // 2) Restliche Commands wie gehabt
+            // 2) Download-Commands (dl / download)
+            if (CommandRouter.HandleDownloads(cmd, UI!, Data, Downloader!, SaveAsync))
+                return;
+
+            // 3) Restliche Commands wie gehabt
             CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data, SaveAsync);
         };
+
 
 
 
@@ -348,12 +700,16 @@ class Program
         finally
         {
             try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
+            try { Application.MainLoop?.RemoveTimeout(_netTimer); } catch { } 
+            try { if (_netTimerToken is not null) Application.MainLoop.RemoveTimeout(_netTimerToken); } catch {}
+
             try { Player?.Stop(); } catch { }
             (Player as IDisposable)?.Dispose();
             await SaveAsync();
             try { Application.Shutdown(); } catch { }
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }
+            try { _probeHttp.Dispose(); } catch { }
         }
     }
 
@@ -478,11 +834,54 @@ class Program
         }
     }
 
+    
+    static void TriggerNetProbe()
+    {
+        if (_netProbeRunning) return;   // schon unterwegs → nix tun
+        _netProbeRunning = true;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var probeOnline = await QuickNetCheckAsync().ConfigureAwait(false);
+
+                if (probeOnline) { _netConsecOk++;  _netConsecFail = 0; }
+                else             { _netConsecFail++; _netConsecOk   = 0; }
+
+                bool state   = Data.NetworkOnline;
+                bool dwellOk = (DateTimeOffset.UtcNow - _netLastFlip) >= _netMinDwell;
+
+                bool flipToOn  = !state && probeOnline && _netConsecOk   >= SUCC_FOR_ONLINE && dwellOk;
+                bool flipToOff =  state && !probeOnline && _netConsecFail >= FAILS_FOR_OFFLINE && dwellOk;
+
+                Log.Information("net/decision prev={Prev} probe={Probe} ok={Ok} fail={Fail} dwellOk={DwellOk} age={Age}s flipOn={FlipOn} flipOff={FlipOff}",
+                    state ? "online" : "offline",
+                    probeOnline ? "online" : "offline",
+                    _netConsecOk, _netConsecFail, dwellOk,
+                    (DateTimeOffset.UtcNow - _netLastFlip).TotalSeconds.ToString("0"),
+                    flipToOn, flipToOff);
+
+                if (flipToOn || flipToOff)
+                {
+                    _netLastFlip = DateTimeOffset.UtcNow;
+                    LogNicsSnapshot();   // optional
+                    OnNetworkChanged(flipToOn);
+                }
+            }
+            finally { _netProbeRunning = false; }
+        });
+    }
+
+    
     static void QuitApp()
     {
         if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
 
         try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
+        try { Application.MainLoop?.RemoveTimeout(_netTimer); } catch { }
+        try { if (_netTimerToken is not null) Application.MainLoop.RemoveTimeout(_netTimerToken); } catch {}
+
         try { (Player as IDisposable)?.Dispose(); } catch { }
 
         try { Application.RequestStop(); } catch { }

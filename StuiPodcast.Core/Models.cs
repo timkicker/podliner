@@ -40,8 +40,16 @@ public class PlayerState {
 public class AppData {
     
     // --- Sortierung (global) ---
+    // AppData.cs
+    public string PlaySource { get; set; } = "auto"; // "auto" | "local" | "remote"
+    public bool   NetworkOnline { get; set; } = true;
+
     
     public List<Guid> Queue { get; set; } = new();
+
+    public string? DownloadDir { get; set; }          // z.B. ~/Podcasts
+    public List<Guid> DownloadQueue { get; set; } = new();  // FIFO
+    public Dictionary<Guid, StuiPodcast.Core.DownloadStatus> DownloadMap { get; set; } = new();
 
     
     public int HistorySize { get; set; } = 200;

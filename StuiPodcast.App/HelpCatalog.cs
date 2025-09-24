@@ -79,10 +79,11 @@ namespace StuiPodcast.App
                 "[on|off|true|false|+|-]",
                 Examples: new[]{ ":save", ":save on", ":save off" }),
 
-            new(":dl", "Toggle or set 'downloaded' (⬇) for selected episode.",
-                "[on|off|true|false|+|-]",
+            new(":dl", "Mark/Unmark for download (auto-queued).",
+                "[start|cancel]",
                 Aliases: new[]{":download"},
-                Examples: new[]{ ":dl", ":dl on", ":download off" }),
+                Examples: new[]{ ":dl", ":dl start", ":dl cancel" }),
+
 
             new(":player", "Place the player bar.",
                 "[top|bottom|toggle]",
