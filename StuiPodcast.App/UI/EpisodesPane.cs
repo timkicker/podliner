@@ -10,13 +10,13 @@ internal sealed class EpisodesPane
 {
     private int _historyLimit = 200;
     public void SetHistoryLimit(int n) => _historyLimit = Math.Clamp(n, 10, 10000);
-    
+
     private Func<Guid, DownloadState>? _dlStateLookup;
     private Func<bool>? _isOffline;
 
     public void SetOfflineLookup(Func<bool> fn) => _isOffline = fn;
 
-    
+    // UI (werden im Ctor initialisiert; non-null)
     public TabView Tabs { get; }
     public TabView.Tab EpisodesTab { get; }
     public TextView Details { get; }
@@ -34,12 +34,11 @@ internal sealed class EpisodesPane
     private const int FEED_COL_W = 24;
     private const string SEP = "  │  ";
 
-    private Func<Guid, bool>? _isQueued;           // Badge-Lookup
+    private Func<Guid, bool>? _isQueued;             // Badge-Lookup
     private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
-    
 
-    public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
-        => _dlStateLookup = fn ?? (_ => StuiPodcast.Core.DownloadState.None);
+    public void SetDownloadStateLookup(Func<Guid, DownloadState> fn)
+        => _dlStateLookup = fn ?? (_ => DownloadState.None);
 
     public event Action? SelectionChanged;
     public event Action? OpenSelected;
@@ -76,7 +75,10 @@ internal sealed class EpisodesPane
     public void SetFeedsMeta(IEnumerable<Feed> feeds)
     {
         _feeds = (feeds ?? Enumerable.Empty<Feed>()).ToList();
-        _feedTitleMap = _feeds.GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First().Title ?? "");
+        // Robust gegen doppelte IDs und null-Titel
+        _feedTitleMap = _feeds
+            .GroupBy(f => f.Id)
+            .ToDictionary(g => g.Key, g => g.First().Title ?? string.Empty);
     }
 
     public void SetQueueLookup(Func<Guid, bool> isQueued) => _isQueued = isQueued ?? (_ => false);
@@ -102,8 +104,8 @@ internal sealed class EpisodesPane
         Guid? preferSelectId)
     {
         // Auswahl & Scroll vor Rebuild sichern
-        var keepTop = List?.TopItem ?? 0;
-        var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
+        var keepTop = List.TopItem;
+        var keepSel = (List.Source?.Count > 0) ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
         IEnumerable<Episode> src = baseEpisodes ?? Enumerable.Empty<Episode>();
 
@@ -118,7 +120,7 @@ internal sealed class EpisodesPane
         {
             // QUEUE: FIFO anhand _queueOrder, Suche/Sort bewusst ignoriert
             _showFeedColumn = true; // Queue listet versch. Feeds → Spalte macht Sinn
-            var map = src.ToDictionary(e => e.Id, e => e);
+            var map = src.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
             src = _queueOrder.Where(map.ContainsKey).Select(id => map[id]);
         }
         else
@@ -177,7 +179,7 @@ internal sealed class EpisodesPane
 
     public void SelectIndex(int index)
     {
-        if (List?.Source?.Count > 0)
+        if (List.Source?.Count > 0)
         {
             List.SelectedItem = Math.Clamp(index, 0, List.Source.Count - 1);
         }
@@ -278,20 +280,20 @@ internal sealed class EpisodesPane
 
         char savedCh = (e.Saved == true) ? '★' : ' ';
 
-// Download-Zustand (nur Unicode, keine Emojis)
-        var ds = _dlStateLookup?.Invoke(e.Id) ?? StuiPodcast.Core.DownloadState.None;
+        // Download-Zustand (nur Unicode, keine Emojis)
+        var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
         char dlCh = ds switch {
-            StuiPodcast.Core.DownloadState.Running   => '⇣', // lädt
-            StuiPodcast.Core.DownloadState.Verifying => '≈', // prüft
-            StuiPodcast.Core.DownloadState.Done      => '⬇', // lokal
-            StuiPodcast.Core.DownloadState.Failed    => '!', // Fehler
-            StuiPodcast.Core.DownloadState.Queued    => '⌵', // markiert
-            _                                        => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
+            DownloadState.Running   => '⇣', // lädt
+            DownloadState.Verifying => '≈', // prüft
+            DownloadState.Done      => '⬇', // lokal
+            DownloadState.Failed    => '!', // Fehler
+            DownloadState.Queued    => '⌵', // markiert
+            _                       => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
         };
 
         char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' ';
 
-// Offline-Badge: nur zeigen, wenn global offline UND Episode nicht wirklich lokal fertig
+        // Offline-Badge: nur zeigen, wenn global offline UND Episode nicht wirklich lokal fertig
         char offCh = ' ';
         bool offline = _isOffline?.Invoke() == true;
         bool hasLocal =
@@ -301,15 +303,12 @@ internal sealed class EpisodesPane
         if (offline && !hasLocal)
             offCh = '∅';
 
-// jetzt 4. Badge anhängen
         string badges = $"{savedCh}{dlCh}{queueCh}{offCh}";
-
-
 
         string left = $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  ";
 
-        string title = e.Title ?? "";
-        int viewWidth = (List?.Bounds.Width > 0) ? List.Bounds.Width : 100;
+        string title = e.Title ?? string.Empty;
+        int viewWidth = (List.Bounds.Width > 0) ? List.Bounds.Width : 100;
 
         int reservedRight = _showFeedColumn ? (SEP.Length + FEED_COL_W) : 0;
         int availTitle = Math.Max(6, viewWidth - left.Length - reservedRight);
@@ -317,7 +316,7 @@ internal sealed class EpisodesPane
 
         if (!_showFeedColumn) return left + titleTrunc;
 
-        string feedName = (_feedTitleMap.TryGetValue(e.FeedId, out var nm) ? nm : "") ?? "";
+        string feedName = (_feedTitleMap.TryGetValue(e.FeedId, out var nm) ? nm : string.Empty) ?? string.Empty;
         string feedTrunc = TruncateTo(feedName, FEED_COL_W);
         string paddedTitle = titleTrunc.PadRight(availTitle);
         return left + paddedTitle + SEP + feedTrunc.PadRight(FEED_COL_W);
@@ -347,16 +346,19 @@ internal sealed class EpisodesPane
         {
             var row = RowFor(e);
             if (nowId != null && e.Id == nowId.Value)
-                row = "▶ " + row.Substring(2);
+            {
+                // Ersetze das neutrale Prefix ("  ") am Anfang durch "▶ "
+                if (row.Length >= 2) row = "▶ " + row.Substring(2);
+                else row = "▶ " + row; // Falls defensiv kürzer
+            }
             return row;
         }).ToList();
 
         // Auswahl & Scroll beibehalten
-        var keepSel = List?.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
-        var keepTop = List?.TopItem ?? 0;
+        var keepSel = (List.Source?.Count > 0) ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
+        var keepTop = List.TopItem;
 
         List.SetSource(items);
-
         var maxSel = Math.Max(0, items.Count - 1);
         List.SelectedItem = Math.Clamp(keepSel, 0, maxSel);
         List.TopItem = Math.Clamp(keepTop, 0, Math.Max(0, items.Count - 1));

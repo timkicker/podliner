@@ -30,6 +30,19 @@ internal sealed class PlayerPanel : FrameView
 
     public Func<ColorScheme>? ProgressSchemeProvider { get; set; }
 
+    // wiring guards / throttles
+    private bool _commandAttached;
+    private bool _seeksWired;
+
+    private DateTime _lastProgressEmit = DateTime.MinValue;
+    private float _lastProgressFrac = -1f;
+    private DateTime _lastVolEmit = DateTime.MinValue;
+    private float _lastVolFrac = -1f;
+
+    private const int DragThrottleMs = 90;     // min interval between emits while dragging
+    private const float ProgressDeltaMin = 0.01f; // min fraction change (~1%) to emit
+    private const float VolumeDeltaMin = 0.02f;   // 2% volume step to emit
+
     public PlayerPanel() : base("Player")
     {
         X = SidePad;
@@ -62,7 +75,8 @@ internal sealed class PlayerPanel : FrameView
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
         var midWidth = 6 + midGap + 6 + midGap + 6;
         var mid = new View { Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false };
-        mid.Add(SpeedLabel, BtnSpeedUp, BtnSpeedDown);
+        // Reihenfolge: Label, -spd, +spd (logisch links->rechts)
+        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp);
 
         const int rightPad = 2;
         const int gap = 2;
@@ -98,28 +112,63 @@ internal sealed class PlayerPanel : FrameView
             mid, BtnVolDown, BtnVolUp, VolPctLabel, VolBar, Progress);
     }
 
+    /// <summary>
+    /// Verdrahtet Seeks/Volume exakt einmal. Mehrfachaufrufe sind idempotent.
+    /// </summary>
     public void WireSeeks(Action<string> command, Func<TimeSpan> lastEffectiveLength, Action<string> osd)
     {
-        Command += command;
+        if (!_commandAttached)
+        {
+            Command += command;
+            _commandAttached = true;
+        }
+        if (_seeksWired) return;
+        _seeksWired = true;
 
         Progress.SeekRequested += frac =>
         {
-            var pct = (int)Math.Round(Math.Clamp(frac, 0f, 1f) * 100);
+            var now = DateTime.UtcNow;
+            var clamped = Math.Clamp(frac, 0f, 1f);
+
+            // Throttle & change detection
+            if ((now - _lastProgressEmit).TotalMilliseconds < DragThrottleMs &&
+                Math.Abs(clamped - _lastProgressFrac) < ProgressDeltaMin)
+                return;
+
+            _lastProgressEmit = now;
+            _lastProgressFrac = clamped;
+
+            var pct = (int)Math.Round(clamped * 100);
             command($":seek {pct}%");
 
             var effLen = lastEffectiveLength();
             if (effLen > TimeSpan.Zero)
             {
-                var target = TimeSpan.FromMilliseconds(effLen.TotalMilliseconds * frac);
-                osd($"→ {(int)target.TotalMinutes:00}:{target.Seconds:00}");
+                var target = TimeSpan.FromMilliseconds(effLen.TotalMilliseconds * clamped);
+                // h:mm:ss Anzeige robust (lange Episoden)
+                var h = (int)target.TotalHours;
+                var mm = target.Minutes;
+                var ss = target.Seconds;
+                var txt = h > 0 ? $"{h}:{mm:00}:{ss:00}" : $"{mm:00}:{ss:00}";
+                osd($"→ {txt}");
             }
         };
 
         VolBar.SeekRequested += frac =>
         {
-            var vol = (int)Math.Round(Math.Clamp(frac, 0f, 1f) * 100);
-            command($":vol {vol}");
-            osd($"Vol {vol}%");
+            var now = DateTime.UtcNow;
+            var clamped = Math.Clamp(frac, 0f, 1f);
+
+            if ((now - _lastVolEmit).TotalMilliseconds < DragThrottleMs &&
+                Math.Abs(clamped - _lastVolFrac) < VolumeDeltaMin)
+                return;
+
+            _lastVolEmit = now;
+            _lastVolFrac = clamped;
+
+            var vol = (int)Math.Round(clamped * 100);
+            command($":vol {Math.Clamp(vol, 0, 100)}");
+            osd($"Vol {Math.Clamp(vol, 0, 100)}%");
         };
     }
 

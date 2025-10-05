@@ -10,24 +10,30 @@ using StuiPodcast.App.Debug;
 sealed class PlaybackCoordinator
 {
     // ---- Dependencies / State --------------------------------------------------
-    readonly AppData _data;
-    readonly IPlayer _player;
-    readonly Func<Task> _saveAsync;
-    readonly MemoryLogSink _mem;
+    private readonly AppData _data;
+    private readonly IPlayer _player;
+    private readonly Func<Task> _saveAsync;
+    private readonly MemoryLogSink _mem;
 
-    Episode? _current;
-    CancellationTokenSource? _resumeCts;
+    private Episode? _current;
 
-    DateTime _lastUiRefresh     = DateTime.MinValue;
-    DateTime _lastPeriodicSave  = DateTime.MinValue;
-    DateTimeOffset _lastAutoAdvanceAt = DateTimeOffset.MinValue;
+    // Resume-Timer
+    private CancellationTokenSource? _resumeCts;
+
+    // Watchdogs / Throttles
+    private DateTime _lastUiRefresh      = DateTime.MinValue;
+    private DateTime _lastPeriodicSave   = DateTime.MinValue;
+    private DateTimeOffset _lastAutoAdv  = DateTimeOffset.MinValue;
 
     // Genau-einmal-Guard pro abgespielter Episode
-    bool _endHandledForSession = false;
+    private bool _endHandledForSession = false;
+
+    // Session-Isolation: Jede Play-Session bekommt eine ID.
+    private int _sid = 0;
 
     public event Action<Episode>? AutoAdvanceSuggested;
 
-    // NEW: Queue-Änderungen signalisieren (damit UI „⧉ Queue“-Feed aktualisiert)
+    // Optional: UI kann darauf reagieren (Queue-Feed neu rendern).
     public event Action? QueueChanged;
 
     public PlaybackCoordinator(AppData data, IPlayer player, Func<Task> saveAsync, MemoryLogSink mem)
@@ -48,32 +54,41 @@ sealed class PlaybackCoordinator
     /// </summary>
     public void Play(Episode ep)
     {
+        // neue Session
+        unchecked { _sid++; }
+        var sid = _sid;
+
         // Wenn die Episode in der Queue ist: alles bis inkl. dieser ID entfernen.
         ConsumeQueueUpToInclusive(ep.Id);
 
         _current = ep;
-        _endHandledForSession = false; // Reset pro Session
+        _endHandledForSession = false;
 
         _current.LastPlayedAt = DateTimeOffset.Now;
         _ = _saveAsync(); // Save ist intern gedrosselt
 
         CancelResume();
 
+        // Startoffset heuristisch:
+        // - sehr nahe am Anfang → nicht resumen
+        // - sehr nahe am Ende → nicht resumen (sonst „hängen“ wir am Ende)
         long? startMs = ep.LastPosMs;
         if (startMs is long ms)
         {
             long knownLen = ep.LengthMs ?? 0;
-            // Resume überspringen, wenn sehr nahe an Anfang/Ende (bessere UX)
             if ((knownLen > 0 && (ms < 5_000 || ms > knownLen - 10_000)) ||
                 (knownLen == 0 && ms < 5_000))
+            {
                 startMs = null;
+            }
         }
 
-        // Erst sauber starten, Resume optional in einem zweiten Tick
+        // 1) Erst sauber starten (ohne Startoffset, stabilisiert Demux)
         _player.Play(ep.AudioUrl, null);
 
+        // 2) Danach einmalig resumen, wenn gewünscht – aber session-sicher
         if (startMs is long want && want > 0)
-            StartOneShotResume(want);
+            StartOneShotResume(want, sid);
     }
 
     /// <summary>
@@ -92,9 +107,10 @@ sealed class PlaybackCoordinator
         long effLenMs, posMs;
         var endNow = IsEndReached(s, out effLenMs, out posMs);
 
-        // Persistiere bekannte Länge & Position
-        if (effLenMs > 0) _current.LengthMs = effLenMs;
-        _current.LastPosMs = posMs;
+        // Persistiere bekannte Länge & Position (clamps)
+        if (effLenMs > 0)
+            _current.LengthMs = effLenMs;
+        _current.LastPosMs = Math.Max(0, posMs);
 
         // Played-Markierung (unabhängig vom Auto-Advance)
         if (effLenMs > 0)
@@ -116,10 +132,10 @@ sealed class PlaybackCoordinator
             _endHandledForSession = true;
 
             if (_data.AutoAdvance &&
-                (DateTimeOffset.Now - _lastAutoAdvanceAt) > TimeSpan.FromMilliseconds(500) &&
+                (DateTimeOffset.Now - _lastAutoAdv) > TimeSpan.FromMilliseconds(500) &&
                 TryFindNext(_current, out var nxt))
             {
-                _lastAutoAdvanceAt = DateTimeOffset.Now;
+                _lastAutoAdv = DateTimeOffset.Now;
                 try { AutoAdvanceSuggested?.Invoke(nxt); } catch { /* best effort */ }
             }
         }
@@ -142,8 +158,8 @@ sealed class PlaybackCoordinator
 
     // ---- Internals -------------------------------------------------------------
 
-    // Einmaliger Resume-Seek, etwas verzögert (stabiler bei LibVLC)
-    void StartOneShotResume(long ms)
+    // Einmaliger Resume-Seek, leicht verzögert (stabiler bei LibVLC); session-sicher.
+    private void StartOneShotResume(long ms, int sid)
     {
         _resumeCts?.Cancel();
         var cts = new CancellationTokenSource();
@@ -156,10 +172,14 @@ sealed class PlaybackCoordinator
                 await Task.Delay(350, cts.Token); // Decoder/Length settle lassen
                 if (cts.IsCancellationRequested) return;
 
+                // Session noch dieselbe?
+                if (sid != _sid) return;
+
                 Application.MainLoop?.Invoke(() =>
                 {
                     try
                     {
+                        if (sid != _sid) return; // Session-Check auch hier
                         var lenMs = _player.State.Length?.TotalMilliseconds ?? 0;
                         if (lenMs > 0 && ms > lenMs - 10_000) return; // nahe Ende ignorieren
                         _player.SeekTo(TimeSpan.FromMilliseconds(ms));
@@ -172,7 +192,7 @@ sealed class PlaybackCoordinator
         });
     }
 
-    void CancelResume()
+    private void CancelResume()
     {
         try { _resumeCts?.Cancel(); } catch { }
         _resumeCts = null;
@@ -184,7 +204,7 @@ sealed class PlaybackCoordinator
     /// - Fallback: gegen effektive Länge (max(PlayerLen, MetaLen, Pos)).
     /// - Außerdem: „End-Stall“: IsPlaying==false und Position ~ Länge.
     /// </summary>
-    bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
+    private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
         var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
         var lenMsMeta   = (long)(_current?.LengthMs ?? 0);
@@ -223,7 +243,7 @@ sealed class PlaybackCoordinator
     ///   1) Erst aus der Queue (FIFO, ungültige Ids werden übersprungen)
     ///   2) Sonst in Feed-Reihenfolge (pubdate desc), optional Wrap & UnplayedOnly
     /// </summary>
-    bool TryFindNext(Episode current, out Episode next)
+    private bool TryFindNext(Episode current, out Episode next)
     {
         // (1) Queue zuerst
         while (_data.Queue.Count > 0)
@@ -231,6 +251,7 @@ sealed class PlaybackCoordinator
             var nextId = _data.Queue[0];
             _data.Queue.RemoveAt(0);             // FIFO
             QueueChangedSafe();
+
             var cand = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
             if (cand != null)
             {
@@ -287,7 +308,7 @@ sealed class PlaybackCoordinator
     /// <summary>
     /// Schneidet die Queue bis inkl. targetId; feuert QueueChanged.
     /// </summary>
-    void ConsumeQueueUpToInclusive(Guid targetId)
+    private void ConsumeQueueUpToInclusive(Guid targetId)
     {
         if (_data.Queue.Count == 0) return;
 
@@ -300,7 +321,7 @@ sealed class PlaybackCoordinator
         _ = _saveAsync();
     }
 
-    void QueueChangedSafe()
+    private void QueueChangedSafe()
     {
         try { QueueChanged?.Invoke(); } catch { /* best effort */ }
     }

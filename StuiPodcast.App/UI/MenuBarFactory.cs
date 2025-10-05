@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Terminal.Gui;
 
 namespace StuiPodcast.App.UI;
@@ -7,7 +8,7 @@ internal static class MenuBarFactory
 {
     public sealed record Callbacks(
         Action<string> Command,
-        Func<System.Threading.Tasks.Task>? RefreshRequested,
+        Func<Task>? RefreshRequested,
         Action AddFeed,
         Action Quit,
         Action FocusFeeds,
@@ -23,29 +24,93 @@ internal static class MenuBarFactory
 
     public static MenuBar Build(Callbacks cb)
     {
+        // Reentrancy-Guard für lange/async Aktionen (lokal für diese MenuBar)
+        bool isBusy = false;
+
+        // --- Helpers ---------------------------------------------------------
         MenuItem Cmd(string text, string help, string cmd) => new(text, help, () => cb.Command(cmd));
         MenuItem Act(string text, string help, Action a)   => new(text, help, a);
+
+        // Sichere Ausführung einer langen/async Aktion:
+        // - OSD (start/finish/fehler)
+        // - Reentrancy-Guard (kein Doppelstart)
+        void AttachRunner(MenuItem item, Func<Task> action, string? busyOsdText = null, string? doneOsdText = null)
+        {
+            void Start()
+            {
+                if (isBusy) return;
+                isBusy = true;
+
+                // optional Busy-OSD
+                if (!string.IsNullOrWhiteSpace(busyOsdText))
+                    cb.Command($":osd {busyOsdText}");
+
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await (action?.Invoke() ?? Task.CompletedTask);
+                        if (!string.IsNullOrWhiteSpace(doneOsdText))
+                            cb.Command($":osd {doneOsdText}");
+                    }
+                    catch (Exception ex)
+                    {
+                        cb.Command($":osd Fehler: {Short(ex.Message)}");
+                    }
+                    finally
+                    {
+                        // UI-Refresh freundlich anstoßen
+                        Application.MainLoop?.Invoke(() => Application.Top?.SetNeedsDisplay());
+                        isBusy = false;
+                    }
+                });
+            }
+
+            item.Action = Start;
+        }
+
+        static string Short(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return "Unbekannter Fehler";
+            s = s.Replace('\n', ' ').Replace('\r', ' ');
+            return s.Length <= 72 ? s : s[..72] + "…";
+        }
+        // ---------------------------------------------------------------------
+
+        // --- Menüstruktur ----------------------------------------------------
+        var addFeedItem    = Act("_Add Feed… (:add URL)", "Open command line with :add", cb.AddFeed);
+        var refreshAllItem = new MenuItem("_Refresh All (:refresh)", "Refresh all feeds", null);
+        var quitItem       = Act("_Quit (Q)", "Quit application", cb.Quit);
+
+        // Runner an Refresh hängen (falls Callback existiert)
+        AttachRunner(
+            refreshAllItem,
+            async () =>
+            {
+                if (cb.RefreshRequested != null)
+                    await cb.RefreshRequested();
+            },
+            busyOsdText: "refreshing",
+            doneOsdText: "refreshed"
+        );
 
         var menu = new MenuBar(new[]
         {
             new MenuBarItem("_File", new[]
             {
-                Act("_Add Feed… (:add URL)", "Open command line with :add", cb.AddFeed),
-                Act("_Refresh All (:refresh)", "Refresh all feeds", async () =>
-                {
-                    cb.Command(":osd refreshing"); // optional OSD-Hook
-                    if (cb.RefreshRequested != null) await cb.RefreshRequested();
-                    cb.Command(":osd refreshed");
-                }),
+                addFeedItem,
+                refreshAllItem,
                 new MenuItem("-", "", null),
-                Act("_Quit (Q)", "Quit application", cb.Quit),
+                quitItem,
             }),
+
             new MenuBarItem("_Feeds", new[]
             {
                 Cmd("_All Episodes", "", ":feed all"),
                 Cmd("_Saved ★",      "", ":feed saved"),
                 Cmd("_Downloaded ⬇", "", ":feed downloaded"),
             }),
+
             new MenuBarItem("_Playback", new[]
             {
                 Cmd("_Play/Pause (Space)", "", ":toggle"),
@@ -67,14 +132,16 @@ internal static class MenuBarFactory
                 Cmd("Volu_me +5 (+)", "", ":vol +5"),
                 new MenuItem("-", "", null),
                 Cmd("_Toggle Download Flag (d)", "", ":dl toggle"),
-                Act("Toggle _Played (m)", "Mark/Unmark played", () => cb.Command(":toggle-played")), 
+                Act("Toggle _Played (m)", "Mark/Unmark played", () => cb.Command(":toggle-played")),
             }),
+
             new MenuBarItem("_View", new[]
             {
                 Act("Toggle _Player Position (Ctrl+P)", "Top/bottom player bar", () => cb.Command(":player toggle")),
                 Act("Toggle _Theme (t)", "Switch base/menu accent", cb.ToggleTheme),
                 Cmd("Filter: _Unplayed (u)", "", ":filter toggle"),
             }),
+
             new MenuBarItem("_Navigate", new[]
             {
                 Act("Focus _Feeds (h)", "Move focus to feeds", cb.FocusFeeds),
@@ -88,6 +155,7 @@ internal static class MenuBarFactory
                 Act("Open _Command Line (:)", "Open command box", cb.ShowCommand),
                 Act("_Search (/)", "Open search box", cb.ShowSearch),
             }),
+
             new MenuBarItem("_Help", new[]
             {
                 Act("_Keys & Commands (:h)", "Help browser", () => StuiPodcast.App.UI.HelpBrowserDialog.Show()),

@@ -19,7 +19,7 @@ static class CommandRouter
                               MemoryLogSink mem,
                               AppData data,
                               Func<Task> persist,
-                              DownloadManager dlm) // <— RE-ADDED
+                              DownloadManager dlm)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
@@ -28,12 +28,12 @@ static class CommandRouter
 
         // Pre-dispatch fastpaths
         if (HandleQueue(raw, ui, data, persist)) return;
-        if (HandleDownloads(raw, ui, data, dlm, persist)) return; // <— USE dlm
+        if (HandleDownloads(raw, ui, data, dlm, persist)) return;
 
         if (raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
             raw.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
         {
-            // Fallback: manueller Toggle, falls Kommando ohne sub-arg kommt
+            // Fallback: manueller Toggle, falls ohne Sub-Arg
             var arg = raw.Contains(' ')
                 ? raw[(raw.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
                 : "";
@@ -51,6 +51,7 @@ static class CommandRouter
             case TopCommand.Help:         ui.ShowKeysHelp(); return;
             case TopCommand.Quit:         ui.RequestQuit();  return;
             case TopCommand.Logs:         ExecLogs(args, ui); return;
+            case TopCommand.Osd:          ExecOsd(args, ui); return;
 
             // Playback & Player
             case TopCommand.Toggle:       player.TogglePause(); ui.UpdatePlayerUI(player.State); return;
@@ -87,12 +88,15 @@ static class CommandRouter
             case TopCommand.AddFeed:      ExecAddFeed(args, ui); return;
             case TopCommand.Refresh:      ui.ShowOsd("Refreshing…", 600); ui.RequestRefresh(); return;
             case TopCommand.RemoveFeed:   RemoveSelectedFeed(ui, data, persist); return;
+            case TopCommand.Feed:         ExecFeed(args, ui, data, persist); return;
 
             // History
             case TopCommand.History:      ExecHistory(args, ui, data, persist); return;
 
-            // Unknown or passthrough:
-            default: return;
+            // Unknown
+            default:
+                ui.ShowOsd($"unknown: {cmdText}");
+                return;
         }
     }
 
@@ -127,14 +131,14 @@ static class CommandRouter
     private enum TopCommand
     {
         Unknown,
-        Help, Quit, Logs,
+        Help, Quit, Logs, Osd,
         Toggle, Seek, Volume, Speed, Replay,
         Next, Prev, PlayNext, PlayPrev,
         Goto, VimTop, VimMiddle, VimBottom,
         NextUnplayed, PrevUnplayed,
         Save, Sort, Filter, PlayerBar,
         Net, PlaySource,
-        AddFeed, Refresh, RemoveFeed,
+        AddFeed, Refresh, RemoveFeed, Feed,
         History
     }
 
@@ -144,6 +148,7 @@ static class CommandRouter
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
         if (cmd.StartsWith(":logs", StringComparison.OrdinalIgnoreCase)) return TopCommand.Logs;
+        if (cmd.StartsWith(":osd", StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
 
         if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase)) return TopCommand.Toggle;
         if (cmd.StartsWith(":seek", StringComparison.OrdinalIgnoreCase)) return TopCommand.Seek;
@@ -175,8 +180,8 @@ static class CommandRouter
         if (cmd.StartsWith(":add", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
         if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase) || cmd.StartsWith(":update", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
         if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) ||
-            cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase) ||
-            cmd.Equals(":feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
+            cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
+        if (cmd.StartsWith(":feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Feed;
 
         if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase)) return TopCommand.History;
 
@@ -191,6 +196,13 @@ static class CommandRouter
         int tail = 500;
         if (int.TryParse(a, out var n) && n > 0) tail = Math.Min(n, 5000);
         ui.ShowLogsOverlay(tail);
+    }
+
+    private static void ExecOsd(string[] args, Shell ui)
+    {
+        var text = string.Join(' ', args ?? Array.Empty<string>()).Trim();
+        if (!string.IsNullOrEmpty(text)) ui.ShowOsd(text);
+        else ui.ShowOsd("usage: :osd <text>");
     }
 
     private static void ExecSeek(string[] args, IPlayer player)
@@ -335,6 +347,39 @@ static class CommandRouter
             ui.RequestAddFeed(url);
         else
             ui.ShowOsd("usage: :add <rss-url>");
+    }
+
+    private static void ExecFeed(string[] args, Shell ui, AppData data, Func<Task> persist)
+    {
+        // Virtuelle Feeds (IDs müssen 1:1 zu Shell/EpisodesPane passen)
+        var FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
+        var FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
+        var FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
+        var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
+        var FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE");
+
+        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        Guid? target = arg switch
+        {
+            "all"        => FEED_ALL,
+            "saved"      => FEED_SAVED,
+            "downloaded" => FEED_DOWNLOADED,
+            "history"    => FEED_HISTORY,
+            "queue"      => FEED_QUEUE,
+            _            => null
+        };
+
+        if (target is Guid fid)
+        {
+            data.LastSelectedFeedId = fid;
+            _ = persist();
+            ui.SelectFeed(fid);
+            ui.SetEpisodesForFeed(fid, data.Episodes);
+        }
+        else
+        {
+            ui.ShowOsd("usage: :feed all|saved|downloaded|history|queue");
+        }
     }
 
     private static void ExecHistory(string[] args, Shell ui, AppData data, Func<Task> persist)
@@ -865,10 +910,13 @@ static class CommandRouter
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Speed;
 
+        // Komma als Dezimaltrenner erlauben
+        arg = arg.Replace(',', '.');
+
         if ((arg.StartsWith("+") || arg.StartsWith("-")) &&
             double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var delta))
         {
-            var s = Math.Clamp(cur + delta, 0.25, 3.0);
+            var s = Math.Clamp(cur + delta, 0.5, 2.5);
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
@@ -877,7 +925,7 @@ static class CommandRouter
         }
         if (double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var abs))
         {
-            var s = Math.Clamp(abs, 0.25, 3.0);
+            var s = Math.Clamp(abs, 0.5, 2.5);
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
