@@ -9,7 +9,6 @@ using Terminal.Gui;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 
-
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 
@@ -38,140 +37,133 @@ class Program
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
     
     static void LogNicsSnapshot()
-{
-    try
-    {
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            var ip = nic.GetIPProperties();
-            var ipv4 = string.Join(",", ip.UnicastAddresses
-                                     .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                                     .Select(a => a.Address.ToString()));
-            var gw   = string.Join(",", ip.GatewayAddresses.Select(g => g.Address?.ToString() ?? ""));
-            var dns  = string.Join(",", ip.DnsAddresses.Select(d => d.ToString()));
-            Log.Information("net/nic name={Name} type={Type} op={Op} spd={Speed} ipv4=[{IPv4}] gw=[{Gw}] dns=[{Dns}]",
-                nic.Name, nic.NetworkInterfaceType, nic.OperationalStatus, nic.Speed, ipv4, gw, dns);
-        }
-    } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
-}
-
-static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
-{
-    try
-    {
-        using var cts = new CancellationTokenSource(timeoutMs);
-        using var sock = new System.Net.Sockets.Socket(
-            System.Net.Sockets.AddressFamily.InterNetwork,
-            System.Net.Sockets.SocketType.Stream,
-            System.Net.Sockets.ProtocolType.Tcp);
-        var start = DateTime.UtcNow;
-        var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
-        await task.ConfigureAwait(false);
-        var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
-        Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
-        return true;
-    }
-    catch (Exception ex)
-    {
-        Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
-        return false;
-    }
-}
-
-static async Task<bool> HttpProbeAsync(string url)
-{
-    try
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        using var req = new HttpRequestMessage(HttpMethod.Head, url);
-        using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-        sw.Stop();
-        Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
-        return ((int)resp.StatusCode) is >= 200 and < 400;
-    }
-    catch (Exception exHead)
     {
         try
         {
-            var sw2 = System.Diagnostics.Stopwatch.StartNew();
-            using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-            sw2.Stop();
-            Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
-                url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
-            return ((int)resp.StatusCode) is >= 200 and < 400;
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                var ip = nic.GetIPProperties();
+                var ipv4 = string.Join(",", ip.UnicastAddresses
+                                         .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                                         .Select(a => a.Address.ToString()));
+                var gw   = string.Join(",", ip.GatewayAddresses.Select(g => g.Address?.ToString() ?? ""));
+                var dns  = string.Join(",", ip.DnsAddresses.Select(d => d.ToString()));
+                Log.Information("net/nic name={Name} type={Type} op={Op} spd={Speed} ipv4=[{IPv4}] gw=[{Gw}] dns=[{Dns}]",
+                    nic.Name, nic.NetworkInterfaceType, nic.OperationalStatus, nic.Speed, ipv4, gw, dns);
+            }
+        } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
+    }
+
+    static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeoutMs);
+            using var sock = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream,
+                System.Net.Sockets.ProtocolType.Tcp);
+            var start = DateTime.UtcNow;
+            var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
+            await task.ConfigureAwait(false);
+            var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
+            Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
+            return true;
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "net/probe http fail {Url}", url);
+            Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
             return false;
         }
     }
-}
 
-
-    
-static async Task<bool> QuickNetCheckAsync()
-{
-    var swAll = System.Diagnostics.Stopwatch.StartNew();
-
-    bool anyUp = false;
-    try
+    static async Task<bool> HttpProbeAsync(string url)
     {
-        anyUp = NetworkInterface.GetIsNetworkAvailable();
-        Log.Debug("net/probe nics-available={Avail}", anyUp);
-    } catch { }
-
-    // Low-level TCP first (DNS-frei)
-    var tcpOk =
-        await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
-        await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
-
-    // HTTP (mit möglicher Captive-Portal-Redirect)
-    // HTTP (ohne TLS) vermeidet Zertifikat-Mismatch bei IP-Literals
-    var httpOk =
-        await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
-        await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
-
-    swAll.Stop();
-    Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
-        tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
-
-    // Heuristik:
-    // - mind. TCP oder HTTP ok ⇒ online
-    // - wenn KEIN Interface up ⇒ offline (hart)
-    // - wenn nur Interfaces up, aber weder TCP noch HTTP ⇒ offline
-    var online = (tcpOk || httpOk) && anyUp;
-    return online;
-}
-
-
-static void OnNetworkChanged(bool online)
-{
-    var prev = Data.NetworkOnline;
-    Data.NetworkOnline = online;
-
-    Application.MainLoop?.Invoke(() =>
-    {
-        CommandRouter.ApplyList(UI!, Data);
-        UI!.RefreshEpisodesForSelectedFeed(Data.Episodes);
-
-        var nowId = UI!.GetNowPlayingId();
-        if (nowId != null)
+        try
         {
-            var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
-            if (ep != null)
-                UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var req = new HttpRequestMessage(HttpMethod.Head, url);
+            using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            sw.Stop();
+            Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
+            return ((int)resp.StatusCode) is >= 200 and < 400;
         }
+        catch (Exception exHead)
+        {
+            try
+            {
+                var sw2 = System.Diagnostics.Stopwatch.StartNew();
+                using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                sw2.Stop();
+                Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
+                    url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
+                return ((int)resp.StatusCode) is >= 200 and < 400;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "net/probe http fail {Url}", url);
+                return false;
+            }
+        }
+    }
 
-        if (!online) UI.ShowOsd("net: offline", 800); // online → keine OSD
-    });
+    static async Task<bool> QuickNetCheckAsync()
+    {
+        var swAll = System.Diagnostics.Stopwatch.StartNew();
 
-    _ = SaveAsync();
-}
+        bool anyUp = false;
+        try
+        {
+            anyUp = NetworkInterface.GetIsNetworkAvailable();
+            Log.Debug("net/probe nics-available={Avail}", anyUp);
+        } catch { }
 
+        // Low-level TCP first (DNS-frei)
+        var tcpOk =
+            await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
+            await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
 
+        // HTTP (mit möglicher Captive-Portal-Redirect)
+        // HTTP (ohne TLS) vermeidet Zertifikat-Mismatch bei IP-Literals
+        var httpOk =
+            await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
+            await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
 
+        swAll.Stop();
+        Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
+            tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
 
+        // Heuristik:
+        // - mind. TCP oder HTTP ok ⇒ online
+        // - wenn KEIN Interface up ⇒ offline (hart)
+        // - wenn nur Interfaces up, aber weder TCP noch HTTP ⇒ offline
+        var online = (tcpOk || httpOk) && anyUp;
+        return online;
+    }
+
+    static void OnNetworkChanged(bool online)
+    {
+        var prev = Data.NetworkOnline;
+        Data.NetworkOnline = online;
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            CommandRouter.ApplyList(UI!, Data);
+            UI!.RefreshEpisodesForSelectedFeed(Data.Episodes);
+
+            var nowId = UI!.GetNowPlayingId();
+            if (nowId != null)
+            {
+                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                if (ep != null)
+                    UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+            }
+
+            if (!online) UI.ShowOsd("net: offline", 800); // online → keine OSD
+        });
+
+        _ = SaveAsync();
+    }
 
     static AppData Data = new();
     static FeedService? Feeds;
@@ -203,7 +195,6 @@ static void OnNetworkChanged(bool online)
             OnNetworkChanged(online);
         });
 
-
         // Default-Feed beim allerersten Start
         if (Data.Feeds.Count == 0)
         {
@@ -211,7 +202,6 @@ static void OnNetworkChanged(bool online)
             catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
         }
         
-
         // Anchor-Feed nur hinzufügen, wenn noch nicht da
         var anchorUrl = "https://anchor.fm/s/fc0e8c18/podcast/rss";
         try
@@ -224,8 +214,6 @@ static void OnNetworkChanged(bool online)
         Player   = new LibVlcPlayer();
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
         Downloader = new DownloadManager(Data);
-
-      
 
         // Auto-Advance: EINZIGE Quelle ist der Coordinator
         Playback.AutoAdvanceSuggested += next =>
@@ -272,7 +260,6 @@ static void OnNetworkChanged(bool online)
             OnNetworkChanged(online);
         });
 
-        
         try
         {
             NetworkChange.NetworkAvailabilityChanged += (s, e) =>
@@ -280,7 +267,6 @@ static void OnNetworkChanged(bool online)
                 // OS-Event ist nur ein Hint → echte Entscheidung trifft die Probe + Hysterese
                 TriggerNetProbe();
             };
-
         }
         catch { /* kann auf manchen Plattformen fehlen → egal */ }
         
@@ -290,22 +276,12 @@ static void OnNetworkChanged(bool online)
             return true; // weiterlaufen
         });
 
-
-
-
-
-
-
-
-
-
-// Lookups
+        // Lookups
         UI.SetQueueLookup(id => Data.Queue.Contains(id));
         UI.SetDownloadStateLookup(id => Data.DownloadMap.TryGetValue(id, out var s) ? s.State : DownloadState.None);
-
         UI.SetOfflineLookup(() => !Data.NetworkOnline); // true = offline
         
-// Download-Status → UI
+        // Download-Status → UI
         Downloader.StatusChanged += (id, st) =>
         {
             var prev = _dlLast.TryGetValue(id, out var p) ? p : DownloadState.None;
@@ -355,16 +331,12 @@ static void OnNetworkChanged(bool online)
             }
         };
 
-// Worker starten (kann hier bleiben)
+        // Worker starten (kann hier bleiben)
         Downloader.EnsureRunning();
 
-
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
-
-        
         UI.SetHistoryLimit(Data.HistorySize);
 
-        
         // >> Restore Player-Bar position & Filter
         UI.SetPlayerPlacement(Data.PlayerAtTop);
         UI.SetUnplayedFilterVisual(Data.UnplayedOnly);
@@ -486,11 +458,6 @@ static void OnNetworkChanged(bool online)
                 return;
             }
 
-
-            // Wenn lokale Datei → in file:// umwandeln
-            //if (localPath != null && source == localPath)
-              //  source = new Uri(localPath).AbsoluteUri;
-
             // Minimale Injektion: ep.AudioUrl kurz auf gewählte Quelle setzen
             var oldUrl = ep.AudioUrl;
             try
@@ -519,8 +486,6 @@ static void OnNetworkChanged(bool online)
                         {
                             try { Player.Stop(); } catch { /* best effort */ }
 
-                            // 1. Versuch: nackter Pfad (haben wir schon probiert)
-                            // 2. Fallback: einmal mit file:// probieren
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
                             var oldUrl = ep.AudioUrl;
@@ -541,11 +506,7 @@ static void OnNetworkChanged(bool online)
                     return false; // one-shot
                 });
             }
-
-            
         };
-
-
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
 
@@ -574,8 +535,7 @@ static void OnNetworkChanged(bool online)
         };
 
         // Program.cs
-// Ersetzt den kompletten UI.Command-Handler
-        // Program.cs
+        // Ersetzt den kompletten UI.Command-Handler
         UI.Command += cmd =>
         {
             // 1) Queue-Commands zuerst
@@ -590,12 +550,9 @@ static void OnNetworkChanged(bool online)
             if (CommandRouter.HandleDownloads(cmd, UI!, Data, Downloader!, SaveAsync))
                 return;
 
-            // 3) Restliche Commands wie gehabt
-            CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data, SaveAsync);
+            // 3) Restliche Commands wie gehabt (→ HIER: zusätzlicher Parameter Downloader!)
+            CommandRouter.Handle(cmd, Player!, Playback!, UI!, MemLog, Data, SaveAsync, Downloader!);
         };
-
-
-
 
         UI.SearchApplied += query =>
         {
@@ -834,7 +791,6 @@ static void OnNetworkChanged(bool online)
         }
     }
 
-    
     static void TriggerNetProbe()
     {
         if (_netProbeRunning) return;   // schon unterwegs → nix tun
@@ -873,7 +829,6 @@ static void OnNetworkChanged(bool online)
         });
     }
 
-    
     static void QuitApp()
     {
         if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
