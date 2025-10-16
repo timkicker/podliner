@@ -109,10 +109,13 @@ internal sealed class OsdOverlay
 
     private void ApplyThemeOnUi()
     {
-        if (_win != null) _win.ColorScheme = Colors.Menu;
-        if (_label != null) _label.ColorScheme = Colors.Menu;
+        var scheme = Application.Top?.ColorScheme ?? Colors.Base;
+        if (_win   != null) _win.ColorScheme   = scheme;
+        if (_label != null) _label.ColorScheme = scheme;
         Application.Top?.SetNeedsDisplay();
     }
+
+
 
     private void EnsureCreated()
     {
@@ -131,8 +134,9 @@ internal sealed class OsdOverlay
             CanFocus = false,
             X = Pos.Center(),
             Y = Pos.At(1),
-            ColorScheme = Colors.Menu
+            ColorScheme = Application.Top?.ColorScheme ?? Colors.Base
         };
+
 
         _win.Border.BorderStyle = BorderStyle.Rounded;
         _win.Add(_label);

@@ -31,7 +31,8 @@ public sealed class Shell
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
-    private bool _useMenuAccent = true;
+    private enum ThemeMode { MenuAccent, Base, Native }
+    private ThemeMode _theme = ThemeMode.MenuAccent;
     private bool _playerAtTop   = false;
     private bool _startupPinned = false;
 
@@ -70,9 +71,16 @@ public sealed class Shell
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
+    
     public void ToggleTheme()
     {
-        _useMenuAccent = !_useMenuAccent;
+        // rotiert: Menu → Base → Native → ...
+        _theme = _theme switch
+        {
+            ThemeMode.MenuAccent => ThemeMode.Base,
+            ThemeMode.Base       => ThemeMode.Native,
+            _                    => ThemeMode.MenuAccent
+        };
         ApplyTheme();
     }
 
@@ -370,7 +378,16 @@ public sealed class Shell
     {
         UI(() =>
         {
-            var scheme = _useMenuAccent ? Colors.Menu : Colors.Base;
+            // 1) Scheme bestimmen
+            ColorScheme scheme = _theme switch
+            {
+                ThemeMode.MenuAccent => Colors.Menu,
+                ThemeMode.Base       => Colors.Base,
+                ThemeMode.Native     => BuildNativeScheme(),
+                _ => Colors.Base
+            };
+
+            // 2) global anwenden
             if (Application.Top != null) Application.Top.ColorScheme = scheme;
 
             if (_mainWin != null)                 _mainWin.ColorScheme = scheme;
@@ -380,28 +397,65 @@ public sealed class Shell
             if (_feedsPane?.List != null)         _feedsPane.List.ColorScheme = scheme;
             if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = scheme;
 
+            // Progress/Vol: eigenes Scheme, aber auf Native basierend, falls aktiv
             if (_player != null)
             {
                 _player.Progress.ColorScheme = MakeProgressScheme();
                 _player.VolBar.ColorScheme   = MakeProgressScheme();
             }
-            _osd.ApplyTheme();
 
-            if (_commandBox != null) _commandBox.ColorScheme = Colors.Base;
-            if (_searchBox  != null) _searchBox.ColorScheme  = Colors.Base;
+            _osd.ApplyTheme(); // OSD nimmt Application.Top.ColorScheme
+
+            if (_commandBox != null) _commandBox.ColorScheme = scheme;
+            if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
 
             RequestRepaint();
         });
     }
-
-    private ColorScheme MakeProgressScheme() => new()
+    
+    private static ColorScheme BuildNativeScheme()
     {
-        Normal    = Colors.Base.Normal,
-        Focus     = Colors.Base.Focus,
-        Disabled  = Colors.Base.Disabled,
-        HotNormal = Colors.Menu.HotNormal,
-        HotFocus  = Colors.Menu.HotFocus
-    };
+        // Nutze die Standard-Attribute des Terminals (Colors.Base),
+        // aber ohne Menü-Akzente o. ä.
+        return new ColorScheme
+        {
+            Normal    = Colors.Base.Normal,
+            Focus     = Colors.Base.Normal,     // kein besonderer Fokus
+            HotNormal = Colors.Base.Normal,
+            HotFocus  = Colors.Base.Normal,
+            Disabled  = Colors.Base.Disabled    // disabled darf blasser bleiben
+        };
+    }
+
+    private ColorScheme MakeProgressScheme()
+    {
+        if (_theme == ThemeMode.Native)
+        {
+            // In „Native” die Balken exakt wie die Basis halten
+            return new ColorScheme
+            {
+                Normal    = Colors.Base.Normal,
+                Focus     = Colors.Base.Normal,
+                HotNormal = Colors.Base.Normal,
+                HotFocus  = Colors.Base.Normal,
+                Disabled  = Colors.Base.Disabled
+            };
+        }
+
+        // In den anderen Themes wie gehabt mit einem kleinen Akzent
+        return new ColorScheme
+        {
+            Normal    = Colors.Base.Normal,
+            Focus     = Colors.Base.Focus,
+            Disabled  = Colors.Base.Disabled,
+            HotNormal = Colors.Menu.HotNormal,
+            HotFocus  = Colors.Menu.HotFocus
+        };
+    }
+
+
+
+
 
     // ---- Command/Search ----
     public void ShowCommandBox(string seed)
