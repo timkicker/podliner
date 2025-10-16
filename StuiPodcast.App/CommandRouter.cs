@@ -31,10 +31,10 @@ static class CommandRouter
         if (HandleQueue(raw, ui, data, persist)) return;
         if (HandleDownloads(raw, ui, data, dlm, persist)) return;
 
+        // Fallback für :dl ohne Sub-Arg
         if (raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
             raw.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
         {
-            // Fallback: manueller Toggle, falls ohne Sub-Arg
             var arg = raw.Contains(' ')
                 ? raw[(raw.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
                 : "";
@@ -53,8 +53,7 @@ static class CommandRouter
             case TopCommand.Quit:         ui.RequestQuit();  return;
             case TopCommand.Logs:         ExecLogs(args, ui); return;
             case TopCommand.Osd:          ExecOsd(args, ui); return;
-            case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine);
-                return;
+            case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine); return;
 
             // Playback & Player
             case TopCommand.Toggle:
@@ -64,7 +63,7 @@ static class CommandRouter
                     return;
                 }
                 player.TogglePause();
-                ui.UpdatePlayerUI(player.State);
+                // ← kein UI.Update mehr; Anzeige kommt via Snapshot
                 return;
 
             case TopCommand.Seek:         ExecSeek(args, player, ui); return;
@@ -114,20 +113,48 @@ static class CommandRouter
 
     // --------------------------- Tokenize / Parse ---------------------------
 
+    // Robuster Tokenizer: unterstützt "…" und '…' sowie Backslash-Escapes (\", \', \ )
     private static string[] Tokenize(string raw)
     {
         var list = new List<string>();
+        var cur  = new System.Text.StringBuilder();
         bool inQuotes = false;
-        var cur = new System.Text.StringBuilder();
-        foreach (var ch in raw)
+        char quoteChar = '\0';
+
+        for (int i = 0; i < raw.Length; i++)
         {
-            if (ch == '"') { inQuotes = !inQuotes; continue; }
+            char ch = raw[i];
+
+            if (ch == '\\' && i + 1 < raw.Length)
+            {
+                // Escape nächstes Zeichen (auch Space/Quote)
+                i++;
+                cur.Append(raw[i]);
+                continue;
+            }
+
+            if (!inQuotes && (ch == '"' || ch == '\''))
+            {
+                inQuotes = true;
+                quoteChar = ch;
+                continue;
+            }
+            if (inQuotes && ch == quoteChar)
+            {
+                inQuotes = false;
+                quoteChar = '\0';
+                continue;
+            }
+
             if (!inQuotes && char.IsWhiteSpace(ch))
             {
                 if (cur.Length > 0) { list.Add(cur.ToString()); cur.Clear(); }
+                continue;
             }
-            else cur.Append(ch);
+
+            cur.Append(ch);
         }
+
         if (cur.Length > 0) list.Add(cur.ToString());
         return list.ToArray();
     }
@@ -218,75 +245,72 @@ static class CommandRouter
         if (!string.IsNullOrEmpty(text)) ui.ShowOsd(text);
         else ui.ShowOsd("usage: :osd <text>");
     }
-    
-// 2) ExecEngine-Signatur erweitern
-private static void ExecEngine(
-    string[] args,
-    IPlayer player,
-    Shell ui,
-    AppData data,
-    Func<Task> persist,
-    Func<string, Task>? switchEngine = null) // <— NEU
-{
-    var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
-    if (string.IsNullOrEmpty(arg) || arg == "show")
+    private static void ExecEngine(
+        string[] args,
+        IPlayer player,
+        Shell ui,
+        AppData data,
+        Func<Task> persist,
+        Func<string, Task>? switchEngine = null)
     {
-        var caps = player.Capabilities;
-        var txt =
-            $"engine active: {player.Name}\n" +
-            $"preference: {data.PreferredEngine ?? "auto"}\n" +
-            "supports: " +
-            $"{((caps & PlayerCapabilities.Seek)   != 0 ? "seek "   : "")}" +
-            $"{((caps & PlayerCapabilities.Speed)  != 0 ? "speed "  : "")}" +
-            $"{((caps & PlayerCapabilities.Volume) != 0 ? "volume " : "")}".Trim();
-        ui.ShowOsd(txt, 1500);
-        return;
-    }
+        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
-    if (arg == "help")
-    {
-        try
+        if (string.IsNullOrEmpty(arg) || arg == "show")
         {
-            var dlg = new Terminal.Gui.Dialog("Engine Help", 80, 24);
-            var tv  = new Terminal.Gui.TextView
+            var caps = player.Capabilities;
+            var txt =
+                $"engine active: {player.Name}\n" +
+                $"preference: {data.PreferredEngine ?? "auto"}\n" +
+                "supports: " +
+                $"{((caps & PlayerCapabilities.Seek)   != 0 ? "seek "   : "")}" +
+                $"{((caps & PlayerCapabilities.Speed)  != 0 ? "speed "  : "")}" +
+                $"{((caps & PlayerCapabilities.Volume) != 0 ? "volume " : "")}".Trim();
+            ui.ShowOsd(txt, 1500);
+            return;
+        }
+
+        if (arg == "help")
+        {
+            try
             {
-                ReadOnly = true,
-                WordWrap = true,
-                X = 0, Y = 0, Width = Terminal.Gui.Dim.Fill(), Height = Terminal.Gui.Dim.Fill()
-            };
-            tv.Text = StuiPodcast.App.HelpCatalog.EngineDoc;
-            dlg.Add(tv);
-            var ok = new Terminal.Gui.Button("OK", is_default: true);
-            ok.Clicked += () => Terminal.Gui.Application.RequestStop();
-            dlg.AddButton(ok);
-            Terminal.Gui.Application.Run(dlg);
+                var dlg = new Terminal.Gui.Dialog("Engine Help", 80, 24);
+                var tv  = new Terminal.Gui.TextView
+                {
+                    ReadOnly = true,
+                    WordWrap = true,
+                    X = 0, Y = 0, Width = Terminal.Gui.Dim.Fill(), Height = Terminal.Gui.Dim.Fill()
+                };
+                tv.Text = StuiPodcast.App.HelpCatalog.EngineDoc;
+                dlg.Add(tv);
+                var ok = new Terminal.Gui.Button("OK", is_default: true);
+                ok.Clicked += () => Terminal.Gui.Application.RequestStop();
+                dlg.AddButton(ok);
+                Terminal.Gui.Application.Run(dlg);
+            }
+            catch { /* best effort */ }
+            return;
         }
-        catch { /* best effort */ }
-        return;
-    }
 
-    if (arg is "auto" or "vlc" or "mpv" or "ffplay")
-    {
-        data.PreferredEngine = arg;
-        _ = persist();
-
-        // optional: sofort live umschalten, wenn Delegate vorhanden
-        if (switchEngine != null)
+        if (arg is "auto" or "vlc" or "mpv" or "ffplay")
         {
-            ui.ShowOsd($"engine: switching to {arg}…", 900);
-            _ = switchEngine(arg); // fire-and-forget
+            data.PreferredEngine = arg;
+            _ = persist();
+
+            if (switchEngine != null)
+            {
+                ui.ShowOsd($"engine: switching to {arg}…", 900);
+                _ = switchEngine(arg); // fire-and-forget
+            }
+            else
+            {
+                ui.ShowOsd($"engine pref: {arg} (active: {player.Name})", 1500);
+            }
+            return;
         }
-        else
-        {
-            ui.ShowOsd($"engine pref: {arg} (active: {player.Name})", 1500);
-        }
-        return;
+
+        ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay]", 1500);
     }
-
-    ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay]", 1500);
-}
-
 
     private static void ExecSeek(string[] args, IPlayer player, Shell ui)
     {
@@ -297,13 +321,12 @@ private static void ExecEngine(
         }
 
         // Hinweis für ffplay: coarse seek (Restart)
-        if (string.Equals(player.Name, "ffplay (limited)", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(player.Name, "ffplay", StringComparison.OrdinalIgnoreCase))
             ui.ShowOsd("coarse seek (ffplay): restarts stream", 1100);
 
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         Seek(arg, player);
     }
-
 
     private static void ExecVolume(string[] args, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {
@@ -830,22 +853,20 @@ private static void ExecEngine(
 
     static void Replay(string arg, IPlayer player, Shell ui)
     {
+        // Kein direktes UI.Update; Snapshot kümmert sich
         if (string.IsNullOrWhiteSpace(arg))
         {
             player.SeekTo(TimeSpan.Zero);
-            ui.UpdatePlayerUI(player.State);
             return;
         }
 
         if (int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sec) && sec > 0)
         {
             player.SeekRelative(TimeSpan.FromSeconds(-sec));
-            ui.UpdatePlayerUI(player.State);
         }
         else
         {
             player.SeekTo(TimeSpan.Zero);
-            ui.UpdatePlayerUI(player.State);
         }
     }
 
@@ -932,10 +953,7 @@ private static void ExecEngine(
 
     static void Seek(string arg, IPlayer player)
     {
-        if ((player.Capabilities & PlayerCapabilities.Seek) == 0) { /* freundlich abbrechen */ return; }
-
-        
-        
+        if ((player.Capabilities & PlayerCapabilities.Seek) == 0) return;
         if (string.IsNullOrWhiteSpace(arg)) return;
 
         var s = player.State;
@@ -961,13 +979,24 @@ private static void ExecEngine(
             return;
         }
 
-        // mm:ss
+        // HH:MM:SS or MM:SS
         var parts = arg.Split(':');
-        if (parts.Length == 2 &&
-            int.TryParse(parts[0], out var mm) &&
-            int.TryParse(parts[1], out var ss))
+        if (parts.Length is 2 or 3)
         {
-            player.SeekTo(TimeSpan.FromSeconds(mm * 60 + ss));
+            int hh = 0, mm = 0, ss = 0;
+            if (parts.Length == 3)
+            {
+                if (!int.TryParse(parts[0], out hh)) hh = 0;
+                if (!int.TryParse(parts[1], out mm)) mm = 0;
+                if (!int.TryParse(parts[2], out ss)) ss = 0;
+            }
+            else
+            {
+                if (!int.TryParse(parts[0], out mm)) mm = 0;
+                if (!int.TryParse(parts[1], out ss)) ss = 0;
+            }
+            var total = hh * 3600 + mm * 60 + ss;
+            player.SeekTo(TimeSpan.FromSeconds(Math.Max(0, total)));
             return;
         }
 
@@ -1018,20 +1047,20 @@ private static void ExecEngine(
         if ((arg.StartsWith("+") || arg.StartsWith("-")) &&
             double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var delta))
         {
-            var s = Math.Clamp(cur + delta, 0.25, 3.0);
-            player.SetSpeed(s);
-            data.Speed = s;
+            var s2 = Math.Clamp(cur + delta, 0.25, 3.0);
+            player.SetSpeed(s2);
+            data.Speed = s2;
             _ = persist();
-            ui.ShowOsd($"Speed {s:0.0}×");
+            ui.ShowOsd($"Speed {s2:0.0}×");
             return;
         }
         if (double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var abs))
         {
-            var s = Math.Clamp(abs, 0.25, 3.0);
-            player.SetSpeed(s);
-            data.Speed = s;
+            var s2 = Math.Clamp(abs, 0.25, 3.0);
+            player.SetSpeed(s2);
+            data.Speed = s2;
             _ = persist();
-            ui.ShowOsd($"Speed {s:0.0}×");
+            ui.ShowOsd($"Speed {s2:0.0}×");
         }
     }
 

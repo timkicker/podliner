@@ -6,23 +6,26 @@ namespace StuiPodcast.App.UI;
 
 internal sealed class PlayerPanel : FrameView
 {
-    public Label TitleLabel  { get; private set; } = null!;
-    public Label TimeLabel   { get; private set; } = null!;
+    public Label TitleLabel    { get; private set; } = null!;
+    public Label TimeLabel     { get; private set; } = null!;
     public Button BtnPlayPause { get; private set; } = null!;
     public SolidProgressBar Progress { get; private set; } = null!;
-    public SolidProgressBar VolBar { get; private set; } = null!;
-    public Label VolPctLabel { get; private set; } = null!;
-    public Label SpeedLabel  { get; private set; } = null!;
+    public SolidProgressBar VolBar   { get; private set; } = null!;
+    public Label VolPctLabel   { get; private set; } = null!;
+    public Label SpeedLabel    { get; private set; } = null!;
 
-    public Button BtnBack10 { get; private set; } = null!;
-    public Button BtnFwd10  { get; private set; } = null!;
-    public Button BtnVolDown{ get; private set; } = null!;
-    public Button BtnVolUp  { get; private set; } = null!;
+    public Button BtnBack10    { get; private set; } = null!;
+    public Button BtnFwd10     { get; private set; } = null!;
+    public Button BtnVolDown   { get; private set; } = null!;
+    public Button BtnVolUp     { get; private set; } = null!;
     public Button BtnSpeedDown { get; private set; } = null!;
     public Button BtnSpeedUp   { get; private set; } = null!;
     public Button BtnDownload  { get; private set; } = null!;
 
-    public event Action<string>? Command; // ":seek +10", ":toggle", ...
+    /// <summary>
+    /// Router-Hook (z. B. ":seek +10")
+    /// </summary>
+    public event Action<string>? Command;
 
     private const int SidePad = 1;
     private const int PlayerContentH = 5;
@@ -39,9 +42,9 @@ internal sealed class PlayerPanel : FrameView
     private DateTime _lastVolEmit = DateTime.MinValue;
     private float _lastVolFrac = -1f;
 
-    private const int DragThrottleMs = 90;     // min interval between emits while dragging
-    private const float ProgressDeltaMin = 0.01f; // min fraction change (~1%) to emit
-    private const float VolumeDeltaMin = 0.02f;   // 2% volume step to emit
+    private const int   DragThrottleMs   = 90;     // min interval between emits while dragging
+    private const float ProgressDeltaMin = 0.01f;  // min fraction change (~1%) to emit
+    private const float VolumeDeltaMin   = 0.02f;  // 2% volume step to emit
 
     public PlayerPanel() : base("Player")
     {
@@ -49,7 +52,6 @@ internal sealed class PlayerPanel : FrameView
         Width  = Dim.Fill(SidePad * 2);
         Height = PlayerFrameH;
         CanFocus = false;
-
         Build();
     }
 
@@ -58,15 +60,16 @@ internal sealed class PlayerPanel : FrameView
         RemoveAll();
 
         TitleLabel = new Label("—") { X = 2, Y = 0, Width = Dim.Fill(34), Height = 1 };
+
         TimeLabel  = new Label("⏸ 00:00 / --:--  (-:--)")
         {
             X = Pos.AnchorEnd(32), Y = 0, Width = 32, Height = 1, TextAlignment = TextAlignment.Right
         };
 
         const int gapL = 2;
-        BtnBack10    = new Button("«10s")   { X = 2, Y = 2 };
-        BtnPlayPause = new Button("Play ⏵"){ X = Pos.Right(BtnBack10) + gapL, Y = 2 };
-        BtnFwd10     = new Button("10s»")   { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
+        BtnBack10    = new Button("«10s")    { X = 2, Y = 2 };
+        BtnPlayPause = new Button("Play ⏵")  { X = Pos.Right(BtnBack10) + gapL, Y = 2 };
+        BtnFwd10     = new Button("10s»")    { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
         BtnDownload  = new Button("⬇ Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
 
         const int midGap = 2;
@@ -75,8 +78,7 @@ internal sealed class PlayerPanel : FrameView
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
         var midWidth = 6 + midGap + 6 + midGap + 6;
         var mid = new View { Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false };
-        // Reihenfolge: Label, -spd, +spd (logisch links->rechts)
-        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp);
+        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp); // links -> rechts
 
         const int rightPad = 2;
         const int gap = 2;
@@ -130,7 +132,6 @@ internal sealed class PlayerPanel : FrameView
             var now = DateTime.UtcNow;
             var clamped = Math.Clamp(frac, 0f, 1f);
 
-            // Throttle & change detection
             if ((now - _lastProgressEmit).TotalMilliseconds < DragThrottleMs &&
                 Math.Abs(clamped - _lastProgressFrac) < ProgressDeltaMin)
                 return;
@@ -145,7 +146,6 @@ internal sealed class PlayerPanel : FrameView
             if (effLen > TimeSpan.Zero)
             {
                 var target = TimeSpan.FromMilliseconds(effLen.TotalMilliseconds * clamped);
-                // h:mm:ss Anzeige robust (lange Episoden)
                 var h = (int)target.TotalHours;
                 var mm = target.Minutes;
                 var ss = target.Seconds;
@@ -167,28 +167,69 @@ internal sealed class PlayerPanel : FrameView
             _lastVolFrac = clamped;
 
             var vol = (int)Math.Round(clamped * 100);
-            command($":vol {Math.Clamp(vol, 0, 100)}");
-            osd($"Vol {Math.Clamp(vol, 0, 100)}%");
+            var v = Math.Clamp(vol, 0, 100);
+            command($":vol {v}");
+            VolBar.Fraction  = v / 100f; // visuelles Feedback sofort
+            VolPctLabel.Text = $"{v}%";
         };
     }
 
+    // ----------------------------------------------------------------------
+    // NEU: Snapshot-basierte Aktualisierung (bevorzugt)
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Bevorzugte Update-Methode: nutzt *einen* atomischen Snapshot
+    /// (Position & Länge stammen aus derselben Quelle/Zeit).
+    /// </summary>
+    public void Update(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
+        => RenderFromSnapshot(snap, volume0to100, format);
+
+    // ----------------------------------------------------------------------
+    // ALT: Abwärtskompatibles Update — delegiert intern auf Snapshot
+    // ----------------------------------------------------------------------
     public void Update(PlayerState s, TimeSpan effLen, Func<TimeSpan, string> format)
     {
-        var icon   = s.IsPlaying ? "▶" : "⏸";
-        var posStr = format(s.Position);
-        var lenStr = effLen == TimeSpan.Zero ? "--:--" : format(effLen);
-        var rem    = effLen == TimeSpan.Zero ? TimeSpan.Zero : (effLen - s.Position);
+        // Ein synthetischer Snapshot (Position & Länge in *einem* Paket)
+        var snap = new PlaybackSnapshot(
+            0,                      // SessionId
+            null,                   // EpisodeId
+            s.Position < TimeSpan.Zero ? TimeSpan.Zero : s.Position,
+            effLen   < TimeSpan.Zero ? TimeSpan.Zero : effLen,
+            s.IsPlaying,
+            s.Speed <= 0 ? 1.0 : s.Speed,
+            DateTimeOffset.Now
+        );
+
+        RenderFromSnapshot(snap, s.Volume0_100, format);
+    }
+
+    // ----------------------------------------------------------------------
+    // Gemeinsame Render-Logik (eine Quelle → synchrones UI)
+    // ----------------------------------------------------------------------
+    private void RenderFromSnapshot(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
+    {
+        var pos = snap.Position < TimeSpan.Zero ? TimeSpan.Zero : snap.Position;
+        var len = snap.Length   < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
+        if (pos > len && len > TimeSpan.Zero) pos = len;
+
+        var rem = len == TimeSpan.Zero ? TimeSpan.Zero : (len - pos);
         if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
 
-        TimeLabel.Text   = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
-        BtnPlayPause.Text = s.IsPlaying ? "Pause ⏸" : "Play ⏵";
+        var icon = snap.IsPlaying ? "▶" : "⏸";
+        var posStr = format(pos);
+        var lenStr = len == TimeSpan.Zero ? "--:--" : format(len);
 
-        Progress.Fraction = (effLen.TotalMilliseconds > 0)
-            ? Math.Clamp((float)(s.Position.TotalMilliseconds / effLen.TotalMilliseconds), 0f, 1f)
+        TimeLabel.Text   = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
+        BtnPlayPause.Text = snap.IsPlaying ? "Pause ⏸" : "Play ⏵";
+
+        Progress.Fraction = (len.TotalMilliseconds > 0)
+            ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
             : 0f;
 
-        VolBar.Fraction  = Math.Clamp(s.Volume0_100 / 100f, 0f, 1f);
-        VolPctLabel.Text = $"{s.Volume0_100}%";
-        SpeedLabel.Text  = $"{s.Speed:0.0}×";
+        var v = Math.Clamp(volume0to100, 0, 100);
+        VolBar.Fraction  = v / 100f;
+        VolPctLabel.Text = $"{v}%";
+        SpeedLabel.Text  = $"{snap.Speed:0.0}×";
     }
 }

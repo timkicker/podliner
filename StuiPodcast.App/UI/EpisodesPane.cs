@@ -37,6 +37,10 @@ internal sealed class EpisodesPane
     private Func<Guid, bool>? _isQueued;             // Badge-Lookup
     private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
 
+    // NEU: optionaler Snapshot für die *aktive* Episode (synchroner Progress)
+    private Guid? _nowPlayingId;
+    private PlaybackSnapshot? _activeSnapshot; // nur für _nowPlayingId relevant
+
     public void SetDownloadStateLookup(Func<Guid, DownloadState> fn)
         => _dlStateLookup = fn ?? (_ => DownloadState.None);
 
@@ -163,7 +167,7 @@ internal sealed class EpisodesPane
         }
 
         // Items setzen
-        var items = _episodes.Select(RowFor).ToList();
+        var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
         List.SetSource(items);
         List.SelectedItem = (items.Count > 0) ? Math.Clamp(sel, 0, items.Count - 1) : 0;
 
@@ -257,13 +261,30 @@ internal sealed class EpisodesPane
         Tabs.SetNeedsDisplay();
     }
 
-    private string RowFor(Episode e)
-    {
-        // Pfeil („▶“) kommt über InjectNowPlaying – hier nur neutrales Prefix
-        var nowPrefix = "  ";
+    // --- Rendering ----------------------------------------------------------------
 
+    // NEU: Fortschritt & Mark/Badges aus persistenten Feldern,
+    //      aber für die *aktive* Episode (nowId) optional mit Snapshot-Override.
+    private string RowFor(Episode e, Guid? nowId, PlaybackSnapshot? snapForActive)
+    {
+        // Prefix: neutrales "  " oder "▶ " für aktive Episode
+        bool isNow = nowId != null && e.Id == nowId.Value;
+        var nowPrefix = isNow ? "▶ " : "  ";
+
+        // Länge/Position – Default aus Persistenz
         long lenMs = e.LengthMs ?? 0;
         long posMs = e.LastPosMs ?? 0;
+
+        // Snapshot-Override NUR für aktive Episode anwenden (synchron mit Player)
+        if (isNow && snapForActive is PlaybackSnapshot snap)
+        {
+            var sp = (long)Math.Max(0, snap.Position.TotalMilliseconds);
+            var sl = (long)Math.Max(0, snap.Length.TotalMilliseconds);
+            // Eff-> nie kleiner als Pos
+            lenMs = Math.Max(lenMs, sl);
+            posMs = Math.Max(0, Math.Min(sp, Math.Max(1, lenMs)));
+        }
+
         long effLenMs = Math.Max(lenMs, posMs);
         double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
 
@@ -280,28 +301,27 @@ internal sealed class EpisodesPane
 
         char savedCh = (e.Saved == true) ? '★' : ' ';
 
-        // Download-Zustand (nur Unicode, keine Emojis)
+        // Download-Zustand (Unicode)
         var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
-        char dlCh = ds switch {
-            DownloadState.Running   => '⇣', // lädt
-            DownloadState.Verifying => '≈', // prüft
-            DownloadState.Done      => '⬇', // lokal
-            DownloadState.Failed    => '!', // Fehler
-            DownloadState.Queued    => '⌵', // markiert
-            _                       => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
+        char dlCh = ds switch
+        {
+            DownloadState.Running => '⇣',
+            DownloadState.Verifying => '≈',
+            DownloadState.Done => '⬇',
+            DownloadState.Failed => '!',
+            DownloadState.Queued => '⌵',
+            _ => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
         };
 
         char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' ';
 
-        // Offline-Badge: nur zeigen, wenn global offline UND Episode nicht wirklich lokal fertig
+        // Offline-Badge: nur, wenn global offline UND Datei nicht lokal (via DL-State bevorzugt)
         char offCh = ' ';
         bool offline = _isOffline?.Invoke() == true;
         bool hasLocal =
-            (_dlStateLookup?.Invoke(e.Id) == DownloadState.Done) // via DownloadManager bekannt
-            || e.Downloaded;                                     // Legacy-Fallback
+            (_dlStateLookup?.Invoke(e.Id) == DownloadState.Done) || e.Downloaded;
 
-        if (offline && !hasLocal)
-            offCh = '∅';
+        if (offline && !hasLocal) offCh = '∅';
 
         string badges = $"{savedCh}{dlCh}{queueCh}{offCh}";
 
@@ -340,19 +360,27 @@ internal sealed class EpisodesPane
         return h > 0 ? $"{h}:{m:00}:{s:00}" : $"{m:00}:{s:00}";
     }
 
+    // --- API: NowPlaying-Markierung ------------------------------------------------
+
+    // Bestehende Signatur bleibt (Kompatibilität)
     public void InjectNowPlaying(Guid? nowId)
     {
-        var items = _episodes.Select(e =>
-        {
-            var row = RowFor(e);
-            if (nowId != null && e.Id == nowId.Value)
-            {
-                // Ersetze das neutrale Prefix ("  ") am Anfang durch "▶ "
-                if (row.Length >= 2) row = "▶ " + row.Substring(2);
-                else row = "▶ " + row; // Falls defensiv kürzer
-            }
-            return row;
-        }).ToList();
+        _nowPlayingId = nowId;
+        _activeSnapshot = null; // kein Snapshot → persistente Werte
+        RebuildRowsPreservingView();
+    }
+
+    // NEU: Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur Player-Anzeige
+    public void InjectNowPlaying(Guid? nowId, PlaybackSnapshot snapshot)
+    {
+        _nowPlayingId = nowId;
+        _activeSnapshot = snapshot;
+        RebuildRowsPreservingView();
+    }
+
+    private void RebuildRowsPreservingView()
+    {
+        var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
 
         // Auswahl & Scroll beibehalten
         var keepSel = (List.Source?.Count > 0) ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;

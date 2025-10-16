@@ -228,10 +228,8 @@ class Program
             throw;
         }
 
-// 3) Coordinator bekommt den SwappablePlayer (implementiert IPlayer)
+        // 3) Coordinator bekommt den SwappablePlayer (implementiert IPlayer)
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
-
-
 
         Downloader = new DownloadManager(Data);
 
@@ -275,9 +273,6 @@ class Program
         
         if (!string.IsNullOrEmpty(_initialEngineInfo))
             UI.ShowOsd(_initialEngineInfo, 1200);
-
-        
-        
 
         // sofort einmal prüfen – nichts zuweisen, einfach ausführen (CS4014-safe via discard)
         _ = Task.Run(async () =>
@@ -625,14 +620,35 @@ class Program
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed);
         }
 
-        // Player-State treibt UI + Persist
+        // === NEU: Snapshot → Player-UI (einzige Quelle für Anzeige) ===
+        Playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
+        {
+            try
+            {
+                if (UI != null && Player != null)
+                {
+                    UI.UpdatePlayerSnapshot(snap, Player.State.Volume0_100);
+
+                    // Optional: Fenstertitel für aktuelle Episode aktualisieren
+                    var nowId = UI.GetNowPlayingId();
+                    if (nowId is Guid nid && snap.EpisodeId == nid)
+                    {
+                        var ep = Data.Episodes.FirstOrDefault(x => x.Id == nid);
+                        if (ep != null)
+                            UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+                    }
+                }
+            }
+            catch { /* UI robust halten */ }
+        });
+
+        // Player-State treibt Persist/Auto-Advance (UI-Update kommt aus Snapshot)
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
             try
             {
                 if (UI != null && Playback != null)
                 {
-                    UI.UpdatePlayerUI(s);
                     Playback.PersistProgressTick(
                         s,
                         eps => {
@@ -648,14 +664,13 @@ class Program
             }
         });
 
-        // UI-Refresh Watchdog (redundant, aber pragmatisch)
+        // UI-Refresh Watchdog (redundant, aber pragmatisch): nur Persist-Tick, kein direktes Player-UI Update mehr
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             try
             {
                 if (UI != null && Player != null && Playback != null)
                 {
-                    UI.UpdatePlayerUI(Player.State);
                     Playback.PersistProgressTick(
                         Player.State,
                         eps => {
@@ -764,7 +779,18 @@ class Program
             {
                 await Player.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
                 UI?.ShowOsd($"engine switched → {Player.Name}", 1400);
-                UI?.UpdatePlayerUI(Player.State);
+
+                // Nach Engine-Switch: Persist-Tick einmal triggern (UI snappt über SnapshotAvailable)
+                if (Playback != null)
+                {
+                    Playback.PersistProgressTick(
+                        Player.State,
+                        eps => {
+                            var fid = UI?.GetSelectedFeedId();
+                            if (fid != null && UI != null) UI.SetEpisodesForFeed(fid.Value, eps);
+                        },
+                        Data.Episodes);
+                }
             }
         }
         catch (Exception ex)

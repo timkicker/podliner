@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,11 @@ using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.App.Debug;
 
+/// <summary>
+/// Koordiniert Playback-Fortschritt, Persistenz, Auto-Advance und liefert
+/// pro Tick einen *atomischen* Fortschritts-Snapshot (Position & Länge).
+/// Öffentliche API bleibt kompatibel: Play(), PersistProgressTick(), Events.
+/// </summary>
 sealed class PlaybackCoordinator
 {
     // ---- Dependencies / State --------------------------------------------------
@@ -21,9 +27,9 @@ sealed class PlaybackCoordinator
     private CancellationTokenSource? _resumeCts;
 
     // Watchdogs / Throttles
-    private DateTime _lastUiRefresh      = DateTime.MinValue;
-    private DateTime _lastPeriodicSave   = DateTime.MinValue;
-    private DateTimeOffset _lastAutoAdv  = DateTimeOffset.MinValue;
+    private DateTime _lastUiRefresh    = DateTime.MinValue;
+    private DateTime _lastPeriodicSave = DateTime.MinValue;
+    private DateTimeOffset _lastAutoAdv = DateTimeOffset.MinValue;
 
     // Genau-einmal-Guard pro abgespielter Episode
     private bool _endHandledForSession = false;
@@ -35,6 +41,14 @@ sealed class PlaybackCoordinator
 
     // Optional: UI kann darauf reagieren (Queue-Feed neu rendern).
     public event Action? QueueChanged;
+
+    /// <summary>
+    /// Neuer, atomischer Fortschritts-Snapshot pro Tick (Position & Länge).
+    /// Die UI wird diesen in PlayerPanel/Shell konsumieren (nächster Schritt).
+    /// </summary>
+    public event Action<PlaybackSnapshot>? SnapshotAvailable;
+
+    private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
     public PlaybackCoordinator(AppData data, IPlayer player, Func<Task> saveAsync, MemoryLogSink mem)
     {
@@ -89,12 +103,25 @@ sealed class PlaybackCoordinator
         // 2) Danach einmalig resumen, wenn gewünscht – aber session-sicher
         if (startMs is long want && want > 0)
             StartOneShotResume(want, sid);
+
+        // Snapshot auf definierte Ausgangswerte setzen
+        _lastSnapshot = PlaybackSnapshot.From(
+            sid,
+            ep.Id,
+            TimeSpan.Zero,
+            _player.State.Length ?? TimeSpan.Zero,
+            _player.State.IsPlaying,
+            _player.State.Speed,
+            DateTimeOffset.Now
+        );
+        FireSnapshot(_lastSnapshot);
     }
 
     /// <summary>
     /// Wird regelmäßig aus Player.StateChanged + UI-Timer aufgerufen.
     /// Persistiert Fortschritt, markiert Played, schlägt Auto-Advance vor und
-    /// triggert leichte UI-Refreshs.
+    /// triggert leichte UI-Refreshs. Außerdem erzeugt sie genau EINEN
+    /// atomischen Fortschritts-Snapshot (Position & Länge) für die UI.
     /// </summary>
     public void PersistProgressTick(
         PlayerState s,
@@ -103,22 +130,40 @@ sealed class PlaybackCoordinator
     {
         if (_current is null) return;
 
-        // Eff-Länge & Pos bestimmen + Ende robust erkennen
+        // 1) Effektive Länge & Position berechnen (einmal pro Tick!)
         long effLenMs, posMs;
         var endNow = IsEndReached(s, out effLenMs, out posMs);
 
-        // Persistiere bekannte Länge & Position (clamps)
+        // 2) Persistiere bekannte Länge & Position (clamps)
         if (effLenMs > 0)
             _current.LengthMs = effLenMs;
         _current.LastPosMs = Math.Max(0, posMs);
 
-        // Played-Markierung (unabhängig vom Auto-Advance)
+        // 3) Snapshot bilden (einmalig) und ausgeben
+        var snap = PlaybackSnapshot.From(
+            _sid,
+            _current.Id,
+            TimeSpan.FromMilliseconds(Math.Max(0, posMs)),
+            TimeSpan.FromMilliseconds(Math.Max(0, effLenMs)),
+            s.IsPlaying,
+            s.Speed,
+            DateTimeOffset.Now
+        );
+        _lastSnapshot = snap;
+        FireSnapshot(snap);
+
+        // 4) Played-Markierung (unabhängig vom Auto-Advance)
         if (effLenMs > 0)
         {
             var ratio  = (double)posMs / effLenMs;
             var remain = TimeSpan.FromMilliseconds(Math.Max(0, effLenMs - posMs));
 
-            if (!_current.Played && (ratio >= 0.90 || remain <= TimeSpan.FromSeconds(30)))
+            // Für sehr kurze Clips härten (keine zu frühe Markierung)
+            var isVeryShort = effLenMs <= 60_000; // <= 60s
+            var remainCut   = isVeryShort ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(30);
+            var ratioCut    = isVeryShort ? 0.98 : 0.90;
+
+            if (!_current.Played && (ratio >= ratioCut || remain <= remainCut))
             {
                 _current.Played = true;
                 _current.LastPlayedAt = DateTimeOffset.Now;
@@ -126,7 +171,7 @@ sealed class PlaybackCoordinator
             }
         }
 
-        // Auto-Advance: genau einmal pro Session, entkoppelt von Played-Markierung
+        // 5) Auto-Advance: genau einmal pro Session, entkoppelt von Played-Markierung
         if (!_endHandledForSession && endNow)
         {
             _endHandledForSession = true;
@@ -140,7 +185,7 @@ sealed class PlaybackCoordinator
             }
         }
 
-        // UI leicht aktualisieren (~1x/s)
+        // 6) UI leicht aktualisieren (~1x/s)
         var now = DateTime.UtcNow;
         if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(1))
         {
@@ -148,7 +193,7 @@ sealed class PlaybackCoordinator
             try { refreshUi(allEpisodes); } catch { /* robust */ }
         }
 
-        // periodisches Save (~3s)
+        // 7) periodisches Save (~3s)
         if ((now - _lastPeriodicSave) > TimeSpan.FromSeconds(3))
         {
             _lastPeriodicSave = now;
@@ -200,9 +245,9 @@ sealed class PlaybackCoordinator
 
     /// <summary>
     /// Robuste End-Erkennung.
-    /// - Wenn Player-Länge bekannt: End-Kriterien gegen *Player*-Länge prüfen.
-    /// - Fallback: gegen effektive Länge (max(PlayerLen, MetaLen, Pos)).
-    /// - Außerdem: „End-Stall“: IsPlaying==false und Position ~ Länge.
+    /// - Priorität: *Player*-Länge (falls vorhanden).
+    /// - Fallback: effektive Länge = max(PlayerLen, MetaLen, Pos).
+    /// - Stall-Fälle: IsPlaying==false & (Rest sehr klein bzw. pos≈len).
     /// </summary>
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
@@ -325,4 +370,52 @@ sealed class PlaybackCoordinator
     {
         try { QueueChanged?.Invoke(); } catch { /* best effort */ }
     }
+
+    // ---- Snapshot-API ----------------------------------------------------------
+
+    /// <summary>
+    /// Liefert den letzten erzeugten Snapshot (z. B. UI-Initialisierung).
+    /// </summary>
+    public PlaybackSnapshot GetLastSnapshot() => _lastSnapshot;
+
+    private void FireSnapshot(PlaybackSnapshot snap)
+    {
+        try { SnapshotAvailable?.Invoke(snap); } catch { /* UI darf App nicht crashen */ }
+    }
+}
+
+/// <summary>
+/// Atomischer Fortschritts-Snapshot: beide Anzeigen (Elapsed & Remaining)
+/// basieren auf denselben Werten innerhalb eines UI-Frames.
+/// </summary>
+public readonly record struct PlaybackSnapshot(
+    int SessionId,
+    Guid? EpisodeId,
+    TimeSpan Position,
+    TimeSpan Length,
+    bool IsPlaying,
+    double Speed,
+    DateTimeOffset Timestamp)
+{
+    public static readonly PlaybackSnapshot Empty = new(
+        SessionId: 0, EpisodeId: null,
+        Position: TimeSpan.Zero, Length: TimeSpan.Zero,
+        IsPlaying: false, Speed: 1.0,
+        Timestamp: DateTimeOffset.MinValue
+    );
+
+    public static PlaybackSnapshot From(
+        int sessionId,
+        Guid? episodeId,
+        TimeSpan position,
+        TimeSpan length,
+        bool isPlaying,
+        double speed,
+        DateTimeOffset now) => new(
+            sessionId, episodeId,
+            position < TimeSpan.Zero ? TimeSpan.Zero : position,
+            length   < TimeSpan.Zero ? TimeSpan.Zero : length,
+            isPlaying,
+            speed <= 0 ? 1.0 : speed,
+            now);
 }

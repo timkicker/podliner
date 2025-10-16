@@ -71,10 +71,8 @@ public sealed class Shell
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
-    
     public void ToggleTheme()
     {
-        // rotiert: Menu → Base → Native → ...
         _theme = _theme switch
         {
             ThemeMode.MenuAccent => ThemeMode.Base,
@@ -96,7 +94,7 @@ public sealed class Shell
     // ---- Build ----
     public void Build()
     {
-        // --- Main Window zuerst ---
+        // --- Main Window ---
         _mainWin = new Window
         {
             X = 0,
@@ -140,7 +138,7 @@ public sealed class Shell
         _player.WireSeeks(cmd => Command?.Invoke(cmd), () => _lastEffLenTs, s => ShowOsd(s));
         Application.Top.Add(_player);
 
-        // --- Menü ERST JETZT bauen (weil Callbacks _episodesPane nutzen) ---
+        // --- Menü ---
         var menu = MenuBarFactory.Build(new MenuBarFactory.Callbacks(
             Command: (cmd) => Command?.Invoke(cmd),
             RefreshRequested: RefreshRequested,
@@ -175,7 +173,7 @@ public sealed class Shell
         // --- Theme ---
         ApplyTheme();
 
-        // --- Keys überall binden (null-safe in BindKeys) ---
+        // --- Keys überall binden ---
         BindKeys(
             Application.Top,
             menu,
@@ -225,7 +223,6 @@ public sealed class Shell
     }
 
     public Guid? GetSelectedFeedId() => _feedsPane?.GetSelectedFeedId();
-
     public void SelectFeed(Guid id) => _feedsPane?.SelectFeed(id);
 
     public void RefreshEpisodesForSelectedFeed(IEnumerable<Episode> episodes)
@@ -240,10 +237,8 @@ public sealed class Shell
         {
             if (_episodesPane == null) return;
 
-            // Feed-Spaltenmodus setzen (Queue soll die Feed-Spalte auch zeigen)
             _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE);
 
-            // aktuelle Auswahl + Scroll behalten
             var prevId  = _episodesPane.GetSelected()?.Id;
             var keepTop = _episodesPane.List?.TopItem ?? 0;
 
@@ -253,10 +248,8 @@ public sealed class Shell
                 EpisodeSorter, _lastSearch, prevId
             );
 
-            // Now-Playing-Pfeil injizieren
             _episodesPane.InjectNowPlaying(_nowPlayingId);
 
-            // Scroll-Position restaurieren (sicher clampen)
             if (_episodesPane.List?.Source is IList<object> src)
             {
                 var maxTop = Math.Max(0, src.Count - 1);
@@ -266,7 +259,6 @@ public sealed class Shell
     }
 
     public Episode? GetSelectedEpisode() => _episodesPane?.GetSelected();
-
     public int GetSelectedEpisodeIndex() => _episodesPane?.GetSelectedIndex() ?? -1;
 
     public void SelectEpisodeIndex(int index)
@@ -317,7 +309,35 @@ public sealed class Shell
         });
     }
 
-    // ---- Player UI tick (mit smoothing wie gehabt, hier kurz) ----
+    // ---- NEU: Snapshot-basierte Player-UI-Aktualisierung ----
+    public void UpdatePlayerSnapshot(PlaybackSnapshot snap, int volume0to100)
+    {
+        UI(() =>
+        {
+            if (_player == null) return;
+
+            // Startup-Pin erst lösen, wenn „echte“ Daten kommen
+            if (_startupPinned)
+            {
+                bool meaningless =
+                    snap.Length == TimeSpan.Zero &&
+                    snap.Position == TimeSpan.Zero &&
+                    !snap.IsPlaying;
+                if (meaningless) return;
+                _startupPinned = false;
+            }
+
+            // Effektive Länge und Progress für Seeks
+            var effLen = snap.Length;
+            if (snap.Position > effLen) effLen = snap.Position;
+            _lastEffLenTs = effLen;
+
+            static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+            _player.Update(snap, volume0to100, F);
+        });
+    }
+
+    // ---- ALT: Player UI tick (Kompatibilität) ----
     public void UpdatePlayerUI(PlayerState s)
     {
         UI(() =>
@@ -371,7 +391,6 @@ public sealed class Shell
     }
 
     public void TogglePlayerPlacement() => SetPlayerPlacement(!_playerAtTop);
-
     public void ShowDetails(Episode e) => UI(() => _episodesPane?.ShowDetails(e));
 
     private void ApplyTheme()
@@ -404,7 +423,7 @@ public sealed class Shell
                 _player.VolBar.ColorScheme   = MakeProgressScheme();
             }
 
-            _osd.ApplyTheme(); // OSD nimmt Application.Top.ColorScheme
+            _osd.ApplyTheme();
 
             if (_commandBox != null) _commandBox.ColorScheme = scheme;
             if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
@@ -412,18 +431,16 @@ public sealed class Shell
             RequestRepaint();
         });
     }
-    
+
     private static ColorScheme BuildNativeScheme()
     {
-        // Nutze die Standard-Attribute des Terminals (Colors.Base),
-        // aber ohne Menü-Akzente o. ä.
         return new ColorScheme
         {
             Normal    = Colors.Base.Normal,
-            Focus     = Colors.Base.Normal,     // kein besonderer Fokus
+            Focus     = Colors.Base.Normal,
             HotNormal = Colors.Base.Normal,
             HotFocus  = Colors.Base.Normal,
-            Disabled  = Colors.Base.Disabled    // disabled darf blasser bleiben
+            Disabled  = Colors.Base.Disabled
         };
     }
 
@@ -431,7 +448,6 @@ public sealed class Shell
     {
         if (_theme == ThemeMode.Native)
         {
-            // In „Native” die Balken exakt wie die Basis halten
             return new ColorScheme
             {
                 Normal    = Colors.Base.Normal,
@@ -441,8 +457,6 @@ public sealed class Shell
                 Disabled  = Colors.Base.Disabled
             };
         }
-
-        // In den anderen Themes wie gehabt mit einem kleinen Akzent
         return new ColorScheme
         {
             Normal    = Colors.Base.Normal,
@@ -452,10 +466,6 @@ public sealed class Shell
             HotFocus  = Colors.Menu.HotFocus
         };
     }
-
-
-
-
 
     // ---- Command/Search ----
     public void ShowCommandBox(string seed)
@@ -534,9 +544,6 @@ public sealed class Shell
     private static bool Has(Key k, Key mask) => (k & mask) == mask;
     private static Key BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
 
-    /// <summary>
-    /// Attach our key handler to every view passed in (ignores nulls).
-    /// </summary>
     private void BindKeys(params View?[] views)
     {
         foreach (var v in views)
@@ -551,14 +558,13 @@ public sealed class Shell
         var key = e.KeyEvent.Key;
         var kv  = e.KeyEvent.KeyValue;
 
-        // Ctrl-C/V/X unterdrücken (Terminal.Gui kopiert sonst intern)
+        // Ctrl-C/V/X unterdrücken
         if ((key & Key.CtrlMask) != 0)
         {
             var baseKey = key & ~Key.CtrlMask;
             if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
         }
 
-        // --- Queue-Reorder: Terminal.Gui sendet bei Shift-J/K schlicht 'J'/'K' ---
         bool inQueue = GetSelectedFeedId() is Guid fid && fid == QueueFeedId;
         if (kv == 'J')
         {
@@ -570,7 +576,6 @@ public sealed class Shell
             if (inQueue) { Command?.Invoke(":queue move up"); return true; }
             JumpToUnplayed(-1); return true;
         }
-        // -------------------------------------------------------------------------
 
         if (kv == 'm' || kv == 'M') { TogglePlayedRequested?.Invoke(); return true; }
         if (key == Key.F12) { ShowLogsOverlay(500); return true; }
@@ -582,7 +587,6 @@ public sealed class Shell
         if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
 
         // pane cycle / details
-        // h
         if (key == (Key)('h'))
         {
             if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
@@ -597,7 +601,6 @@ public sealed class Shell
             return true;
         }
 
-        // l
         if (key == (Key)('l'))
         {
             if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
@@ -615,7 +618,6 @@ public sealed class Shell
         if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
         if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
 
-        // i
         if (kv == 'i' || kv == 'I')
         {
             if (_episodesPane != null)
@@ -626,7 +628,6 @@ public sealed class Shell
             return true;
         }
 
-        // Esc aus Details
         if (key == Key.Esc && _episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
         {
             if (_episodesPane != null)
