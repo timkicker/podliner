@@ -1,7 +1,21 @@
 using System;
+using System.Collections.Generic;
 using Terminal.Gui;
 
 namespace StuiPodcast.Core;
+
+[Flags]
+public enum PlayerCapabilities {
+    None     = 0,
+    Play     = 1 << 0,
+    Pause    = 1 << 1,
+    Stop     = 1 << 2,
+    Seek     = 1 << 3,     // präzises Seek während der Wiedergabe
+    Volume   = 1 << 4,     // Lautstärke live veränderbar
+    Speed    = 1 << 5,     // Wiedergabegeschwindigkeit live veränderbar
+    Network  = 1 << 6,     // Remote-URLs unterstützt
+    Local    = 1 << 7      // lokale Dateien unterstützt
+}
 
 public class Feed {
     public Guid   Id { get; set; } = Guid.NewGuid();
@@ -13,11 +27,10 @@ public class Feed {
 public class Episode {
     public bool Saved { get; set; } = false;
     public bool Downloaded { get; set; } = false;
-    // in Episode.cs (oder wo dein Episode-Modell liegt)
-    public long? LastPosMs { get; set; }      // letzte Position
-    public long? LengthMs  { get; set; }      // bekannte Länge
-    public bool  Played    { get; set; }      // als gespielt markiert
-    public DateTimeOffset? LastPlayedAt { get; set; } // optionales Meta
+    public long? LastPosMs { get; set; }
+    public long? LengthMs  { get; set; }
+    public bool  Played    { get; set; }
+    public DateTimeOffset? LastPlayedAt { get; set; }
 
     public Guid   Id { get; set; } = Guid.NewGuid();
     public Guid   FeedId { get; set; }
@@ -35,44 +48,38 @@ public class PlayerState {
     public double Speed { get; set; } = 1.0;
     public TimeSpan Position { get; set; }
     public TimeSpan? Length { get; set; }
+
+    // neu: Fähigkeiten der aktiven Engine
+    public PlayerCapabilities Capabilities { get; set; } =
+        PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
+        PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |
+        PlayerCapabilities.Network | PlayerCapabilities.Local;
 }
 
 public class AppData {
-    
-    // --- Sortierung (global) ---
-    // AppData.cs
-    public string PlaySource { get; set; } = "auto"; // "auto" | "local" | "remote"
+    public string PlaySource { get; set; } = "auto";
     public bool   NetworkOnline { get; set; } = true;
 
-    
     public List<Guid> Queue { get; set; } = new();
 
-    public string? DownloadDir { get; set; }          // z.B. ~/Podcasts
-    public List<Guid> DownloadQueue { get; set; } = new();  // FIFO
+    public string? DownloadDir { get; set; }
+    public List<Guid> DownloadQueue { get; set; } = new();
     public Dictionary<Guid, StuiPodcast.Core.DownloadStatus> DownloadMap { get; set; } = new();
 
-    
     public int HistorySize { get; set; } = 200;
-    public string SortBy  { get; set; } = "pubdate"; // pubdate|title|played|progress|feed
-    public string SortDir { get; set; } = "desc";    // asc|desc
+    public string SortBy  { get; set; } = "pubdate";
+    public string SortDir { get; set; } = "desc";
 
-    
-    TabView.Tab? episodesTabRef = null; // <— Referenz auf „Episodes“-Tab
-    // AppData.cs – Ergänzungen
-    public bool AutoAdvance  { get; set; } = true;      // automatisch weiter zur nächsten Episode
-    public bool WrapAdvance  { get; set; } = true;      // am Listenende wieder vorne anfangen
-    public int  PlayedThresholdPercent { get; set; } = 95; // ab x% als „gespielt“ markieren
+    public bool AutoAdvance  { get; set; } = true;
+    public bool WrapAdvance  { get; set; } = true;
+    public int  PlayedThresholdPercent { get; set; } = 95;
 
-
-    
     public bool UnplayedOnly { get; set; } = false;
     public Dictionary<Guid, int> LastSelectedEpisodeIndexByFeed { get; set; } = new();
     public int  Volume0_100 { get; set; } = 50;
     public double Speed { get; set; } = 1.0;
-
     public int? LastVolume0_100 { get; set; }
     public double? LastSpeed { get; set; }
-
 
     public Guid? LastSelectedFeedId { get; set; }
     public int?  LastSelectedEpisodeIndex { get; set; }

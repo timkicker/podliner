@@ -838,6 +838,10 @@ static class CommandRouter
 
     static void Seek(string arg, IPlayer player)
     {
+        if ((player.Capabilities & PlayerCapabilities.Seek) == 0) { /* freundlich abbrechen */ return; }
+
+        
+        
         if (string.IsNullOrWhiteSpace(arg)) return;
 
         var s = player.State;
@@ -882,6 +886,8 @@ static class CommandRouter
 
     static void Volume(string arg, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {
+        if ((player.Capabilities & PlayerCapabilities.Volume) == 0) { ui.ShowOsd("volume not supported on this engine"); return; }
+
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Volume0_100;
 
@@ -907,6 +913,8 @@ static class CommandRouter
 
     static void Speed(string arg, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {
+        if ((player.Capabilities & PlayerCapabilities.Speed) == 0) { ui.ShowOsd("speed not supported on this engine"); return; }
+
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Speed;
 
