@@ -749,10 +749,14 @@ class Program
     
     
     // Program.cs
-    static async Task SwitchEngineAsync(string? _)
+    static async Task SwitchEngineAsync(string pref)
     {
         try
         {
+            // Wunsch merken (falls PlayerFactory auf Data.PreferredEngine schaut)
+            Data.PreferredEngine = string.IsNullOrWhiteSpace(pref) ? "auto" : pref.Trim().ToLowerInvariant();
+            _ = SaveAsync();
+
             var next = PlayerFactory.Create(Data, out var info);
             ApplyPrefsTo(next);
 
@@ -769,6 +773,7 @@ class Program
             UI?.ShowOsd("engine switch failed", 1500);
         }
     }
+
 
 
     

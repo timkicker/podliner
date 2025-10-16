@@ -1018,7 +1018,7 @@ private static void ExecEngine(
         if ((arg.StartsWith("+") || arg.StartsWith("-")) &&
             double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var delta))
         {
-            var s = Math.Clamp(cur + delta, 0.5, 2.5);
+            var s = Math.Clamp(cur + delta, 0.25, 3.0);
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
@@ -1027,7 +1027,7 @@ private static void ExecEngine(
         }
         if (double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var abs))
         {
-            var s = Math.Clamp(abs, 0.5, 2.5);
+            var s = Math.Clamp(abs, 0.25, 3.0);
             player.SetSpeed(s);
             data.Speed = s;
             _ = persist();
