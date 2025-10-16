@@ -10,7 +10,7 @@ namespace StuiPodcast.Infra;
 
 public static class PlayerFactory
 {
-    // Engine Auswahl: respektiert PreferredEngine; robustes Fallback + klare OSD-Infos
+    // Engine-Auswahl: bevorzugt VLC; OS-spezifische Fallback-Ketten
     public static IPlayer Create(AppData data, out string infoOsd)
     {
         var pref = (data.PreferredEngine ?? "auto").Trim().ToLowerInvariant();
@@ -26,7 +26,7 @@ public static class PlayerFactory
             catch (Exception ex)
             {
                 p = null!;
-                reason = $"VLClib init failed: {Short(ex)}";
+                reason = $"libVLC init failed: {Short(ex)}";
                 return false;
             }
         }
@@ -34,7 +34,6 @@ public static class PlayerFactory
         bool TryMpv(out IPlayer p, out string reason)
         {
             p = null!;
-            reason = "";
             if (!ExecutableExists("mpv"))
             {
                 reason = "mpv not found in PATH";
@@ -74,18 +73,47 @@ public static class PlayerFactory
         IPlayer? chosen = null;
         string why = "";
 
-        // Preferred explicit choice first
+        // 1) Explizite Präferenz zuerst
         if (pref is "vlc" && !TryVlc(out chosen!, out why)) pref = "auto";
         if (pref is "mpv" && !TryMpv(out chosen!, out why)) pref = "auto";
         if (pref is "ffplay" && !TryFfp(out chosen!, out why)) pref = "auto";
 
-        // Auto fallback chain: VLC → mpv → ffplay
+        // 2) Auto-Kette nach OS
         if (chosen == null)
         {
-            if (TryVlc(out chosen!, out var w1))      why = $"VLC: {w1}";
-            else if (TryMpv(out chosen!, out var w2)) why = $"mpv: {w2}";
-            else if (TryFfp(out chosen!, out var w3)) why = $"ffplay: {w3}";
-            else throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
+            bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+            bool isLin = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
+
+            if (TryVlc(out chosen!, out var wVlc))
+            {
+                why = $"vlc: {wVlc}";
+            }
+            else
+            {
+                if (isWin || isMac)
+                {
+                    // Windows/macOS: ffplay → mpv
+                    if (TryFfp(out chosen!, out var wFfp))      { why = $"ffplay: {wFfp}"; }
+                    else if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; }
+                }
+                else if (isLin)
+                {
+                    // Linux: mpv → ffplay
+                    if (TryMpv(out chosen!, out var wMpv))      { why = $"mpv: {wMpv}"; }
+                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; }
+                }
+                else
+                {
+                    // Unbekanntes OS: mpv → ffplay
+                    if (TryMpv(out chosen!, out var wMpv))      { why = $"mpv: {wMpv}"; }
+                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; }
+                }
+
+                if (chosen == null)
+                    throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
+            }
+
             infoOsd = $"Engine: {chosen.Name} (fallback)";
         }
         else
@@ -99,35 +127,46 @@ public static class PlayerFactory
     }
 
     // Cross-platform Executable lookup:
-    //  - Unix: try 'which'
-    //  - Windows: search PATH + PATHEXT, also allow direct Start to test
+    //  - Unix: 'which'
+    //  - Windows: PATH + PATHEXT + letzter Startversuch (abgefangen)
     private static bool ExecutableExists(string fileName)
     {
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // Try to resolve via PATH + PATHEXT
                 var pathext = (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD")
                               .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var paths = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+                var paths = (Environment.GetEnvironmentVariable("PATH") ?? "")
+                            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
                 foreach (var dir in paths)
                 {
                     foreach (var ext in pathext)
                     {
-                        var candidate = Path.Combine(dir, fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase) ? fileName : fileName + ext);
+                        var candidate = Path.Combine(dir,
+                            fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase) ? fileName : fileName + ext);
                         if (File.Exists(candidate)) return true;
                     }
                 }
-                // Last resort: try start & catch Win32Exception (file not found)
-                using var p = new Process { StartInfo = new ProcessStartInfo { FileName = fileName, UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true } };
-                try { p.Start(); p.Kill(true); return true; }
+
+                // Letzter Versuch: Starten & Fehler fangen (Datei nicht gefunden)
+                using var p = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = fileName,
+                        UseShellExecute = false,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true
+                    }
+                };
+                try { p.Start(); try { p.Kill(entireProcessTree: true); } catch { } return true; }
                 catch (Win32Exception) { return false; }
                 catch { return false; }
             }
             else
             {
-                // Unix-y: which
                 using var p = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -140,7 +179,7 @@ public static class PlayerFactory
                     }
                 };
                 p.Start();
-                if (!p.WaitForExit(1500)) { try { p.Kill(true); } catch { } }
+                if (!p.WaitForExit(1500)) { try { p.Kill(entireProcessTree: true); } catch { } }
                 return p.ExitCode == 0;
             }
         }

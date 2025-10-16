@@ -32,12 +32,11 @@ internal sealed class EpisodesPane
     private Dictionary<Guid, string> _feedTitleMap = new();
 
     private const int FEED_COL_W = 24;
-    private const string SEP = "  │  ";
 
     private Func<Guid, bool>? _isQueued;             // Badge-Lookup
     private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
 
-    // NEU: optionaler Snapshot für die *aktive* Episode (synchroner Progress)
+    // Snapshot für die *aktive* Episode (synchroner Progress)
     private Guid? _nowPlayingId;
     private PlaybackSnapshot? _activeSnapshot; // nur für _nowPlayingId relevant
 
@@ -263,13 +262,13 @@ internal sealed class EpisodesPane
 
     // --- Rendering ----------------------------------------------------------------
 
-    // NEU: Fortschritt & Mark/Badges aus persistenten Feldern,
-    //      aber für die *aktive* Episode (nowId) optional mit Snapshot-Override.
+    // Fortschritt & Badges aus persistenten Feldern,
+    // aber für die *aktive* Episode (nowId) optional mit Snapshot-Override.
     private string RowFor(Episode e, Guid? nowId, PlaybackSnapshot? snapForActive)
     {
         // Prefix: neutrales "  " oder "▶ " für aktive Episode
         bool isNow = nowId != null && e.Id == nowId.Value;
-        var nowPrefix = isNow ? "▶ " : "  ";
+        var nowPrefix = GlyphSet.NowPrefix(isNow);
 
         // Länge/Position – Default aus Persistenz
         long lenMs = e.LengthMs ?? 0;
@@ -288,49 +287,30 @@ internal sealed class EpisodesPane
         long effLenMs = Math.Max(lenMs, posMs);
         double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
 
-        char mark = e.Played
-            ? '✔'
-            : r <= 0.0 ? '○'
-                : r < 0.25 ? '◔'
-                    : r < 0.50 ? '◑'
-                        : r < 0.75 ? '◕'
-                            : '●';
+        char mark = GlyphSet.ProgressGlyph(r, e.Played);
 
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
-        string dur = FormatDuration(lenMs);
+        string dur = GlyphSet.FormatDuration(lenMs);
 
-        char savedCh = (e.Saved == true) ? '★' : ' ';
-
-        // Download-Zustand (Unicode)
+        // Download-Zustand / Badges
         var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
-        char dlCh = ds switch
-        {
-            DownloadState.Running => '⇣',
-            DownloadState.Verifying => '≈',
-            DownloadState.Done => '⬇',
-            DownloadState.Failed => '!',
-            DownloadState.Queued => '⌵',
-            _ => (e.Downloaded ? '⬇' : ' ') // Legacy-Fallback
-        };
 
-        char queueCh = (_isQueued?.Invoke(e.Id) == true) ? '⧉' : ' ';
-
-        // Offline-Badge: nur, wenn global offline UND Datei nicht lokal (via DL-State bevorzugt)
-        char offCh = ' ';
         bool offline = _isOffline?.Invoke() == true;
-        bool hasLocal =
-            (_dlStateLookup?.Invoke(e.Id) == DownloadState.Done) || e.Downloaded;
+        bool hasLocal = (ds == DownloadState.Done) || e.Downloaded;
 
-        if (offline && !hasLocal) offCh = '∅';
-
-        string badges = $"{savedCh}{dlCh}{queueCh}{offCh}";
+        string badges = GlyphSet.ComposeBadges(
+            isSaved: e.Saved,
+            dlState: ds,
+            isQueued: _isQueued?.Invoke(e.Id) == true,
+            showOffline: offline && !hasLocal
+        );
 
         string left = $"{nowPrefix}{mark} {date,-10}  {dur,8}  {badges}  ";
 
         string title = e.Title ?? string.Empty;
         int viewWidth = (List.Bounds.Width > 0) ? List.Bounds.Width : 100;
 
-        int reservedRight = _showFeedColumn ? (SEP.Length + FEED_COL_W) : 0;
+        int reservedRight = _showFeedColumn ? (GlyphSet.Separator.Length + FEED_COL_W) : 0;
         int availTitle = Math.Max(6, viewWidth - left.Length - reservedRight);
         string titleTrunc = TruncateTo(title, availTitle);
 
@@ -339,7 +319,7 @@ internal sealed class EpisodesPane
         string feedName = (_feedTitleMap.TryGetValue(e.FeedId, out var nm) ? nm : string.Empty) ?? string.Empty;
         string feedTrunc = TruncateTo(feedName, FEED_COL_W);
         string paddedTitle = titleTrunc.PadRight(availTitle);
-        return left + paddedTitle + SEP + feedTrunc.PadRight(FEED_COL_W);
+        return left + paddedTitle + GlyphSet.Separator + feedTrunc.PadRight(FEED_COL_W);
     }
 
     private static string TruncateTo(string? s, int max)
@@ -348,16 +328,6 @@ internal sealed class EpisodesPane
         if (s.Length <= max) return s;
         if (max <= 1) return "…";
         return s.Substring(0, Math.Max(0, max - 1)) + "…";
-    }
-
-    private static string FormatDuration(long ms)
-    {
-        if (ms <= 0) return "--:--";
-        long totalSeconds = ms / 1000;
-        long h = totalSeconds / 3600;
-        long m = (totalSeconds % 3600) / 60;
-        long s = totalSeconds % 60;
-        return h > 0 ? $"{h}:{m:00}:{s:00}" : $"{m:00}:{s:00}";
     }
 
     // --- API: NowPlaying-Markierung ------------------------------------------------
@@ -370,7 +340,7 @@ internal sealed class EpisodesPane
         RebuildRowsPreservingView();
     }
 
-    // NEU: Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur Player-Anzeige
+    // Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur Player-Anzeige
     public void InjectNowPlaying(Guid? nowId, PlaybackSnapshot snapshot)
     {
         _nowPlayingId = nowId;

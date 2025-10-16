@@ -22,9 +22,7 @@ internal sealed class PlayerPanel : FrameView
     public Button BtnSpeedUp   { get; private set; } = null!;
     public Button BtnDownload  { get; private set; } = null!;
 
-    /// <summary>
-    /// Router-Hook (z. B. ":seek +10")
-    /// </summary>
+    /// <summary>Router-Hook (z. B. ":seek +10")</summary>
     public event Action<string>? Command;
 
     private const int SidePad = 1;
@@ -67,13 +65,13 @@ internal sealed class PlayerPanel : FrameView
         };
 
         const int gapL = 2;
-        BtnBack10    = new Button("«10s")    { X = 2, Y = 2 };
-        BtnPlayPause = new Button("Play ⏵")  { X = Pos.Right(BtnBack10) + gapL, Y = 2 };
-        BtnFwd10     = new Button("10s»")    { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
-        BtnDownload  = new Button("⬇ Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
+        BtnBack10    = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "«10s" : "<10") { X = 2, Y = 2 };
+        BtnPlayPause = new Button("Play " + (GlyphSet.Current == GlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2 };
+        BtnFwd10     = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "10s»" : "10>") { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
+        BtnDownload  = new Button($"{GlyphSet.DownloadedMark} Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
 
         const int midGap = 2;
-        SpeedLabel   = new Label("1.0×") { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
+        SpeedLabel   = new Label(GlyphSet.SpeedLabel(1.0)) { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
         BtnSpeedDown = new Button("-spd"){ Y = 0, X = Pos.Right(SpeedLabel) + midGap };
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
         var midWidth = 6 + midGap + 6 + midGap + 6;
@@ -88,8 +86,8 @@ internal sealed class PlayerPanel : FrameView
         if (ProgressSchemeProvider != null) VolBar.ColorScheme = ProgressSchemeProvider();
         r += 16 + gap - 2;
 
-        VolPctLabel = new Label("0%") { Y = 2, Width = 4, X = Pos.AnchorEnd(r + 4), TextAlignment = TextAlignment.Left };
-        r += 4 + gap + 1;
+        VolPctLabel = new Label(GlyphSet.VolumePercent(0)) { Y = 2, Width = 5, X = Pos.AnchorEnd(r + 5), TextAlignment = TextAlignment.Left };
+        r += 5 + gap + 1;
 
         BtnVolUp   = new Button("Vol+") { Y = 2, X = Pos.AnchorEnd(r + 6) };
         r += 6 + gap;
@@ -170,18 +168,13 @@ internal sealed class PlayerPanel : FrameView
             var v = Math.Clamp(vol, 0, 100);
             command($":vol {v}");
             VolBar.Fraction  = v / 100f; // visuelles Feedback sofort
-            VolPctLabel.Text = $"{v}%";
+            VolPctLabel.Text = GlyphSet.VolumePercent(v);
         };
     }
 
     // ----------------------------------------------------------------------
-    // NEU: Snapshot-basierte Aktualisierung (bevorzugt)
+    // Bevorzugtes Update: EIN atomischer Snapshot = synchrones UI
     // ----------------------------------------------------------------------
-
-    /// <summary>
-    /// Bevorzugte Update-Methode: nutzt *einen* atomischen Snapshot
-    /// (Position & Länge stammen aus derselben Quelle/Zeit).
-    /// </summary>
     public void Update(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
         => RenderFromSnapshot(snap, volume0to100, format);
 
@@ -190,7 +183,6 @@ internal sealed class PlayerPanel : FrameView
     // ----------------------------------------------------------------------
     public void Update(PlayerState s, TimeSpan effLen, Func<TimeSpan, string> format)
     {
-        // Ein synthetischer Snapshot (Position & Länge in *einem* Paket)
         var snap = new PlaybackSnapshot(
             0,                      // SessionId
             null,                   // EpisodeId
@@ -200,7 +192,6 @@ internal sealed class PlayerPanel : FrameView
             s.Speed <= 0 ? 1.0 : s.Speed,
             DateTimeOffset.Now
         );
-
         RenderFromSnapshot(snap, s.Volume0_100, format);
     }
 
@@ -216,12 +207,16 @@ internal sealed class PlayerPanel : FrameView
         var rem = len == TimeSpan.Zero ? TimeSpan.Zero : (len - pos);
         if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
 
-        var icon = snap.IsPlaying ? "▶" : "⏸";
+        var isUnicode = GlyphSet.Current == GlyphSet.Profile.Unicode;
+        var icon = snap.IsPlaying ? (isUnicode ? "▶" : ">") : (isUnicode ? "⏸" : "||");
+
         var posStr = format(pos);
         var lenStr = len == TimeSpan.Zero ? "--:--" : format(len);
 
-        TimeLabel.Text   = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
-        BtnPlayPause.Text = snap.IsPlaying ? "Pause ⏸" : "Play ⏵";
+        TimeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
+        BtnPlayPause.Text = snap.IsPlaying
+            ? (isUnicode ? "Pause ⏸" : "Pause ||")
+            : (isUnicode ? "Play ⏵"  : "Play >");
 
         Progress.Fraction = (len.TotalMilliseconds > 0)
             ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
@@ -229,7 +224,7 @@ internal sealed class PlayerPanel : FrameView
 
         var v = Math.Clamp(volume0to100, 0, 100);
         VolBar.Fraction  = v / 100f;
-        VolPctLabel.Text = $"{v}%";
-        SpeedLabel.Text  = $"{snap.Speed:0.0}×";
+        VolPctLabel.Text = GlyphSet.VolumePercent(v);
+        SpeedLabel.Text  = GlyphSet.SpeedLabel(snap.Speed);
     }
 }

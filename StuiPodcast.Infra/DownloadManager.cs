@@ -142,6 +142,16 @@ namespace StuiPodcast.Infra
                     continue;
                 }
 
+                // Schon vorhanden & markiert?
+                if (_data.DownloadMap.TryGetValue(ep.Id, out var st0) &&
+                    st0.State == DownloadState.Done &&
+                    !string.IsNullOrWhiteSpace(st0.LocalPath) &&
+                    File.Exists(st0.LocalPath))
+                {
+                    // Nichts tun – bereits fertig
+                    continue;
+                }
+
                 // pro-Job CTS anlegen (linked mit globalem Cancel)
                 CancellationTokenSource? jobCts = null;
                 try
@@ -174,35 +184,84 @@ namespace StuiPodcast.Infra
         private async Task DownloadOneAsync(Episode ep, CancellationToken cancel)
         {
             var url = ep.AudioUrl;
-            if (string.IsNullOrWhiteSpace(url)) throw new InvalidOperationException("Episode has no AudioUrl");
+            if (string.IsNullOrWhiteSpace(url))
+                throw new InvalidOperationException("Episode has no AudioUrl");
 
-            // Pfade vorbereiten
-            var root = ResolveDownloadRoot();
+            // ---- Zielpfade vorbereiten (OS-sicher) ----
+            var rootDir = ResolveDownloadRoot();
             var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
-            var feedDirName = SanitizeFileName(feed?.Title ?? "Podcast");
-            var epiName = SanitizeFileName(ep.Title ?? "episode");
-            var ext = GuessExtensionFromUrl(url) ?? ".mp3";
-            var dir = Path.Combine(root, feedDirName);
-            Directory.CreateDirectory(dir);
-            var dst = Path.Combine(dir, $"{feedDirName} - {epiName}{ext}");
+            var feedTitle = feed?.Title ?? "Podcast";
 
-            // Temp-Datei für atomare Moves
-            var tmp = dst + ".part";
+            // Versuch, eine passendere Extension zu finden:
+            //  - Aus URL
+            //  - Falls HEAD/GET später Content-Disposition liefert, aktualisieren wir ggf. (rare)
+            var extFromUrl = PathSanitizer.GetExtension(url, ".mp3");
 
-            // Status: Running
-            SetState(ep.Id, s => { s.State = DownloadState.Running; s.LocalPath = dst; s.BytesReceived = 0; s.TotalBytes = null; s.Error = null; });
+            var targetPath = PathSanitizer.BuildDownloadPath(
+                baseDir: rootDir,
+                feedTitle: feedTitle,
+                episodeTitle: ep.Title ?? "episode",
+                urlOrExtHint: extFromUrl
+            );
+
+            // Eindeutig machen (falls Datei bereits existiert)
+            targetPath = PathSanitizer.EnsureUniquePath(targetPath);
+
+            // Temp-Datei im gleichen Verzeichnis (atomarer Move)
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            var tmpPath = targetPath + ".part";
+
+            // --- Status: Running (früh) ---
+            SetState(ep.Id, s =>
+            {
+                s.State = DownloadState.Running;
+                s.LocalPath = targetPath;
+                s.BytesReceived = 0;
+                s.TotalBytes = null;
+                s.Error = null;
+            });
 
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            // pragmatischer UA hilft einzelnen Hosts (manche blocken „default“ Clients)
+            req.Headers.UserAgent.ParseAdd("stui-podcast/1.0");
+
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancel);
             resp.EnsureSuccessStatusCode();
 
+            // Gesamtgröße (falls bekannt)
             var total = resp.Content.Headers.ContentLength;
             SetState(ep.Id, s => s.TotalBytes = total);
+
+            // Content-Disposition → ggf. Endung feinjustieren (selten, aber nice)
+            try
+            {
+                if (resp.Content.Headers.ContentDisposition != null &&
+                    !string.IsNullOrWhiteSpace(resp.Content.Headers.ContentDisposition.FileNameStar))
+                {
+                    var fn = resp.Content.Headers.ContentDisposition.FileNameStar!.Trim('"');
+                    var ext = PathSanitizer.GetExtension(fn, extFromUrl);
+                    if (!string.IsNullOrWhiteSpace(ext) && !targetPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var dir = Path.GetDirectoryName(targetPath)!;
+                        var baseName = Path.GetFileNameWithoutExtension(targetPath);
+                        var newPath = Path.Combine(dir, baseName + ext);
+                        // nur wenn frei
+                        newPath = PathSanitizer.EnsureUniquePath(newPath);
+                        // Temp-Name anpassen
+                        tmpPath = newPath + ".part";
+                        targetPath = newPath;
+
+                        // State updaten, damit UI die finale Endung kennt
+                        SetState(ep.Id, s => s.LocalPath = targetPath);
+                    }
+                }
+            }
+            catch { /* hint ist optional */ }
 
             try
             {
                 await using (var net = await resp.Content.ReadAsStreamAsync(cancel))
-                await using (var file = File.Create(tmp))
+                await using (var file = File.Create(tmpPath))
                 {
                     var buf = new byte[64 * 1024];
                     int n;
@@ -213,27 +272,37 @@ namespace StuiPodcast.Infra
                         got += n;
 
                         var cg = got; var ct = total;
-                        SetState(ep.Id, s => { s.BytesReceived = cg; s.TotalBytes = ct; s.State = DownloadState.Running; });
+                        SetState(ep.Id, s =>
+                        {
+                            s.BytesReceived = cg;
+                            s.TotalBytes = ct;
+                            s.State = DownloadState.Running;
+                        });
                     }
                 }
 
                 // Verifying (einfach: Größencheck, wenn bekannt)
                 SetState(ep.Id, s => s.State = DownloadState.Verifying);
-                var fi = new FileInfo(tmp);
+                var fi = new FileInfo(tmpPath);
                 if (total.HasValue && fi.Length != total.Value)
                     throw new IOException("Size mismatch after download.");
 
                 // Atomar finalisieren
-                if (File.Exists(dst)) File.Delete(dst);
-                File.Move(tmp, dst);
+                if (File.Exists(targetPath)) File.Delete(targetPath);
+                File.Move(tmpPath, targetPath);
 
                 ep.Downloaded = true;
-                SetState(ep.Id, s => { s.State = DownloadState.Done; s.LocalPath = dst; s.Error = null; });
+                SetState(ep.Id, s =>
+                {
+                    s.State = DownloadState.Done;
+                    s.LocalPath = targetPath;
+                    s.Error = null;
+                });
             }
             catch
             {
                 // bei Cancel/Fehler: .part bereinigen
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
                 throw;
             }
         }
@@ -250,29 +319,6 @@ namespace StuiPodcast.Infra
             }
             Directory.CreateDirectory(root);
             return root;
-        }
-
-        private static string SanitizeFileName(string name)
-        {
-            var invalid = Path.GetInvalidFileNameChars();
-            var cleaned = new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
-            return string.Join(" ", cleaned.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)).Trim();
-        }
-
-        private static string? GuessExtensionFromUrl(string url)
-        {
-            try
-            {
-                var u = new Uri(url);
-                var path = u.AbsolutePath.ToLowerInvariant();
-                if (path.EndsWith(".mp3")) return ".mp3";
-                if (path.EndsWith(".m4a")) return ".m4a";
-                if (path.EndsWith(".aac")) return ".aac";
-                if (path.EndsWith(".ogg")) return ".ogg";
-                if (path.EndsWith(".opus")) return ".opus";
-            }
-            catch { }
-            return null;
         }
 
         private void SetState(Guid epId, Action<DownloadStatus> mutate)

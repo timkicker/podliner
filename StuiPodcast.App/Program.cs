@@ -12,6 +12,8 @@ using System.Net.NetworkInformation;
 using StuiPodcast.App;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
+using System.Text;
+using System.Runtime.InteropServices;
 
 class Program
 {
@@ -180,6 +182,9 @@ class Program
 
     static async Task Main()
     {
+        // --- NEU: Windows-Konsole für Unicode/ANSI fit machen ---
+        EnableWindowsConsoleAnsi();
+
         ConfigureLogging();
         InstallGlobalErrorHandlers();
 
@@ -620,7 +625,7 @@ class Program
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed);
         }
 
-        // === NEU: Snapshot → Player-UI (einzige Quelle für Anzeige) ===
+        // === Snapshot → Player-UI (einzige Quelle für Anzeige) ===
         Playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -664,7 +669,7 @@ class Program
             }
         });
 
-        // UI-Refresh Watchdog (redundant, aber pragmatisch): nur Persist-Tick, kein direktes Player-UI Update mehr
+        // UI-Refresh Watchdog (redundant, aber pragmatisch): nur Persist-Tick
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             try
@@ -991,4 +996,39 @@ class Program
 
     // Legacy-Compat: aktuell No-Op (wurde früher für End-Transition genutzt)
     static void ResetAutoAdvance() { }
+
+    // ---------- NEU: Windows VT/UTF-8 Enable ----------
+    static void EnableWindowsConsoleAnsi()
+    {
+        try
+        {
+            // UTF-8 ohne BOM für saubere Glyphen
+            Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
+
+            const int STD_OUTPUT_HANDLE = -11;
+            const uint ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
+            const uint DISABLE_NEWLINE_AUTO_RETURN = 0x0008;
+
+            var handle = GetStdHandle(STD_OUTPUT_HANDLE);
+            if (handle == IntPtr.Zero || handle == new IntPtr(-1)) return;
+
+            if (GetConsoleMode(handle, out uint mode))
+            {
+                uint newMode = mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN;
+                SetConsoleMode(handle, newMode);
+            }
+        }
+        catch { /* best effort */ }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
 }
