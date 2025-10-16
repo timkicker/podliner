@@ -14,106 +14,151 @@ namespace StuiPodcast.App.UI
             var tabs = new TabView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             dlg.Add(tabs);
 
-            // --- KEYS TAB -------------------------------------------------------
+            // ==== KEYS TAB ====
             var keysHost   = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
-            var keyList    = new ListView    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
-            var keyDetails = new TextView    { X = Pos.Right(keyList) + 2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
-
-            keysHost.Add(new Label("Search:") { X = 1, Y = 0 }, keySearch, keyList, keyDetails);
+            var keyList    = new ListView {
+                X = 1, Y = 2,
+                Width  = Dim.Percent(35),
+                Height = Dim.Fill(1)
+            };
+            var keyDetails = new TextView {
+                X = Pos.Right(keyList) + 2, Y = 2,
+                Width = Dim.Fill(1), Height = Dim.Fill(1),
+                ReadOnly = true, WordWrap = true
+            };
+            keysHost.Add(new Label("Search:"){ X=1, Y=0 }, keySearch, keyList, keyDetails);
             var keysTab = new TabView.Tab("Keys", keysHost);
             tabs.AddTab(keysTab, true);
 
-            // --- COMMANDS TAB ---------------------------------------------------
+            // ==== COMMANDS TAB ====
             var cmdHost    = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
-            var cmdList    = new ListView    { X = 1, Y = 2, Width = 36, Height = Dim.Fill(1) };
-            var cmdDetails = new TextView    { X = Pos.Right(cmdList) + 2, Y = 2, Width = Dim.Fill(1), Height = Dim.Fill(1), ReadOnly = true, WordWrap = true };
-
-            cmdHost.Add(new Label("Search:") { X = 1, Y = 0 }, cmdSearch, cmdList, cmdDetails);
+            var cmdList    = new ListView {
+                X = 1, Y = 2,
+                Width  = Dim.Percent(35),
+                Height = Dim.Fill(1)
+            };
+            var cmdDetails = new TextView {
+                X = Pos.Right(cmdList) + 2, Y = 2,
+                Width = Dim.Fill(1), Height = Dim.Fill(1),
+                ReadOnly = true, WordWrap = true
+            };
+            cmdHost.Add(new Label("Search:"){ X=1, Y=0 }, cmdSearch, cmdList, cmdDetails);
             var cmdsTab = new TabView.Tab("Commands", cmdHost);
             tabs.AddTab(cmdsTab, false);
 
-            // --- Daten ----------------------------------------------------------
+            // ==== Daten/Filter ====
             List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
             List<CmdHelp> cmdData = HelpCatalog.Commands.ToList();
+            List<KeyHelp> keyFiltered = keyData.ToList();
+            List<CmdHelp> cmdFiltered = cmdData.ToList();
 
-            // --- Helpers ---------------------------------------------------------
             static int Clamp(int v, int lo, int hi) => Math.Max(lo, Math.Min(hi, v));
-            void MoveList(ListView lv, int d)
+
+            // Sichtbarkeit der Auswahl erzwingen (manuelle Scroll-Logik)
+            static void EnsureSelectionVisible(ListView lv)
             {
-                var c = lv.Source?.Count ?? 0;
-                if (c <= 0) return;
-                lv.SelectedItem = Clamp(lv.SelectedItem + d, 0, c - 1);
+                var count = lv.Source?.Count ?? 0;
+                if (count <= 0) return;
+
+                var sel = Clamp(lv.SelectedItem, 0, count - 1);
+                var viewH = Math.Max(0, lv.Bounds.Height);         // sichtbare Zeilen
+                var top = Clamp(lv.TopItem, 0, Math.Max(0, count - 1));
+
+                if (sel < top)
+                    lv.TopItem = sel;
+                else if (sel >= top + viewH)
+                    lv.TopItem = Math.Max(0, sel - Math.Max(1, viewH - 1));
+
+                lv.SetNeedsDisplay();
             }
-            void GoTop(ListView lv)    { var c = lv.Source?.Count ?? 0; if (c > 0) lv.SelectedItem = 0; }
-            void GoBottom(ListView lv) { var c = lv.Source?.Count ?? 0; if (c > 0) lv.SelectedItem = c - 1; }
-            void FocusKeysTab() { tabs.SelectedTab = keysTab; keyList.SetFocus(); }
-            void FocusCmdsTab() { tabs.SelectedTab = cmdsTab; cmdList.SetFocus(); }
 
             void RefreshKeyList()
             {
                 var q = keySearch.Text?.ToString() ?? "";
-                var filtered = string.IsNullOrWhiteSpace(q)
+                keyFiltered = string.IsNullOrWhiteSpace(q)
                     ? keyData
                     : keyData.Where(k =>
-                           (k.Key ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                           (k.Description ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                           (!string.IsNullOrWhiteSpace(k.Notes) && k.Notes!.Contains(q, StringComparison.OrdinalIgnoreCase)))
-                      .ToList();
+                        (k.Key ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (k.Description ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(k.Notes) && k.Notes!.Contains(q, StringComparison.OrdinalIgnoreCase))
+                      ).ToList();
 
-                keyList.SetSource(filtered.Select(k => k.Key ?? "").ToList());
+                keyList.SetSource(keyFiltered.Select(k => k.Key ?? "").ToList());
                 keyList.SelectedItem = 0;
+                keyList.TopItem = 0;
+                EnsureSelectionVisible(keyList);
             }
 
             void RefreshCmdList()
             {
                 var q = cmdSearch.Text?.ToString() ?? "";
-                var filtered = string.IsNullOrWhiteSpace(q)
+                cmdFiltered = string.IsNullOrWhiteSpace(q)
                     ? cmdData
                     : cmdData.Where(c =>
-                           (c.Command ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                           (c.Description ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                           (!string.IsNullOrWhiteSpace(c.Args) && c.Args!.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
-                           (c.Aliases != null && c.Aliases.Any(a => (a ?? "").Contains(q, StringComparison.OrdinalIgnoreCase))))
-                      .ToList();
+                        (c.Command ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (c.Description ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrWhiteSpace(c.Args) && c.Args!.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                        (c.Aliases != null && c.Aliases.Any(a => (a ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)))
+                      ).ToList();
 
-                cmdList.SetSource(filtered.Select(c => c.Command ?? "").ToList());
+                cmdList.SetSource(cmdFiltered.Select(c => c.Command ?? "").ToList());
                 cmdList.SelectedItem = 0;
+                cmdList.TopItem = 0;
+                EnsureSelectionVisible(cmdList);
             }
 
+            // Suche tippen -> filtern
             keySearch.KeyPress += (View.KeyEventEventArgs _) =>
                 Application.MainLoop.AddIdle(() => { RefreshKeyList(); return false; });
             cmdSearch.KeyPress += (View.KeyEventEventArgs _) =>
                 Application.MainLoop.AddIdle(() => { RefreshCmdList(); return false; });
 
-            keyList.SelectedItemChanged += _ =>
-            {
-                var src = keyList.Source?.ToList() ?? new List<object>();
-                var idx = Clamp(keyList.SelectedItem, 0, Math.Max(0, src.Count - 1));
-                if (src.Count == 0) { keyDetails.Text = ""; return; }
-
-                var name  = src[idx]?.ToString() ?? "";
-                var item  = HelpCatalog.Keys.FirstOrDefault(k => (k.Key ?? "") == name) ?? keyData.First();
-                var notes = string.IsNullOrWhiteSpace(item.Notes) ? "" : $"\n\nNotes: {item.Notes}";
-                keyDetails.Text = $"{item.Key}\n\n{item.Description}{notes}";
+            // Esc löscht, Enter fokussiert Liste
+            keySearch.KeyPress += e => {
+                if (e.KeyEvent.Key == Key.Esc) { keySearch.Text = ""; RefreshKeyList(); e.Handled = true; }
+                else if (e.KeyEvent.Key == Key.Enter) { keyList.SetFocus(); e.Handled = true; }
+            };
+            cmdSearch.KeyPress += e => {
+                if (e.KeyEvent.Key == Key.Esc) { cmdSearch.Text = ""; RefreshCmdList(); e.Handled = true; }
+                else if (e.KeyEvent.Key == Key.Enter) { cmdList.SetFocus(); e.Handled = true; }
             };
 
+            // Detail-Update (aus gefiltertem View)
+            keyList.SelectedItemChanged += _ =>
+            {
+                if (keyFiltered.Count == 0) { keyDetails.Text = ""; return; }
+                var idx = Clamp(keyList.SelectedItem, 0, keyFiltered.Count - 1);
+                var item = keyFiltered[idx];
+                var notes = string.IsNullOrWhiteSpace(item.Notes) ? "" : $"\n\nNotes: {item.Notes}";
+                keyDetails.Text = $"{item.Key}\n\n{item.Description}{notes}";
+                EnsureSelectionVisible(keyList);
+            };
             cmdList.SelectedItemChanged += _ =>
             {
-                var src = cmdList.Source?.ToList() ?? new List<object>();
-                var idx = Clamp(cmdList.SelectedItem, 0, Math.Max(0, src.Count - 1));
-                if (src.Count == 0) { cmdDetails.Text = ""; return; }
-
-                var name = src[idx]?.ToString() ?? "";
-                var item = HelpCatalog.Commands.FirstOrDefault(c => (c.Command ?? "") == name) ?? cmdData.First();
-
+                if (cmdFiltered.Count == 0) { cmdDetails.Text = ""; return; }
+                var idx = Clamp(cmdList.SelectedItem, 0, cmdFiltered.Count - 1);
+                var item = cmdFiltered[idx];
                 string aliases  = (item.Aliases is { Length: > 0 }) ? $"Aliases: {string.Join(", ", item.Aliases)}\n" : "";
                 string args     = string.IsNullOrWhiteSpace(item.Args) ? "" : $"Args: {item.Args}\n";
                 string examples = (item.Examples is { Length: > 0 }) ? $"Examples:\n  - {string.Join("\n  - ", item.Examples)}\n" : "";
-
                 cmdDetails.Text = $"{item.Command}\n\n{item.Description}\n\n{aliases}{args}{examples}".TrimEnd();
+                EnsureSelectionVisible(cmdList);
             };
+
+            // Navigation (hjkl / Pfeile) – nach jedem Move Sichtbarkeit erzwingen
+            void MoveList(ListView lv, int d)
+            {
+                var c = lv.Source?.Count ?? 0;
+                if (c <= 0) return;
+                lv.SelectedItem = Clamp(lv.SelectedItem + d, 0, c - 1);
+                EnsureSelectionVisible(lv);
+            }
+            void GoTop(ListView lv)    { var c = lv.Source?.Count ?? 0; if (c > 0) { lv.SelectedItem = 0; EnsureSelectionVisible(lv); } }
+            void GoBottom(ListView lv) { var c = lv.Source?.Count ?? 0; if (c > 0) { lv.SelectedItem = c - 1; EnsureSelectionVisible(lv); } }
+            void FocusKeysTab() { tabs.SelectedTab = keysTab; keyList.SetFocus(); EnsureSelectionVisible(keyList); }
+            void FocusCmdsTab() { tabs.SelectedTab = cmdsTab; cmdList.SetFocus(); EnsureSelectionVisible(cmdList); }
 
             keyList.KeyPress += e =>
             {
@@ -141,7 +186,7 @@ namespace StuiPodcast.App.UI
                 if (ch == 'l') { FocusCmdsTab(); e.Handled = true; return; }
             };
 
-            // Global close + tab nav
+            // Global close / tab-nav
             dlg.KeyPress += e =>
             {
                 var ch = e.KeyEvent.KeyValue;
@@ -154,7 +199,7 @@ namespace StuiPodcast.App.UI
                 }
             };
 
-            // Initial fill
+            // initial
             RefreshKeyList();
             RefreshCmdList();
             Application.Run(dlg);

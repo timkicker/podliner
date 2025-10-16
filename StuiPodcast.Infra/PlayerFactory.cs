@@ -8,39 +8,33 @@ namespace StuiPodcast.Infra;
 
 public static class PlayerFactory
 {
-    public static IPlayer Create(out string infoOsd)
+    // StuiPodcast.Infra/PlayerFactory.cs
+    public static IPlayer Create(StuiPodcast.Core.AppData data, out string infoOsd)
     {
-        // 1) libVLC
-        try {
-            var p = new LibVlcPlayer();
-            infoOsd = $"Engine: {p.Name}";
-            return p;
-        } catch (Exception ex) {
-            Log.Warning(ex, "LibVLC unavailable, trying mpv");
+        string pref = (data.PreferredEngine ?? "auto").Trim().ToLowerInvariant();
+
+        bool TryVlc(out IPlayer p) { try { p = new LibVlcPlayer(); return true; } catch { p = null!; return false; } }
+        bool TryMpv(out IPlayer p) { if (!ExeExists("mpv")) { p = null!; return false; } try { p = new MpvIpcPlayer(); return true; } catch { p = null!; return false; } }
+        bool TryFfp(out IPlayer p) { if (!ExeExists("ffplay")) { p = null!; return false; } p = new FfplayPlayer(); return true; }
+
+        IPlayer? chosen = null;
+        if (pref == "vlc"   && !TryVlc(out chosen))  pref = "auto";
+        if (pref == "mpv"   && !TryMpv(out chosen))  pref = "auto";
+        if (pref == "ffplay"&& !TryFfp(out chosen))  pref = "auto";
+
+        if (chosen == null) {
+            // Fallback-Kette VLC → MPV → ffplay
+            if (!TryVlc(out chosen) && !TryMpv(out chosen) && !TryFfp(out chosen))
+                throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
+            infoOsd = $"Engine: {chosen.Name} (fallback)";
+        } else {
+            infoOsd = $"Engine: {chosen.Name}";
         }
 
-        // 2) mpv via IPC
-        if (ExeExists("mpv")) {
-            try {
-                var p = new MpvIpcPlayer();
-                infoOsd = $"Engine: {p.Name}";
-                return p;
-            } catch (Exception ex) {
-                Log.Warning(ex, "mpv IPC failed, trying ffplay");
-            }
-        }
-
-        // 3) ffplay (letzte Stufe)
-        if (ExeExists("ffplay")) {
-            var p = new FfplayPlayer();
-            infoOsd = $"Engine: {p.Name} (limited)";
-            return p;
-        }
-
-        // 4) Fallback: harte Exception
-        infoOsd = "No player engine found";
-        throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay not found).");
+        data.LastEngineUsed = chosen.Name;
+        return chosen;
     }
+
 
     private static bool ExeExists(string name)
     {

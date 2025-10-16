@@ -52,10 +52,20 @@ static class CommandRouter
             case TopCommand.Quit:         ui.RequestQuit();  return;
             case TopCommand.Logs:         ExecLogs(args, ui); return;
             case TopCommand.Osd:          ExecOsd(args, ui); return;
+            case TopCommand.Engine:      ExecEngine(args, player, ui, data, persist); return;
 
             // Playback & Player
-            case TopCommand.Toggle:       player.TogglePause(); ui.UpdatePlayerUI(player.State); return;
-            case TopCommand.Seek:         ExecSeek(args, player); return;
+            case TopCommand.Toggle:
+                if ((player.Capabilities & PlayerCapabilities.Pause) == 0)
+                {
+                    ui.ShowOsd("pause not supported by current engine");
+                    return;
+                }
+                player.TogglePause();
+                ui.UpdatePlayerUI(player.State);
+                return;
+
+            case TopCommand.Seek:         ExecSeek(args, player, ui); return;
             case TopCommand.Volume:       ExecVolume(args, player, data, persist, ui); return;
             case TopCommand.Speed:        ExecSpeed(args, player, data, persist, ui);  return;
             case TopCommand.Replay:       ExecReplay(args, player, ui); return;
@@ -130,7 +140,7 @@ static class CommandRouter
 
     private enum TopCommand
     {
-        Unknown,
+        Unknown, Engine,
         Help, Quit, Logs, Osd,
         Toggle, Seek, Volume, Speed, Replay,
         Next, Prev, PlayNext, PlayPrev,
@@ -144,6 +154,8 @@ static class CommandRouter
 
     private static TopCommand MapTop(string cmd)
     {
+        if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
+
         cmd = cmd?.Trim() ?? "";
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
@@ -204,12 +216,101 @@ static class CommandRouter
         if (!string.IsNullOrEmpty(text)) ui.ShowOsd(text);
         else ui.ShowOsd("usage: :osd <text>");
     }
+    
+    private static void ExecEngine(string[] args, IPlayer player, Shell ui, AppData data, Func<Task> persist)
+{
+    var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
-    private static void ExecSeek(string[] args, IPlayer player)
+    // Helper: Capabilities in "seek/speed/volume" + fehlend
+    static (string supported, string missing) CapStrings(PlayerCapabilities caps)
     {
+        var sup = new List<string>();
+        var miss = new List<string>();
+        if ((caps & PlayerCapabilities.Seek)   != 0) sup.Add("seek");   else miss.Add("seek");
+        if ((caps & PlayerCapabilities.Speed)  != 0) sup.Add("speed");  else miss.Add("speed");
+        if ((caps & PlayerCapabilities.Volume) != 0) sup.Add("volume"); else miss.Add("volume");
+        return (string.Join(", ", sup), string.Join(", ", miss));
+    }
+
+    if (string.IsNullOrEmpty(arg) || arg == "show")
+    {
+        var pref = data.PreferredEngine ?? "auto";
+        var active = player.Name ?? "unknown";
+        var (sup, miss) = CapStrings(player.Capabilities);
+
+        // Fallback-Hinweis, wenn eine feste Präferenz != aktiver Engine ist
+        string fallback =
+            (pref != "auto" && !active.StartsWith(pref, StringComparison.OrdinalIgnoreCase))
+                ? $" (fallback from '{pref}')"
+                : "";
+
+        // Zusatzhinweis für ffplay
+        string notes = active.StartsWith("ffplay", StringComparison.OrdinalIgnoreCase)
+            ? "\nnotes: ffplay ist limitiert (coarse seek; kein echtes speed/volume bei manchen Quellen)."
+            : "";
+
+        var txt =
+            $"engine active: {active}{fallback}\n" +
+            $"preference   : {pref}\n" +
+            $"supports     : {(string.IsNullOrEmpty(sup) ? "—" : sup)}\n" +
+            (string.IsNullOrEmpty(miss) ? "" : $"missing      : {miss}\n") +
+            "set with     : :engine auto|vlc|mpv|ffplay" +
+            notes;
+
+        ui.ShowOsd(txt, 2000);
+        return;
+    }
+
+    if (arg == "help")
+    {
+        try
+        {
+            var dlg = new Terminal.Gui.Dialog("Engine Help", 80, 24);
+            var tv  = new Terminal.Gui.TextView
+            {
+                ReadOnly = true,
+                WordWrap = true,
+                X = 0, Y = 0, Width = Terminal.Gui.Dim.Fill(), Height = Terminal.Gui.Dim.Fill()
+            };
+            tv.Text = StuiPodcast.App.HelpCatalog.EngineDoc;
+            dlg.Add(tv);
+            var ok = new Terminal.Gui.Button("OK", is_default: true);
+            ok.Clicked += () => Terminal.Gui.Application.RequestStop();
+            dlg.AddButton(ok);
+            Terminal.Gui.Application.Run(dlg);
+        }
+        catch { /* best effort */ }
+        return;
+    }
+
+    if (arg is "auto" or "vlc" or "mpv" or "ffplay")
+    {
+        data.PreferredEngine = arg;
+        _ = persist();
+        ui.ShowOsd($"engine pref set: {arg} (active now: {player.Name})", 1500);
+        return;
+    }
+
+    ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay]", 1500);
+}
+
+
+    private static void ExecSeek(string[] args, IPlayer player, Shell ui)
+    {
+        if ((player.Capabilities & PlayerCapabilities.Seek) == 0)
+        {
+            ui.ShowOsd("seek not supported by current engine");
+            return;
+        }
+
+        // Hinweis für ffplay: coarse seek (Restart)
+        if (string.Equals(player.Name, "ffplay (limited)", StringComparison.OrdinalIgnoreCase))
+            ui.ShowOsd("coarse seek (ffplay): restarts stream", 1100);
+
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         Seek(arg, player);
     }
+
 
     private static void ExecVolume(string[] args, IPlayer player, AppData data, Func<Task> persist, Shell ui)
     {

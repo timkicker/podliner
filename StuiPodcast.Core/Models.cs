@@ -87,4 +87,7 @@ public class AppData {
     public bool PlayerAtTop { get; set; } = false;
     public List<Feed> Feeds { get; set; } = new();
     public List<Episode> Episodes { get; set; } = new();
+    
+    public string PreferredEngine { get; set; } = "auto"; // auto|vlc|mpv|ffplay
+    public string? LastEngineUsed { get; set; }           // Diagnose/OSD
 }

@@ -208,19 +208,15 @@ class Program
         }
         catch (Exception ex) { Log.Warning(ex, "Could not add anchor feed"); }
 
-        // Player via Factory (LibVLC → mpv → ffplay)
         try {
-            Player = PlayerFactory.Create(out var engineInfo);
+            Player = PlayerFactory.Create(Data, out var engineInfo);
             UI?.ShowOsd(engineInfo, 1200);
         } catch (Exception ex) {
             UI?.ShowOsd("No audio engine found", 2000);
             throw;
         }
-
-        // Preferences anwenden (wie gehabt)
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
 
-        Playback   = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
         Downloader = new DownloadManager(Data);
 
         // Auto-Advance: EINZIGE Quelle ist der Coordinator
