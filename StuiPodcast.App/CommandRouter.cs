@@ -19,7 +19,8 @@ static class CommandRouter
                               MemoryLogSink mem,
                               AppData data,
                               Func<Task> persist,
-                              DownloadManager dlm)
+                              DownloadManager dlm,
+                              Func<string, Task>? switchEngine = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
@@ -52,7 +53,8 @@ static class CommandRouter
             case TopCommand.Quit:         ui.RequestQuit();  return;
             case TopCommand.Logs:         ExecLogs(args, ui); return;
             case TopCommand.Osd:          ExecOsd(args, ui); return;
-            case TopCommand.Engine:      ExecEngine(args, player, ui, data, persist); return;
+            case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine);
+                return;
 
             // Playback & Player
             case TopCommand.Toggle:
@@ -217,47 +219,28 @@ static class CommandRouter
         else ui.ShowOsd("usage: :osd <text>");
     }
     
-    private static void ExecEngine(string[] args, IPlayer player, Shell ui, AppData data, Func<Task> persist)
+// 2) ExecEngine-Signatur erweitern
+private static void ExecEngine(
+    string[] args,
+    IPlayer player,
+    Shell ui,
+    AppData data,
+    Func<Task> persist,
+    Func<string, Task>? switchEngine = null) // <— NEU
 {
     var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
-    // Helper: Capabilities in "seek/speed/volume" + fehlend
-    static (string supported, string missing) CapStrings(PlayerCapabilities caps)
-    {
-        var sup = new List<string>();
-        var miss = new List<string>();
-        if ((caps & PlayerCapabilities.Seek)   != 0) sup.Add("seek");   else miss.Add("seek");
-        if ((caps & PlayerCapabilities.Speed)  != 0) sup.Add("speed");  else miss.Add("speed");
-        if ((caps & PlayerCapabilities.Volume) != 0) sup.Add("volume"); else miss.Add("volume");
-        return (string.Join(", ", sup), string.Join(", ", miss));
-    }
-
     if (string.IsNullOrEmpty(arg) || arg == "show")
     {
-        var pref = data.PreferredEngine ?? "auto";
-        var active = player.Name ?? "unknown";
-        var (sup, miss) = CapStrings(player.Capabilities);
-
-        // Fallback-Hinweis, wenn eine feste Präferenz != aktiver Engine ist
-        string fallback =
-            (pref != "auto" && !active.StartsWith(pref, StringComparison.OrdinalIgnoreCase))
-                ? $" (fallback from '{pref}')"
-                : "";
-
-        // Zusatzhinweis für ffplay
-        string notes = active.StartsWith("ffplay", StringComparison.OrdinalIgnoreCase)
-            ? "\nnotes: ffplay ist limitiert (coarse seek; kein echtes speed/volume bei manchen Quellen)."
-            : "";
-
+        var caps = player.Capabilities;
         var txt =
-            $"engine active: {active}{fallback}\n" +
-            $"preference   : {pref}\n" +
-            $"supports     : {(string.IsNullOrEmpty(sup) ? "—" : sup)}\n" +
-            (string.IsNullOrEmpty(miss) ? "" : $"missing      : {miss}\n") +
-            "set with     : :engine auto|vlc|mpv|ffplay" +
-            notes;
-
-        ui.ShowOsd(txt, 2000);
+            $"engine active: {player.Name}\n" +
+            $"preference: {data.PreferredEngine ?? "auto"}\n" +
+            "supports: " +
+            $"{((caps & PlayerCapabilities.Seek)   != 0 ? "seek "   : "")}" +
+            $"{((caps & PlayerCapabilities.Speed)  != 0 ? "speed "  : "")}" +
+            $"{((caps & PlayerCapabilities.Volume) != 0 ? "volume " : "")}".Trim();
+        ui.ShowOsd(txt, 1500);
         return;
     }
 
@@ -287,7 +270,17 @@ static class CommandRouter
     {
         data.PreferredEngine = arg;
         _ = persist();
-        ui.ShowOsd($"engine pref set: {arg} (active now: {player.Name})", 1500);
+
+        // optional: sofort live umschalten, wenn Delegate vorhanden
+        if (switchEngine != null)
+        {
+            ui.ShowOsd($"engine: switching to {arg}…", 900);
+            _ = switchEngine(arg); // fire-and-forget
+        }
+        else
+        {
+            ui.ShowOsd($"engine pref: {arg} (active: {player.Name})", 1500);
+        }
         return;
     }
 

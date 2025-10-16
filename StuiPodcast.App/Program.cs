@@ -9,7 +9,7 @@ using StuiPodcast.App.UI;
 using Terminal.Gui;
 using System.Net.Http;
 using System.Net.NetworkInformation;
-
+using StuiPodcast.App;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 
@@ -164,8 +164,11 @@ class Program
 
     static AppData Data = new();
     static FeedService? Feeds;
-    static IPlayer? Player;
 
+    static SwappablePlayer? Player;
+    static string? _initialEngineInfo; // für OSD nach UI-Build
+
+    
     static Shell? UI;
     static PlaybackCoordinator? Playback;
     static MemoryLogSink MemLog = new(2000);
@@ -208,14 +211,27 @@ class Program
         }
         catch (Exception ex) { Log.Warning(ex, "Could not add anchor feed"); }
 
-        try {
-            Player = PlayerFactory.Create(Data, out var engineInfo);
-            UI?.ShowOsd(engineInfo, 1200);
-        } catch (Exception ex) {
+        // 1) Core-Engine erzeugen …
+        try
+        {
+            var core = PlayerFactory.Create(Data, out var engineInfo);
+
+            // 2) … und als SwappablePlayer wrappen
+            Player = new SwappablePlayer(core);
+
+            // UI existiert hier noch nicht -> Text merken, OSD erst nach UI.Build()
+            _initialEngineInfo = engineInfo;
+        }
+        catch (Exception)
+        {
             UI?.ShowOsd("No audio engine found", 2000);
             throw;
         }
+
+// 3) Coordinator bekommt den SwappablePlayer (implementiert IPlayer)
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
+
+
 
         Downloader = new DownloadManager(Data);
 
@@ -256,6 +272,12 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
+        
+        if (!string.IsNullOrEmpty(_initialEngineInfo))
+            UI.ShowOsd(_initialEngineInfo, 1200);
+
+        
+        
 
         // sofort einmal prüfen – nichts zuweisen, einfach ausführen (CS4014-safe via discard)
         _ = Task.Run(async () =>
@@ -544,7 +566,8 @@ class Program
                 return;
 
             // 3) Rest
-            CommandRouter.Handle(cmd, Player, Playback, UI, MemLog, Data, SaveAsync, Downloader);
+            CommandRouter.Handle(cmd, Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+
         };
 
         UI.SearchApplied += query =>
@@ -723,6 +746,54 @@ class Program
 
         return ordered;
     }
+    
+    
+    // Program.cs
+    static async Task SwitchEngineAsync(string? _)
+    {
+        try
+        {
+            var next = PlayerFactory.Create(Data, out var info);
+            ApplyPrefsTo(next);
+
+            if (Player != null)
+            {
+                await Player.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
+                UI?.ShowOsd($"engine switched → {Player.Name}", 1400);
+                UI?.UpdatePlayerUI(Player.State);
+            }
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Debug(ex, "engine switch failed");
+            UI?.ShowOsd("engine switch failed", 1500);
+        }
+    }
+
+
+    
+    static void ApplyPrefsTo(IPlayer p)
+    {
+        try
+        {
+            if ((p.Capabilities & PlayerCapabilities.Volume) != 0)
+            {
+                var v = Math.Clamp(Data.Volume0_100, 0, 100);
+                p.SetVolume(v);
+            }
+        } catch { }
+
+        try
+        {
+            if ((p.Capabilities & PlayerCapabilities.Speed) != 0)
+            {
+                var s = Data.Speed;
+                if (s <= 0) s = 1.0;
+                p.SetSpeed(Math.Clamp(s, 0.25, 3.0));
+            }
+        } catch { }
+    }
+
 
     static async Task SaveAsync()
     {
