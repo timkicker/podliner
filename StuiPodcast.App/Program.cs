@@ -278,8 +278,7 @@ class Program
         UI = new Shell(MemLog);
         UI.Build();
 
-        if (!string.IsNullOrEmpty(_initialEngineInfo))
-            UI.ShowOsd(_initialEngineInfo, 1200);
+       
 
         // sofort einmal prüfen – nichts zuweisen, einfach ausführen
         _ = Task.Run(async () =>
