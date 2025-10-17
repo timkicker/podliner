@@ -114,7 +114,14 @@ public static class PlayerFactory
                     throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
             }
 
-            infoOsd = $"Engine: {chosen.Name} (fallback)";
+          
+
+            bool degraded =
+                string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase) ||
+                (isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase)); // optional
+
+            infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : null;
+
         }
         else
         {

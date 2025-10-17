@@ -53,6 +53,7 @@ static class CommandRouter
             case TopCommand.Quit:         ui.RequestQuit();  return;
             case TopCommand.Logs:         ExecLogs(args, ui); return;
             case TopCommand.Osd:          ExecOsd(args, ui); return;
+            case TopCommand.Opml:         ExecOpml(args, ui, data, persist); return;
             case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine); return;
 
             // Playback & Player
@@ -178,13 +179,14 @@ static class CommandRouter
         Save, Sort, Filter, PlayerBar,
         Net, PlaySource,
         AddFeed, Refresh, RemoveFeed, Feed,
-        History
+        History, Opml
     }
 
     private static TopCommand MapTop(string cmd)
     {
         if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
-
+        if (cmd.StartsWith(":opml",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;  // <-- NEU
+        
         cmd = cmd?.Trim() ?? "";
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
@@ -635,6 +637,82 @@ static class CommandRouter
 
         ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
     }
+    
+    private static void ExecOpml(string[] args, Shell ui, AppData data, Func<Task> persist)
+{
+    // Syntax:
+    // :opml import <path> [--update-titles]
+    // :opml export [<path>]
+    var argv = args ?? Array.Empty<string>();
+    if (argv.Length == 0) { ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]"); return; }
+
+    var sub = argv[0].ToLowerInvariant();
+    if (sub is "import")
+    {
+        if (argv.Length < 2) { ui.ShowOsd("usage: :opml import <path> [--update-titles]"); return; }
+
+        var path = argv[1];
+        bool updateTitles = argv.Any(a => string.Equals(a, "--update-titles", StringComparison.OrdinalIgnoreCase));
+
+        string xml;
+        try { xml = OpmlIo.ReadFile(path); }
+        catch (Exception ex) { ui.ShowOsd($"import: read error ({ex.Message})", 2000); return; }
+
+        OpmlDocument doc;
+        try { doc = OpmlParser.Parse(xml); }
+        catch (Exception ex) { ui.ShowOsd($"import: parse error ({ex.Message})", 2000); return; }
+
+        var plan = OpmlImportPlanner.Plan(doc, data.Feeds, updateTitles);
+        ui.ShowOsd($"OPML: new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 1600);
+
+        // Sicherheitsabfrage minimal (ohne Dialog): bei 0 new → fertig
+        if (plan.NewCount == 0) return;
+
+        // Import seriell: wir nutzen den bestehenden Flow via ui.RequestAddFeed(url)
+        int added = 0;
+        foreach (var item in plan.NewItems())
+        {
+            var url = item.Entry.XmlUrl?.Trim();
+            if (string.IsNullOrWhiteSpace(url)) continue;
+
+            ui.RequestAddFeed(url); // triggert bestehenden Add-Mechanismus
+            added++;
+        }
+
+        _ = persist(); // speichere AppData nach Import
+        ui.RequestRefresh();
+        ui.ShowOsd($"Imported {added} feed(s).", 1200);
+        return;
+    }
+
+    if (sub is "export")
+    {
+        string? path = (argv.Length >= 2 ? argv[1] : null);
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            // Falls kein Pfad angegeben: sinnvoller Default
+            path = OpmlIo.GetDefaultExportPath(baseName: "stui-feeds.opml");
+        }
+
+        string xml;
+        try { xml = OpmlExporter.BuildXml(data.Feeds, "stui-podcast feeds"); }
+        catch (Exception ex) { ui.ShowOsd($"export: build error ({ex.Message})", 2000); return; }
+
+        try
+        {
+            var used = OpmlIo.WriteFile(path!, xml, sanitizeFileNameIfNeeded: true, overwrite: true);
+            ui.ShowOsd($"Exported → {used}", 1600);
+        }
+        catch (Exception ex)
+        {
+            ui.ShowOsd($"export: write error ({ex.Message})", 2000);
+        }
+        return;
+    }
+
+    ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]");
+}
+
 
     static List<Episode> BuildCurrentList(Shell ui, AppData data)
     {

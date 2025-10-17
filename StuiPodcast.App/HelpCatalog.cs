@@ -108,10 +108,20 @@ namespace StuiPodcast.App
             new(":rm-feed", "Remove the currently selected feed.",
                 Aliases: new[]{":remove-feed", ":feed remove"}),
 
-            // NEW
+            // Playback engine
             new(":engine", "Select or inspect playback engine.",
                 "[show|help|auto|vlc|mpv|ffplay]",
                 Examples: new[]{ ":engine", ":engine mpv", ":engine help" }),
+
+            // OPML (Import/Export)
+            new(":opml", "Import or export OPML (feed migration).",
+                "import <path> [--update-titles] | export [<path>]",
+                Examples: new[]{
+                    ":opml import ~/feeds.opml",
+                    ":opml import feeds.opml --update-titles",
+                    ":opml export",
+                    ":opml export ~/stui-feeds.opml"
+                }),
         };
 
         public static readonly string EngineDoc =
@@ -142,5 +152,28 @@ Notes
   - Linux: install packages 'vlc', 'mpv', 'ffmpeg'.
   - macOS: brew install vlc mpv ffmpeg
   - Windows: install VLC/MPV/FFmpeg and ensure they are in PATH.";
+
+        // Optional: kurzer Leitfaden für OPML (falls du ihn im UI anzeigen willst)
+        public static readonly string OpmlDoc =
+@"OPML import/export (feed migration)
+
+Import
+  :opml import <path> [--update-titles]
+    - Reads OPML 2.0 and shows a summary: new / duplicates / invalid.
+    - Default policy:
+        • Groups are ignored (flat import)
+        • Existing feed titles are NOT overwritten
+        • No online validation (works offline)
+
+Export
+  :opml export [<path>]
+    - Writes a flat OPML (UTF-8) with all current feeds.
+    - If <path> is omitted, a sensible default is used (Documents/stui-feeds.opml).
+
+Examples
+  :opml import ~/feeds.opml
+  :opml import feeds.opml --update-titles
+  :opml export
+  :opml export ~/stui-feeds.opml";
     }
 }
