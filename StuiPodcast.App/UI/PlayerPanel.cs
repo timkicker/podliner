@@ -44,22 +44,20 @@ internal sealed class PlayerPanel : FrameView
     private const float ProgressDeltaMin = 0.01f;  // min fraction change (~1%) to emit
     private const float VolumeDeltaMin   = 0.02f;  // 2% volume step to emit
     
-    // PlayerPanel.cs (oben in der Klasse)
+    // Loading-Steuerung
     private bool _isLoading;
     private string _loadingText = "Loading…";
     private TimeSpan _loadingBaseline = TimeSpan.Zero;
     private DateTime _loadingSinceUtc = DateTime.MinValue;
 
-// Tuning
+    // Tuning
     private static readonly TimeSpan LoadingAdvanceThreshold = TimeSpan.FromMilliseconds(400);
     private static readonly TimeSpan LoadingMinVisible       = TimeSpan.FromMilliseconds(300);
 
-// optional: letzte bekannte Pos für Baseline-Fallback
+    // optional: letzte bekannte Pos für Baseline-Fallback
     private TimeSpan _lastPosSnapshot = TimeSpan.Zero;
 
-
-// öffentlich:
-    // PlayerPanel.cs – öffentliches API (unter Build()):
+    // öffentliches API für Shell/Coordinator
     public void SetLoading(bool on, string? text = null, TimeSpan? baseline = null)
     {
         _isLoading = on;
@@ -97,8 +95,8 @@ internal sealed class PlayerPanel : FrameView
             BtnPlayPause.Enabled = false;
 
             var t = TimeLabel.Text?.ToString() ?? "";
-            if (!t.EndsWith(" ⌛") && !t.EndsWith(" …") && !t.EndsWith(" ⟳"))
-                TimeLabel.Text = t + (isUnicode ? " ⌛" : " …");
+            if (!t.EndsWith(" ⧖") && !t.EndsWith(" …") && !t.EndsWith(" ⟳"))
+                TimeLabel.Text = t + (isUnicode ? " ⧖" : " …");
         }
         else
         {
@@ -108,7 +106,6 @@ internal sealed class PlayerPanel : FrameView
         // -> sofort neu zeichnen
         try { SetNeedsDisplay(); Application.Top?.SetNeedsDisplay(); } catch { }
     }
-
 
     public PlayerPanel() : base("Player")
     {
@@ -269,25 +266,31 @@ internal sealed class PlayerPanel : FrameView
         var pos = snap.Position < TimeSpan.Zero ? TimeSpan.Zero : snap.Position;
         _lastPosSnapshot = pos;
         ClearLoadingIfAdvanced(pos);
-        var len = snap.Length   < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
+
+        var len = snap.Length < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
         if (pos > len && len > TimeSpan.Zero) pos = len;
 
-        var rem = len == TimeSpan.Zero ? TimeSpan.Zero : (len - pos);
-        if (rem < TimeSpan.Zero) rem = TimeSpan.Zero;
+        // --- NEU: konsistente Quantisierung auf ganze Sekunden ---
+        int posSec = (int)Math.Floor(pos.TotalSeconds);             // oder Math.Round(...) wenn dir das lieber ist
+        int lenSec = (int)Math.Floor(len.TotalSeconds);
+        pos = TimeSpan.FromSeconds(Math.Clamp(posSec, 0, Math.Max(0, lenSec)));
+        len = TimeSpan.FromSeconds(Math.Max(0, lenSec));
+
+        var remSec = Math.Max(0, lenSec - posSec);
+        var rem = TimeSpan.FromSeconds(remSec);
 
         var isUnicode = GlyphSet.Current == GlyphSet.Profile.Unicode;
         var icon = snap.IsPlaying ? (isUnicode ? "▶" : ">") : (isUnicode ? "⏸" : "||");
 
         var posStr = format(pos);
-        var lenStr = len == TimeSpan.Zero ? "--:--" : format(len);
+        var lenStr = lenSec == 0 ? "--:--" : format(len);
+        var remStr = lenSec == 0 ? "--:--" : format(rem);
 
-        TimeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
+        TimeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})";
 
-        // <<< NEW: Loading-Logik automatisch zurücknehmen, sobald echte Wiedergabe anläuft
-        if (_isLoading && (snap.IsPlaying || pos > TimeSpan.Zero))
+        if (_isLoading && (snap.IsPlaying || posSec > 0))
             _isLoading = false;
 
-        // Button-Text hängt von Loading / Play/Pause ab
         if (_isLoading)
             BtnPlayPause.Text = _loadingText;
         else
@@ -295,8 +298,8 @@ internal sealed class PlayerPanel : FrameView
                 ? (isUnicode ? "Pause ⏸" : "Pause ||")
                 : (isUnicode ? "Play ⏵"  : "Play >");
 
-        Progress.Fraction = (len.TotalMilliseconds > 0)
-            ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
+        Progress.Fraction = (lenSec > 0)
+            ? Math.Clamp((float)posSec / lenSec, 0f, 1f)
             : 0f;
 
         var v = Math.Clamp(volume0to100, 0, 100);
@@ -304,8 +307,8 @@ internal sealed class PlayerPanel : FrameView
         VolPctLabel.Text = GlyphSet.VolumePercent(v);
         SpeedLabel.Text  = GlyphSet.SpeedLabel(snap.Speed);
 
-        // Button Enabled/Suffix sauber halten
         UpdateLoadingVisuals();
     }
+
 
 }

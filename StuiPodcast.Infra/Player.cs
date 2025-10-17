@@ -30,6 +30,9 @@ public sealed class LibVlcPlayer : IPlayer {
     private long? _pendingSeekMs;
     private int _sessionId;
 
+    // Ready-Gate: Erst wenn wir *echten* Fortschritt/Länge gesehen haben → IsPlaying=true
+    private bool _ready;
+
     // Für :engine show/OSD etc. kurz & konsistent halten
     public string Name => "vlc";
 
@@ -90,6 +93,8 @@ public sealed class LibVlcPlayer : IPlayer {
             var sid = _sessionId;
             Log.Information("[#{sid}] Play {url} (startMs={startMs})", sid, url, startMs);
 
+            _ready = false;
+
             try { if (_mp.IsPlaying) _mp.Stop(); } catch {}
             SafeDisposeMediaLocked(sid);
 
@@ -106,88 +111,110 @@ public sealed class LibVlcPlayer : IPlayer {
             }
 
             var ok = _mp.Play(_media);
-            State.IsPlaying = ok;
+
+            // WICHTIG: kein optimistisches „spielend“
+            State.IsPlaying = false;              // bleibt „Loading“ bis erstes Time/Len-Signal
+            State.Position  = TimeSpan.Zero;
+            State.Length    = null;
             State.Capabilities = Capabilities;
             SafeFire();
+
+            if (!ok) {
+                Log.Debug("[#{sid}] _mp.Play returned false");
+            }
         }
     }
 
     public void TogglePause() {
         lock (_sync) {
-            if (State.IsPlaying) _mp.Pause(); else _mp.Play();
-            State.IsPlaying = !State.IsPlaying;
+            try {
+                if (_mp.CanPause) {
+                    _mp.Pause();
+                }
+                else {
+                    _mp.Play();
+                }
+                // Defensiv: Status aus VLC erfragen (nicht blind toggeln)
+                State.IsPlaying = _mp.IsPlaying;
+            } catch { /* robust bleiben */ }
             SafeFire();
         }
     }
 
     public void SeekRelative(TimeSpan delta) {
         lock (_sync) {
-            var len = _mp.Length;
-            var cur = _mp.Time;
-            long target = Math.Max(0, cur + (long)delta.TotalMilliseconds);
-            if (len > 0) target = Math.Min(target, Math.Max(0, len - 5));
-            _mp.Time = target;
             try {
-                State.Position = TimeSpan.FromMilliseconds(target);
-                if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
-                if (len > 0 && target >= Math.Max(0, len - 250)) State.IsPlaying = false;
-                SafeFire();
-            } catch {}
+                var target = State.Position + delta;
+                if (target < TimeSpan.Zero) target = TimeSpan.Zero;
+                SeekTo(target);
+            } catch { /* ignore */ }
         }
     }
 
     public void SeekTo(TimeSpan position) {
         lock (_sync) {
-            var len = _mp.Length;
-            long ms = Math.Max(0, (long)position.TotalMilliseconds);
-            if (len > 0) ms = Math.Min(ms, Math.Max(0, len - 5));
-            _mp.Time = ms;
             try {
-                State.Position = TimeSpan.FromMilliseconds(ms);
-                if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
-                if (len > 0 && ms >= Math.Max(0, len - 250)) State.IsPlaying = false;
-                SafeFire();
-            } catch {}
+                var ms = (long)Math.Max(0, position.TotalMilliseconds);
+                if (_mp.IsSeekable) {
+                    _mp.Time = ms;
+                } else {
+                    var len = _mp.Length;
+                    if (len > 0) {
+                        _mp.Position = Math.Clamp((float)ms / len, 0f, 1f);
+                    }
+                }
+            } catch { /* ignore */ }
         }
     }
 
     public void SetVolume(int vol0to100) {
         lock (_sync) {
-            vol0to100 = Math.Clamp(vol0to100, 0, 100);
-            State.Volume0_100 = vol0to100;
-            _mp.Volume = vol0to100;
+            try {
+                var v = Math.Clamp(vol0to100, 0, 100);
+                _mp.Volume = v;
+                State.Volume0_100 = v;
+            } catch { /* ignore */ }
             SafeFire();
         }
     }
 
     public void SetSpeed(double speed) {
         lock (_sync) {
-            speed = Math.Clamp(speed, 0.5, 2.5);
-            State.Speed = speed;
-            _mp.SetRate((float)speed);
+            try {
+                var s = Math.Clamp(speed, 0.25, 3.0);
+                _mp.SetRate((float)s);
+                State.Speed = s;
+            } catch { /* ignore */ }
             SafeFire();
         }
     }
 
     public void Stop() {
         lock (_sync) {
-            try { if (_mp.IsPlaying) _mp.Stop(); } catch {}
+            try {
+                if (_mp.IsPlaying) _mp.Stop();
+            } catch { /* ignore */ }
+
+            SafeDisposeMediaLocked(_sessionId);
+
             State.IsPlaying = false;
             SafeFire();
         }
     }
 
-    // -------------------- Internals --------------------
+    public void Dispose() {
+        try {
+            Stop();
+            _mp.Dispose();
+            _lib.Dispose();
+        } catch { /* ignore */ }
+    }
 
-    private static VLC.Media CreateMedia(VLC.LibVLC lib, string input)
-    {
-        // 1) Gültige absolute URI?
-        if (Uri.TryCreate(input, UriKind.Absolute, out var uri))
-        {
-            // file:// → Pfad
-            if (uri.Scheme.Equals("file", StringComparison.OrdinalIgnoreCase))
-                return new VLC.Media(lib, uri.LocalPath, VLC.FromType.FromPath);
+    // == intern ==
 
+    private static VLC.Media CreateMedia(VLC.LibVLC lib, string input) {
+        // 1) Gültige URL?
+        if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme)) {
             // http(s)/… → Location
             return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
         }
@@ -207,14 +234,28 @@ public sealed class LibVlcPlayer : IPlayer {
 
     private void OnPlaying(object? _, EventArgs __) {
         lock (_sync) {
-            var want = _pendingSeekMs;
-            _pendingSeekMs = null;
-            if (want is long ms && ms > 0) {
-                try {
-                    if (_mp.IsSeekable) _mp.Time = ms;
-                    else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
-                } catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
-            }
+            try {
+                // Startoffset nachreichen (einmalig), stabiler nach „Playing“
+                var want = _pendingSeekMs;
+                _pendingSeekMs = null;
+                if (want is long ms && ms > 0) {
+                    try {
+                        if (_mp.IsSeekable) _mp.Time = ms;
+                        else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
+                    } catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
+                }
+
+                // Ready-Gate (wenn Playing + irgendeine sinnvolle Info vorhanden)
+                if (!_ready) {
+                    var len = _mp.Length;
+                    var pos = _mp.Time;
+                    if ((len > 0) || (pos > 0)) {
+                        _ready = true;
+                        State.IsPlaying = true;
+                        SafeFire();
+                    }
+                }
+            } catch (Exception ex) { Log.Debug(ex, "OnPlaying"); }
         }
     }
 
@@ -222,9 +263,22 @@ public sealed class LibVlcPlayer : IPlayer {
         lock (_sync) {
             try {
                 State.Position = TimeSpan.FromMilliseconds(e.Time);
+
                 var len = _mp.Length;
                 if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
-                if (len > 0 && e.Time >= Math.Max(0, len - 100)) State.IsPlaying = false;
+
+                // Ready-Gate: erstes echtes Fortschrittssignal
+                if (!_ready && (e.Time > 0 || len > 0)) {
+                    _ready = true;
+                    State.IsPlaying = true;
+                }
+
+                // Nahe Ende: wenn Player-Länge bekannt und *nicht mehr spielend*,
+                // und Position >= len - 250ms, dann IsPlaying=false setzen
+                if (len > 0 && !_mp.IsPlaying && e.Time >= Math.Max(0, len - 250)) {
+                    State.IsPlaying = false;
+                }
+
                 SafeFire();
             } catch (Exception ex) { Log.Debug(ex, "OnTimeChanged"); }
         }
@@ -234,6 +288,13 @@ public sealed class LibVlcPlayer : IPlayer {
         lock (_sync) {
             try {
                 State.Length = e.Length > 0 ? TimeSpan.FromMilliseconds(e.Length) : (TimeSpan?)null;
+
+                // Ready-Gate: Länge bekannt → wir haben „echte“ Info
+                if (!_ready && e.Length > 0) {
+                    _ready = true;
+                    State.IsPlaying = _mp.IsPlaying; // wenn Playing-Event vorher kam, greift das; sonst bleibt evtl. false bis TimeChanged
+                }
+
                 SafeFire();
             } catch (Exception ex) { Log.Debug(ex, "OnLengthChanged"); }
         }
@@ -255,7 +316,10 @@ public sealed class LibVlcPlayer : IPlayer {
 
     private void OnEncounteredError(object? _, EventArgs __) {
         lock (_sync) {
-            try { State.IsPlaying = false; SafeFire(); } catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
+            try {
+                State.IsPlaying = false;
+                SafeFire();
+            } catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
         }
     }
 
@@ -272,19 +336,5 @@ public sealed class LibVlcPlayer : IPlayer {
         Array.Copy(a, 0, res, 0, a.Length);
         Array.Copy(b, 0, res, a.Length, b.Length);
         return res;
-    }
-
-    public void Dispose() {
-        lock (_sync) {
-            try {
-                _mp.Playing       -= OnPlaying;
-                _mp.TimeChanged   -= OnTimeChanged;
-                _mp.LengthChanged -= OnLengthChanged;
-                _mp.EndReached    -= OnEndReached;
-                _mp.EncounteredError -= OnEncounteredError;
-            } catch {}
-            try { _mp.Dispose(); } catch {}
-            try { _lib.Dispose(); } catch {}
-        }
     }
 }

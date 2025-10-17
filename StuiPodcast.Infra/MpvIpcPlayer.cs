@@ -15,13 +15,15 @@ public sealed class MpvIpcPlayer : IPlayer
 {
     public event Action<PlayerState>? StateChanged;
 
-    public PlayerState State { get; } = new() {
+    public PlayerState State { get; } = new()
+    {
         Capabilities = PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
                        PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |
                        PlayerCapabilities.Network | PlayerCapabilities.Local
     };
 
     public string Name => "mpv";
+    public PlayerCapabilities Capabilities => State.Capabilities;
 
     private readonly object _gate = new();
     private Process? _proc;
@@ -29,9 +31,13 @@ public sealed class MpvIpcPlayer : IPlayer
     private Timer? _poll;
     private volatile bool _disposed;
 
+    // Ready-Gate: Erst wenn wir das erste Mal valide time-pos oder duration erhalten haben,
+    // wird IsPlaying = true gesetzt und ein StateChanged gefeuert.
+    private bool _ready;
+
     public MpvIpcPlayer()
     {
-        // mpv IPC braucht Unix Domain Sockets
+        // mpv IPC braucht Unix Domain Sockets (Linux/macOS)
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
             !RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             throw new PlatformNotSupportedException("mpv IPC requires Unix domain sockets (Linux/macOS)");
@@ -39,37 +45,51 @@ public sealed class MpvIpcPlayer : IPlayer
 
     public void Play(string url, long? startMs = null)
     {
-        Process? started = null;
+        Process? started;
         string sock;
+
         lock (_gate)
         {
             StopInternal_NoEvents();
-            sock = _sockPath = Path.Combine(Path.GetTempPath(), $"stui-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
+
+            _ready = false;              // neue Session: noch nicht "ready"
+            State.IsPlaying = false;     // nicht optimistisch setzen
+            State.Position = TimeSpan.Zero;
+            State.Length = null;
+
+            sock = _sockPath = Path.Combine(
+                Path.GetTempPath(), $"stui-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
+
             try { if (File.Exists(sock)) File.Delete(sock); } catch { /* ignore */ }
 
             started = StartMpvProcess(url, sock, startMs);
             _proc = started;
-            StartPolling(); // will wait for IPC readiness
-            State.IsPlaying = true;
+
+            StartPolling(); // Timer, der regelmäßig TryUpdateFromMpv() aufruft
         }
-        // Events AUßERHALB des Locks
+
+        // Ein initiales StateChanged ist ok (UI kann darauf Loading anzeigen),
+        // aber ohne IsPlaying=true – das kommt erst nach dem ersten IPC-Read.
         FireStateChanged();
     }
 
     public void TogglePause()
     {
-        lock (_gate) SendIpc(new { command = new object[] { "cycle", "pause" } }, bestEffort: true);
+        lock (_gate)
+            SendIpc(new { command = new object[] { "cycle", "pause" } }, bestEffort: true);
     }
 
     public void SeekRelative(TimeSpan delta)
     {
-        lock (_gate) SendIpc(new { command = new object[] { "seek", delta.TotalSeconds, "relative" } }, bestEffort: true);
+        lock (_gate)
+            SendIpc(new { command = new object[] { "seek", delta.TotalSeconds, "relative" } }, bestEffort: true);
     }
 
     public void SeekTo(TimeSpan position)
     {
         var sec = position.TotalSeconds < 0 ? 0 : position.TotalSeconds;
-        lock (_gate) SendIpc(new { command = new object[] { "seek", sec, "absolute" } }, bestEffort: true);
+        lock (_gate)
+            SendIpc(new { command = new object[] { "seek", sec, "absolute" } }, bestEffort: true);
     }
 
     public void SetVolume(int vol0to100)
@@ -101,7 +121,11 @@ public sealed class MpvIpcPlayer : IPlayer
         bool raise = false;
         lock (_gate)
         {
-            if (State.IsPlaying) { StopInternal_NoEvents(); State.IsPlaying = false; raise = true; }
+            if (_proc != null || !string.IsNullOrEmpty(_sockPath))
+            {
+                StopInternal_NoEvents();
+                if (State.IsPlaying) { State.IsPlaying = false; raise = true; }
+            }
         }
         if (raise) FireStateChanged();
     }
@@ -112,7 +136,7 @@ public sealed class MpvIpcPlayer : IPlayer
         Stop();
     }
 
-    // ---- intern
+    // ---- intern ---------------------------------------------------------------
 
     private Process StartMpvProcess(string url, string sockPath, long? startMs)
     {
@@ -123,14 +147,18 @@ public sealed class MpvIpcPlayer : IPlayer
             RedirectStandardError = true,
             RedirectStandardOutput = true
         };
-        // ArgumentList vermeidet Quoting-Probleme
+
+        // Basis-Argumente (deterministischer, ruhiger Start)
         psi.ArgumentList.Add("--no-video");
         psi.ArgumentList.Add("--really-quiet");
         psi.ArgumentList.Add("--terminal=no");
         psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
         psi.ArgumentList.Add("--keep-open=no");
+
+        // Startoffset (nur als Hint; Coordinator resumiert ggf. später einmalig)
         if (startMs is long ms && ms > 0)
             psi.ArgumentList.Add($"--start={(ms / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
+
         psi.ArgumentList.Add(url);
 
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -139,6 +167,7 @@ public sealed class MpvIpcPlayer : IPlayer
             bool raise = false;
             lock (_gate)
             {
+                // Bei Exit sofort auf nicht spielend
                 if (State.IsPlaying) { State.IsPlaying = false; raise = true; }
             }
             if (raise) FireStateChanged();
@@ -149,50 +178,51 @@ public sealed class MpvIpcPlayer : IPlayer
 
     private void StartPolling()
     {
-        // leichten Poll starten; der erste Durchlauf wartet auf IPC-Readiness
-        _poll = new Timer(async _ => await PollTick(), null, dueTime: 250, period: 500);
+        // leichte Poll-Periode; der Timer ruft TryUpdateFromMpv() regelmäßig auf
+        // erster Tick nach kurzer Verzögerung, damit mpv IPC-Socket anlegt
+        _poll = new Timer(_ => { try { TryUpdateFromMpv(); } catch { /* swallow */ } },
+                          null, dueTime: 250, period: 500);
     }
 
-    private async Task PollTick()
-    {
-        if (_disposed) return;
-        // IPC-Readiness mit kurzem Backoff
-        const int maxWaitMs = 2000;
-        var start = Environment.TickCount64;
-
-        // Erstversuch: wenn keine Verbindung möglich, backoff & retry
-        while (true)
-        {
-            if (TryUpdateFromMpv())
-            {
-                return;
-            }
-            if (Environment.TickCount64 - start > maxWaitMs) return;
-            await Task.Delay(100);
-        }
-    }
-
+    /// <summary>
+    /// Liest time-pos und duration via IPC und aktualisiert State.
+    /// Beim *ersten* erfolgreichen Read wird State.IsPlaying=true gesetzt (Ready-Gate).
+    /// </summary>
     private bool TryUpdateFromMpv()
     {
-        double pos = 0, dur = 0;
+        if (_disposed) return false;
+
+        double? posVal = null, durVal = null;
         try
         {
-            var posVal = GetProperty<double?>("time-pos");
-            var durVal = GetProperty<double?>("duration");
-            if (posVal is null && durVal is null) return false;
+            posVal = GetProperty<double?>("time-pos");
+            durVal = GetProperty<double?>("duration");
+
+            if (posVal is null && durVal is null)
+                return false;
 
             bool raise = false;
             lock (_gate)
             {
+                // Position
                 if (posVal is double p && p >= 0)
                 {
                     var ts = TimeSpan.FromSeconds(p);
                     if (ts != State.Position) { State.Position = ts; raise = true; }
                 }
+
+                // Länge
                 if (durVal is double d && d > 0)
                 {
                     var ts = TimeSpan.FromSeconds(d);
                     if (State.Length != ts) { State.Length = ts; raise = true; }
+                }
+
+                // Ready-Gate: Erst jetzt "spielend"
+                if (!_ready && ((posVal is double pp && pp > 0) || (durVal is double dd && dd > 0)))
+                {
+                    _ready = true;
+                    if (!State.IsPlaying) { State.IsPlaying = true; raise = true; }
                 }
             }
             if (raise) FireStateChanged();
@@ -213,9 +243,9 @@ public sealed class MpvIpcPlayer : IPlayer
         {
             using var doc = JsonDocument.Parse(txt);
             if (doc.RootElement.TryGetProperty("data", out var d))
-                return System.Text.Json.JsonSerializer.Deserialize<T>(d.GetRawText());
+                return JsonSerializer.Deserialize<T>(d.GetRawText());
         }
-        catch { }
+        catch { /* ignore */ }
         return default;
     }
 
@@ -230,7 +260,7 @@ public sealed class MpvIpcPlayer : IPlayer
             using var s = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             s.Connect(new UnixDomainSocketEndPoint(sock));
 
-            var json = System.Text.Json.JsonSerializer.Serialize(payload) + "\n";
+            var json = JsonSerializer.Serialize(payload) + "\n";
             var bytes = Encoding.UTF8.GetBytes(json);
             s.Send(bytes);
 
@@ -261,6 +291,8 @@ public sealed class MpvIpcPlayer : IPlayer
         var sock = _sockPath;
         _sockPath = "";
         try { if (!string.IsNullOrEmpty(sock) && File.Exists(sock)) File.Delete(sock); } catch { }
+
+        _ready = false;
     }
 
     private void FireStateChanged()
@@ -268,5 +300,4 @@ public sealed class MpvIpcPlayer : IPlayer
         var snapshot = State; // nur Referenz
         try { StateChanged?.Invoke(snapshot); } catch { /* UI-Subscriber sollen App nicht crashen */ }
     }
-    public PlayerCapabilities Capabilities => State.Capabilities;
 }

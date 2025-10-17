@@ -6,7 +6,8 @@ using StuiPodcast.Infra;
 namespace StuiPodcast.App
 {
     /// <summary>
-    /// Stabiler Proxy für IPlayer, dessen innerer Engine zur Laufzeit austauschbar ist.
+    /// Stabiler Proxy für IPlayer, dessen innere Engine zur Laufzeit austauschbar ist.
+    /// Thread-safe: Öffentliche Methoden greifen auf einen Snapshot der aktuellen Engine zu.
     /// </summary>
     public sealed class SwappablePlayer : IPlayer, IDisposable
     {
@@ -19,24 +20,88 @@ namespace StuiPodcast.App
             _inner.StateChanged += ForwardState;
         }
 
-        public string Name => _inner.Name;
-        public PlayerCapabilities Capabilities => _inner.Capabilities;
-        public PlayerState State => _inner.State;
+        // Snapshot-Helfer: gibt die aktuell aktive Engine atomar zurück
+        private IPlayer Inner
+        {
+            get { lock (_gate) return _inner; }
+        }
+
+        public string Name
+        {
+            get { return Inner.Name; }
+        }
+
+        public PlayerCapabilities Capabilities
+        {
+            get { return Inner.Capabilities; }
+        }
+
+        public PlayerState State
+        {
+            get { return Inner.State; }
+        }
 
         public event Action<PlayerState>? StateChanged;
 
-        // <- HIER: Signatur wie im Interface (long? statt TimeSpan?)
-        public void Play(string url, long? startMs) => _inner.Play(url, startMs);
+        public void Play(string url, long? startMs = null)
+        {
+            // Snapshot, dann aufrufen
+            var p = Inner;
+            p.Play(url, startMs);
+        }
 
-        public void TogglePause() => _inner.TogglePause();
-        public void SeekTo(TimeSpan t) => _inner.SeekTo(t);
-        public void SeekRelative(TimeSpan dt) => _inner.SeekRelative(dt);
-        public void SetVolume(int v) => _inner.SetVolume(v);
-        public void SetSpeed(double s) => _inner.SetSpeed(s);
-        public void Stop() => _inner.Stop();
+        public void TogglePause()
+        {
+            var p = Inner;
+            p.TogglePause();
+        }
 
-        public void Dispose() => _inner.Dispose();
+        public void SeekTo(TimeSpan t)
+        {
+            var p = Inner;
+            p.SeekTo(t);
+        }
 
+        public void SeekRelative(TimeSpan dt)
+        {
+            var p = Inner;
+            p.SeekRelative(dt);
+        }
+
+        public void SetVolume(int v)
+        {
+            var p = Inner;
+            p.SetVolume(v);
+        }
+
+        public void SetSpeed(double s)
+        {
+            var p = Inner;
+            p.SetSpeed(s);
+        }
+
+        public void Stop()
+        {
+            var p = Inner;
+            p.Stop();
+        }
+
+        public void Dispose()
+        {
+            IPlayer old;
+            lock (_gate)
+            {
+                old = _inner;
+                _inner.StateChanged -= ForwardState;
+                // Kein Null setzen – wir behalten eine gültige Referenz bis Dispose durch ist
+            }
+
+            try { old.Dispose(); } catch { /* robust */ }
+        }
+
+        /// <summary>
+        /// Tauscht die Engine im Laufenden Betrieb aus. Optionaler Hook vor Dispose der alten Engine.
+        /// </summary>
         public async Task SwapToAsync(IPlayer next, Action<IPlayer>? onBeforeDispose = null)
         {
             if (next == null) throw new ArgumentNullException(nameof(next));
@@ -45,19 +110,19 @@ namespace StuiPodcast.App
             lock (_gate)
             {
                 old = _inner;
-                old.StateChanged -= ForwardState;
+                try { old.StateChanged -= ForwardState; } catch { }
                 _inner = next;
                 _inner.StateChanged += ForwardState;
             }
 
-            try { onBeforeDispose?.Invoke(old); } catch { }
-            await Task.Yield();
-            try { old.Dispose(); } catch { }
+            try { onBeforeDispose?.Invoke(old); } catch { /* ignore */ }
+            await Task.Yield(); // sanfter Kontextwechsel
+            try { old.Dispose(); } catch { /* robust */ }
         }
 
         private void ForwardState(PlayerState s)
         {
-            try { StateChanged?.Invoke(s); } catch { }
+            try { StateChanged?.Invoke(s); } catch { /* UI darf Player nicht crashen */ }
         }
     }
 }

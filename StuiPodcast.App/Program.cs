@@ -34,8 +34,6 @@ class Program
     const int SUCC_FOR_ONLINE   = 3;
     static DateTimeOffset _netLastFlip = DateTimeOffset.MinValue;
     static readonly TimeSpan _netMinDwell = TimeSpan.FromSeconds(15);
-    
-    
 
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
@@ -56,7 +54,6 @@ class Program
             }
         } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
     }
-    
 
     static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
     {
@@ -173,7 +170,6 @@ class Program
     static SwappablePlayer? Player;
     static string? _initialEngineInfo; // für OSD nach UI-Build
 
-    
     static Shell? UI;
     static PlaybackCoordinator? Playback;
     static MemoryLogSink MemLog = new(2000);
@@ -185,7 +181,7 @@ class Program
 
     static async Task Main()
     {
-        // --- NEU: Windows-Konsole für Unicode/ANSI fit machen ---
+        // --- Windows-Konsole für Unicode/ANSI fit machen ---
         EnableWindowsConsoleAnsi();
 
         ConfigureLogging();
@@ -278,11 +274,11 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
-        
+
         if (!string.IsNullOrEmpty(_initialEngineInfo))
             UI.ShowOsd(_initialEngineInfo, 1200);
 
-        // sofort einmal prüfen – nichts zuweisen, einfach ausführen (CS4014-safe via discard)
+        // sofort einmal prüfen – nichts zuweisen, einfach ausführen
         _ = Task.Run(async () =>
         {
             var online = await QuickNetCheckAsync();
@@ -428,8 +424,6 @@ class Program
             var ep = UI.GetSelectedEpisode();
             if (ep == null || Player == null || Playback == null || UI == null) return;
 
-            
-            
             var curFeed = UI.GetSelectedFeedId();
 
             // Verlauf stempeln
@@ -458,7 +452,7 @@ class Program
             {
                 localPath = st.LocalPath;
             }
-            
+
             bool isRemote =
                 string.IsNullOrWhiteSpace(localPath) &&           // kein lokaler Treffer
                 !string.IsNullOrWhiteSpace(ep.AudioUrl) &&
@@ -518,14 +512,7 @@ class Program
                         var s = Player.State;
                         if (!s.IsPlaying && s.Position == TimeSpan.Zero)
                         {
-                            try
-                            {
-                                Player.Stop();
-                            }
-                            catch
-                            {
-                                /* best effort */
-                            }
+                            try { Player.Stop(); } catch { /* best effort */ }
 
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
@@ -545,10 +532,6 @@ class Program
                     catch
                     {
                         /* robust bleiben */
-                    }
-                    finally
-                    {
-
                     }
 
                     return false; // one-shot
@@ -601,7 +584,6 @@ class Program
 
             // 3) Rest
             CommandRouter.Handle(cmd, Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
-
         };
 
         UI.SearchApplied += query =>
@@ -681,6 +663,30 @@ class Program
             catch { /* UI robust halten */ }
         });
 
+        // **NEU**: Playback-Status steuert das Loading-Banner sichtbar & korrekt
+        Playback.StatusChanged += st => Application.MainLoop?.Invoke(() =>
+        {
+            try
+            {
+                if (UI == null) return;
+                switch (st)
+                {
+                    case PlaybackStatus.Loading:
+                        UI.SetPlayerLoading(true, "Loading…", null);
+                        break;
+                    case PlaybackStatus.SlowNetwork:
+                        UI.SetPlayerLoading(true, "Connecting… (slow)", null);
+                        break;
+                    case PlaybackStatus.Playing:
+                    case PlaybackStatus.Ended:
+                    default:
+                        UI.SetPlayerLoading(false);
+                        break;
+                }
+            }
+            catch { /* robust */ }
+        });
+
         // Player-State treibt Persist/Auto-Advance (UI-Update kommt aus Snapshot)
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
@@ -733,7 +739,7 @@ class Program
             try { Player?.Stop(); } catch { }
             (Player as IDisposable)?.Dispose();
 
-            try { Downloader?.Dispose(); } catch { }   // <--- NEU
+            try { Downloader?.Dispose(); } catch { }
 
             await SaveAsync();
             try { Application.Shutdown(); } catch { }
@@ -741,7 +747,6 @@ class Program
             try { Log.CloseAndFlush(); } catch { }
             try { _probeHttp.Dispose(); } catch { }
         }
-
     }
 
     static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
@@ -804,9 +809,8 @@ class Program
 
         return ordered;
     }
-    
-    
-    // Program.cs
+
+    // Engine-Wechsel (hot swap)
     static async Task SwitchEngineAsync(string pref)
     {
         try
@@ -843,9 +847,6 @@ class Program
         }
     }
 
-
-
-    
     static void ApplyPrefsTo(IPlayer p)
     {
         try
@@ -867,7 +868,6 @@ class Program
             }
         } catch { }
     }
-
 
     static async Task SaveAsync()
     {
@@ -996,7 +996,6 @@ class Program
         });
     }
 
-
     static void ConfigureLogging()
     {
         var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
@@ -1048,7 +1047,7 @@ class Program
     // Legacy-Compat: aktuell No-Op (wurde früher für End-Transition genutzt)
     static void ResetAutoAdvance() { }
 
-    // ---------- NEU: Windows VT/UTF-8 Enable ----------
+    // ---------- Windows VT/UTF-8 Enable ----------
     static void EnableWindowsConsoleAnsi()
     {
         try

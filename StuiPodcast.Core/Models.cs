@@ -1,3 +1,4 @@
+// Models.cs
 using System;
 using System.Collections.Generic;
 using Terminal.Gui;
@@ -49,11 +50,17 @@ public class PlayerState {
     public TimeSpan Position { get; set; }
     public TimeSpan? Length { get; set; }
 
-    // neu: Fähigkeiten der aktiven Engine
+    // Fähigkeiten der aktiven Engine
     public PlayerCapabilities Capabilities { get; set; } =
         PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
         PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |
         PlayerCapabilities.Network | PlayerCapabilities.Local;
+}
+
+// Netzprofil für Start-/Buffer-Verhalten (Engines lesen dies perspektivisch aus)
+public enum NetworkProfile {
+    Standard = 0,
+    BadNetwork = 1
 }
 
 public class AppData {
@@ -90,4 +97,7 @@ public class AppData {
     
     public string PreferredEngine { get; set; } = "auto"; // auto|vlc|mpv|ffplay
     public string? LastEngineUsed { get; set; }           // Diagnose/OSD
+
+    // NEU: Netzprofil (wirkt sich auf Engine-Startparameter aus, sobald Engines es auswerten)
+    public NetworkProfile NetProfile { get; set; } = NetworkProfile.Standard;
 }

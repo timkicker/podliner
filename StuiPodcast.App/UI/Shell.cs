@@ -88,15 +88,12 @@ public sealed class Shell
     public void RequestRefresh()           => _ = RefreshRequested?.Invoke();
     public void RequestQuit()              => QuitRequested?.Invoke();
 
-    
-// Shell.cs – irgendwo bei den Public helpers:
+    // für Coordinator/Program: Loading klar sichtbar steuern
     public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
     {
         UI(() => _player?.SetLoading(on, text, baseline));
     }
 
-
-    
     public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
     public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "Refreshed ✓" : "Refreshing…");
 
@@ -518,7 +515,8 @@ public sealed class Shell
         UI(() =>
         {
             _searchBox?.SuperView?.Remove(_searchBox);
-            _searchBox = new TextField(seed)
+            _searchBox = new TextField(seed
+            )
             {
                 X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, ColorScheme = Colors.Base
             };

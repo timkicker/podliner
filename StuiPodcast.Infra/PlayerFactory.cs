@@ -1,3 +1,4 @@
+// PlayerFactory.cs
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -114,22 +115,25 @@ public static class PlayerFactory
                     throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
             }
 
-          
-
+            // Degradierter Hinweis (für OSD)
             bool degraded =
                 string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase) ||
                 (isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase)); // optional
 
-            infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : null;
-
+            infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : $"Engine: {chosen.Name}";
         }
         else
         {
             infoOsd = $"Engine: {chosen.Name}";
         }
 
+        // Netzprofil in OSD mit anzeigen (reine Info; Engines können es separat berücksichtigen)
+        if (data.NetProfile == NetworkProfile.BadNetwork)
+            infoOsd += " • Net: bad";
+
         data.LastEngineUsed = chosen.Name;
-        Log.Debug("Chosen engine: {Engine} ({Why})", chosen.Name, why);
+        Log.Debug("Chosen engine: {Engine} ({Why}) — NetProfile={Net}", chosen.Name, why, data.NetProfile);
+
         return chosen;
     }
 
