@@ -678,13 +678,24 @@ static class CommandRouter
         int removedEps = data.Episodes.RemoveAll(e => e.FeedId == fid);
         data.Feeds.RemoveAll(f => f.Id == fid);
 
+        // Persistieren
         _ = persist();
 
-        ui.SetFeeds(data.Feeds);
+        // --- NEU: sichere Zielauswahl bestimmen ---
+        // Wenn keine realen Feeds mehr existieren → immer auf "All Episodes" gehen.
+        // Sonst: auf den ersten realen Feed hinter der Barriere selektieren (das macht Shell.SetFeeds intern),
+        // aber wir geben explizit FEED_ALL als Fallback vor, um den Separator sicher zu vermeiden.
+        data.LastSelectedFeedId = FEED_ALL;
+
+        // Feeds neu setzen und gewünschte Auswahl explizit übergeben
+        ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
+
+        // Episodenliste entsprechend der (nun sicheren) Auswahl neu anwenden
         ApplyList(ui, data);
 
         ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
     }
+
     
     private static void ExecOpml(string[] args, Shell ui, AppData data, Func<Task> persist)
     {

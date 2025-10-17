@@ -199,6 +199,7 @@ class Program
             OnNetworkChanged(online);
         });
 
+        /*
         // Default-Feed beim allerersten Start
         if (Data.Feeds.Count == 0)
         {
@@ -214,6 +215,8 @@ class Program
                 await Feeds!.AddFeedAsync(anchorUrl);
         }
         catch (Exception ex) { Log.Warning(ex, "Could not add anchor feed"); }
+
+        */
 
         // 1) Core-Engine erzeugen …
         try

@@ -10,6 +10,8 @@ namespace StuiPodcast.App.UI;
 public sealed class Shell
 {
     // ---- Events/API wie vorher ----
+    private bool _suppressFeedSelectionEvents = false;
+    private Terminal.Gui.MenuBar? _menu;
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
@@ -120,19 +122,34 @@ public sealed class Shell
 
         _feedsPane.SelectedChanged += () =>
         {
-            // Wenn Separator angeklickt / fokussiert wurde → sofort weiter springen
+            // Während wir die Liste neu befüllen → keine Events verarbeiten
+            if (_suppressFeedSelectionEvents) return;
+
+            // Aktuelle Auswahl holen
             var selId = _feedsPane.GetSelectedFeedId();
-            if (IsSeparator(selId) && _feedsPane.List is { } lv)
+
+            // Separator oder null? → gleich zur nächsten gültigen Zeile springen
+            if (selId is null && _feedsPane.List is { } lv)
             {
                 var next = Math.Min(lv.SelectedItem + 1, (lv.Source?.Count ?? 1) - 1);
-                lv.SelectedItem = next;
+                lv.SelectedItem = Math.Max(0, next);
+                selId = _feedsPane.GetSelectedFeedId();
+                if (selId is null) return; // immer noch nix → dann abbrechen
             }
 
             if (_activePane == Pane.Feeds)
                 RefreshListVisual(_feedsPane.List);
 
-            SelectedFeedChanged?.Invoke();
+            try
+            {
+                SelectedFeedChanged?.Invoke();
+            }
+            catch
+            {
+                // UI darf niemals crashen
+            }
         };
+
 
 
         // --- Right Root + EpisodesPane ---
@@ -217,37 +234,55 @@ public sealed class Shell
     }
 
     // ---- Feeds/Episodes (API) ----
-    public void SetFeeds(IEnumerable<Feed> feeds, Guid? selectId = null)
+    public void SetFeeds(List<Feed> feeds, Guid? selectId = null)
     {
-        UI(() =>
+        if (feeds is null) feeds = new List<Feed>();
+
+        var viewList = BuildFeedsWithBarrier(feeds);
+
+        _suppressFeedSelectionEvents = true;
+        try
         {
             _feeds.Clear();
-            _feeds.AddRange(BuildFeedsWithBarrier(feeds));
-
-            // ...
+            _feeds.AddRange(viewList);
             _feedsPane?.SetFeeds(_feeds);
 
-// Startauswahl bestimmen
-            int idx = 0;
-            if (selectId is Guid gid)
-            {
-                var j = _feeds.FindIndex(f => f.Id == gid);
-                if (j >= 0) idx = j;
-            }
+            // Zielauswahl bestimmen
+            var FEED_ALL = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
 
-// Falls Barriere getroffen → auf die nächste gültige Zeile springen
+            bool anyRealFeeds = feeds.Count > 0;
+            Guid want = selectId
+                        ?? (anyRealFeeds
+                            ? _feeds.FirstOrDefault(f => f.Id != FEED_SEPARATOR)?.Id ?? FEED_ALL
+                            : FEED_ALL);
+
+            // Index finden (oder 0)
+            int idx = 0;
+            var j = _feeds.FindIndex(f => f.Id == want);
+            if (j >= 0) idx = j;
+
+            // Separator niemals selektieren → eins weiter
             if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
             {
-                idx = Math.Min(idx + 1, _feeds.Count - 1);
+                idx = Math.Clamp(idx + 1, 0, Math.Max(0, _feeds.Count - 1));
+                if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
+                    idx = 0; // falls dahinter nichts mehr ist
             }
 
+            if (_feeds.Count == 0) idx = 0;
+
             _feedsPane?.List?.SetSelectedItemIfPresent(idx);
-// ...
+        }
+        finally
+        {
+            _suppressFeedSelectionEvents = false;
+        }
 
-
-            if (_activePane == Pane.Feeds && _feedsPane?.List is { } lv) RefreshListVisual(lv);
-        });
+        // Jetzt, wo eine valide Auswahl steht, Episoden aktualisieren
+        RefreshEpisodesForSelectedFeed(_episodes);
     }
+
+
 
     public Guid? GetSelectedFeedId()
     {
