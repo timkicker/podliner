@@ -48,6 +48,12 @@ namespace StuiPodcast.App.UI
             var cmdsTab = new TabView.Tab("Commands", cmdHost);
             tabs.AddTab(cmdsTab, false);
 
+            // ==== Scrollbars verdrahten ====
+            WireListScrollbar(keyList);
+            WireListScrollbar(cmdList);
+            WireTextViewScrollbar(keyDetails);
+            WireTextViewScrollbar(cmdDetails);
+
             // ==== Daten/Filter ====
             List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
             List<CmdHelp> cmdData = HelpCatalog.Commands.ToList();
@@ -204,5 +210,75 @@ namespace StuiPodcast.App.UI
             RefreshCmdList();
             Application.Run(dlg);
         }
+
+        // ---------- Scrollbar-Helfer ----------
+        private static void WireListScrollbar(ListView lv)
+        {
+            try
+            {
+                var vbar = new ScrollBarView(lv, true);
+                vbar.ChangedPosition += () =>
+                {
+                    lv.TopItem = Math.Max(0, Math.Min(vbar.Position, Math.Max(0, (lv.Source?.Count ?? 0) - 1)));
+                    if (vbar.Position != lv.TopItem) vbar.Position = lv.TopItem;
+                    lv.SetNeedsDisplay();
+                };
+
+                lv.DrawContent += _ =>
+                {
+                    var size = lv.Source?.Count ?? 0;
+                    vbar.Size = Math.Max(0, size);
+                    vbar.Position = Math.Max(0, Math.Min(lv.TopItem, Math.Max(0, size - 1)));
+                    vbar.Refresh();
+                };
+            }
+            catch { /* best effort, falls TUI-Version abweicht */ }
+        }
+
+        private static void WireTextViewScrollbar(TextView tv)
+        {
+            // Falls deine Terminal.Gui-Version eingebaute Scrollbars hat, kannst du alternativ das hier versuchen:
+            // try { tv.VerticalScrollBarVisible = true; tv.HorizontalScrollBarVisible = false; return; } catch {}
+
+            try
+            {
+                var vbar = new ScrollBarView(tv, true);
+
+                vbar.ChangedPosition += () =>
+                {
+                    tv.TopRow = System.Math.Max(0, vbar.Position);
+                    if (vbar.Position != tv.TopRow) vbar.Position = tv.TopRow;
+                    tv.SetNeedsDisplay();
+                };
+
+                // Zähle Zeilen ohne Wrap (robust und versionsunabhängig)
+                int ContentLines()
+                {
+                    var s = tv.Text?.ToString() ?? string.Empty;
+                    if (s.Length == 0) return 0;
+                    int lines = 1;
+                    for (int i = 0; i < s.Length; i++)
+                        if (s[i] == '\n') lines++;
+                    return lines;
+                }
+
+                void RefreshBar()
+                {
+                    // Mindestgröße = Frame.Height, damit die Leiste immer konsistent wirkt
+                    var size = System.Math.Max(ContentLines(), tv.Frame.Height);
+                    vbar.Size = size;
+                    vbar.Position = System.Math.Max(0, System.Math.Min(tv.TopRow, System.Math.Max(0, size - 1)));
+                    vbar.Refresh();
+                }
+
+                // Bei jedem Repaint aktualisieren
+                tv.DrawContent += _ => RefreshBar();
+
+                // Wenn verfügbar, auf Textänderungen reagieren (nicht in allen Versionen vorhanden)
+                try { tv.TextChanged += () => { RefreshBar(); tv.SetNeedsDisplay(); }; } catch { /* best effort */ }
+            }
+            catch { /* best effort */ }
+        }
+
     }
 }
