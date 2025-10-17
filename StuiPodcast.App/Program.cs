@@ -277,6 +277,13 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
+        
+        if (OperatingSystem.IsWindows())
+        {
+            // Aktiviere beim Start das gleiche Theme, das ein einzelner "t"-Druck wählen würde.
+            // So bleiben wir immer im Gleichschritt mit deinem Toggle-Zyklus.
+            UI.ToggleTheme();
+        }
 
        
 
