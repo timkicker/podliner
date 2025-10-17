@@ -285,7 +285,6 @@ class Program
             UI.ToggleTheme();
         }
 
-       
 
         // sofort einmal prüfen – nichts zuweisen, einfach ausführen
         _ = Task.Run(async () =>

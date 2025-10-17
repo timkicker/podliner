@@ -33,11 +33,26 @@ public sealed class Shell
     private static readonly Guid FEED_SEPARATOR = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
     private static bool IsSeparator(Guid? id) => id is Guid g && g == FEED_SEPARATOR;
 
+    // Public helper: Theme gezielt setzen (1=Base, 2=MenuAccent, 3=Native)
+    public void SetThemeByNumber(int n)
+    {
+        var mode = n switch
+        {
+            1 => ThemeMode.Base,
+            2 => ThemeMode.MenuAccent,
+            3 => ThemeMode.Native,
+            _ => ThemeMode.Base
+        };
+        _theme = mode;
+        ApplyTheme();
+    }
+
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
     private enum ThemeMode { MenuAccent, Base, Native }
-    private ThemeMode _theme = ThemeMode.MenuAccent;
+
+    private ThemeMode _theme = OperatingSystem.IsWindows() ? ThemeMode.MenuAccent : ThemeMode.Base;
     private bool _playerAtTop   = false;
     private bool _startupPinned = false;
 
@@ -62,7 +77,12 @@ public sealed class Shell
     private TextField? _commandBox;
     private TextField? _searchBox;
 
-    public Shell(MemoryLogSink mem) { _mem = mem; }
+    public Shell(MemoryLogSink mem)
+    {
+        _mem = mem;
+        SetDefaultThemeForOS();   // ← NEU: OS-Default schon hier setzen
+    }
+
 
     // ---- Helpers ----
     private static void UI(Action a)
@@ -207,6 +227,15 @@ public sealed class Shell
 
         // --- Theme ---
         ApplyTheme();
+
+        if (Application.MainLoop != null)
+        {
+            Application.MainLoop.AddIdle(() =>
+            {
+                ApplyTheme();
+                return false; // einmalig
+            });
+        }
 
         // --- Keys überall binden ---
         BindKeys(
@@ -820,6 +849,26 @@ public sealed class Shell
             list.SelectedItem = old;
         }
     }
+
+    private void SetDefaultThemeForOS()
+    {
+        // Mapping von "Theme-Nummer" → ThemeMode:
+        // 1 = Base, 2 = MenuAccent, 3 = Native
+        ThemeMode FromNumber(int n) => n switch
+        {
+            1 => ThemeMode.Base,
+            2 => ThemeMode.MenuAccent,
+            3 => ThemeMode.Native,
+            _ => ThemeMode.Base
+        };
+
+        // Wunsch: Linux ← Theme 1, Windows ← Theme 2
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+            _theme = FromNumber(2);
+        else
+            _theme = FromNumber(1);
+    }
+
 
     private void RefreshListVisual(ListView lv)
     {

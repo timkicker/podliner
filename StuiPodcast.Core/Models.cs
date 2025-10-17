@@ -1,8 +1,6 @@
 // Models.cs
 using System;
 using System.Collections.Generic;
-using Terminal.Gui;
-
 namespace StuiPodcast.Core;
 
 [Flags]

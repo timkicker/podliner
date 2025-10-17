@@ -5,336 +5,379 @@ using System.IO;
 using System.Threading.Tasks;
 using VLC = LibVLCSharp.Shared;
 
-namespace StuiPodcast.Infra;
+namespace StuiPodcast.Infra
+{
+    // --- öffentliche Player-API (unverändert) -------------------------------
+    public interface IPlayer : IDisposable
+    {
+        event Action<PlayerState>? StateChanged;
+        PlayerState State { get; }
+        string Name { get; }                      // Anzeigename der Engine
+        PlayerCapabilities Capabilities { get; }  // Fähigkeiten
 
-public interface IPlayer : IDisposable {
-    event Action<PlayerState>? StateChanged;
-    PlayerState State { get; }
-    string Name { get; }                      // Anzeigename der Engine
-    PlayerCapabilities Capabilities { get; }  // Fähigkeiten
-
-    void Play(string url, long? startMs = null);
-    void TogglePause();
-    void SeekRelative(TimeSpan delta);
-    void SeekTo(TimeSpan position);
-    void SetVolume(int vol0to100);
-    void SetSpeed(double speed);
-    void Stop();
-}
-
-public sealed class LibVlcPlayer : IPlayer {
-    private readonly VLC.LibVLC _lib;
-    private readonly VLC.MediaPlayer _mp;
-    private VLC.Media? _media;
-    private readonly object _sync = new();
-    private long? _pendingSeekMs;
-    private int _sessionId;
-
-    // Ready-Gate: Erst wenn wir *echten* Fortschritt/Länge gesehen haben → IsPlaying=true
-    private bool _ready;
-
-    // Für :engine show/OSD etc. kurz & konsistent halten
-    public string Name => "vlc";
-
-    public PlayerCapabilities Capabilities =>
-        PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
-        PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |
-        PlayerCapabilities.Network | PlayerCapabilities.Local;
-
-    public PlayerState State { get; } = new();
-    public event Action<PlayerState>? StateChanged;
-
-    public LibVlcPlayer() {
-        // 0) Best-effort Pfadfindung für Windows/macOS (Linux meist no-op)
-        var vlcPaths = VlcPathResolver.Apply();
-
-        // 1) Native Lib laden (muss NACH Env-Anpassungen erfolgen)
-        VLC.Core.Initialize();
-
-        // 2) Logging-Datei vorbereiten (optional, hilft bei Support)
-        var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "stui-vlc.log");
-        try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
-
-        // 3) Runtime-Optionen (unsere Defaults + evtl. plugin-path vom Resolver)
-        var baseOpts = new[]{
-            "--no-video-title-show",
-            "--quiet","--verbose=0","--no-color",
-            "--no-xlib",                 // headless-freundlich
-            "--input-fast-seek",
-            "--file-caching=1000",
-            "--network-caching=2000",
-            "--file-logging", $"--logfile={logPath}"
-        };
-        var opts = MergeOpts(baseOpts, vlcPaths.LibVlcOptions);
-
-        // 4) Lib & Player anlegen
-        _lib = new VLC.LibVLC(opts);
-        _mp  = new VLC.MediaPlayer(_lib);
-
-        // 5) Events (UI rendert über Snapshot; hier nur State pflegen + feuern)
-        _mp.Playing          += OnPlaying;
-        _mp.TimeChanged      += OnTimeChanged;
-        _mp.LengthChanged    += OnLengthChanged;
-        _mp.EndReached       += OnEndReached;
-        _mp.EncounteredError += OnEncounteredError;
-        _mp.Stopped          += (_,__) => { lock(_sync){ State.IsPlaying = false; SafeFire(); } };
-
-        // 6) Startzustand
-        _mp.Volume = State.Volume0_100;
-        _mp.SetRate((float)State.Speed);
-        State.Capabilities = Capabilities;
-
-        Log.Information("LibVLC initialized ({Diag})", vlcPaths.Diagnose);
+        void Play(string url, long? startMs = null);
+        void TogglePause();
+        void SeekRelative(TimeSpan delta);
+        void SeekTo(TimeSpan position);
+        void SetVolume(int vol0to100);
+        void SetSpeed(double speed);
+        void Stop();
     }
 
-    public void Play(string url, long? startMs = null) {
-        lock (_sync) {
-            _sessionId++;
-            var sid = _sessionId;
-            Log.Information("[#{sid}] Play {url} (startMs={startMs})", sid, url, startMs);
+    /// <summary>
+    /// LibVLC-basierter Player, der LibVLC **aus NuGet-Runtime-Assets** lädt.
+    /// Kein Pfad-Resolver, kein externes VLC nötig.
+    /// </summary>
+    public sealed class LibVlcPlayer : IPlayer
+    {
+        private readonly VLC.LibVLC _lib;
+        private readonly VLC.MediaPlayer _mp;
+        private VLC.Media? _media;
+        private readonly object _sync = new();
 
-            _ready = false;
+        private long? _pendingSeekMs;
+        private int _sessionId;
+        private bool _ready; // Erst „spielend“, wenn echte Länge/Time gesichtet
 
-            try { if (_mp.IsPlaying) _mp.Stop(); } catch {}
-            SafeDisposeMediaLocked(sid);
+        public string Name => "vlc";
 
-            _pendingSeekMs = (startMs is > 0) ? startMs : null;
+        public PlayerCapabilities Capabilities =>
+            PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
+            PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |
+            PlayerCapabilities.Network | PlayerCapabilities.Local;
 
-            // URL vs. lokaler Pfad robust unterscheiden
-            _media = CreateMedia(_lib, url);
+        public PlayerState State { get; } = new();
+        public event Action<PlayerState>? StateChanged;
 
-            // Startoffset als Hint mitgeben (beschleunigt initial seek auf manchen Inputs)
-            if (_pendingSeekMs is long msOpt && msOpt >= 1000) {
-                var secs = (int)(msOpt / 1000);
-                _media.AddOption($":start-time={secs}");
-                _media.AddOption(":input-fast-seek");
-            }
+        public LibVlcPlayer()
+        {
+            // Lädt libvlc aus NuGet (z. B. VideoLAN.LibVLC.Windows)
+            VLC.Core.Initialize();
 
-            var ok = _mp.Play(_media);
+            // Optionale Log-Datei (hilfreich bei Supportfällen)
+            var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "stui-vlc.log");
+            try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
 
-            // WICHTIG: kein optimistisches „spielend“
-            State.IsPlaying = false;              // bleibt „Loading“ bis erstes Time/Len-Signal
-            State.Position  = TimeSpan.Zero;
-            State.Length    = null;
+            // Runtime-Optionen: leise + robuste Netzwerk-Buffer
+            var opts = new[]
+            {
+                "--no-video",
+                "--no-video-title-show",
+                "--quiet","--verbose=0","--no-color",
+                "--no-xlib",
+                "--input-fast-seek",
+                "--file-caching=1000",
+                "--network-caching=2000",
+                "--tcp-caching=1200",
+                "--http-reconnect",
+                "--file-logging", $"--logfile={logPath}"
+            };
+
+            _lib = new VLC.LibVLC(opts);
+            _mp = new VLC.MediaPlayer(_lib);
+
+            // Events verdrahten
+            _mp.Playing += OnPlaying;
+            _mp.TimeChanged += OnTimeChanged;
+            _mp.LengthChanged += OnLengthChanged;
+            _mp.EndReached += OnEndReached;
+            _mp.EncounteredError += OnEncounteredError;
+            _mp.Stopped += (_, __) => { lock (_sync) { State.IsPlaying = false; SafeFire(); } };
+
+            // Startzustand
+            try { _mp.Volume = Math.Clamp(State.Volume0_100, 0, 100); } catch { }
+            try { _mp.SetRate((float)Math.Clamp(State.Speed, 0.25, 3.0)); } catch { }
             State.Capabilities = Capabilities;
-            SafeFire();
 
-            if (!ok) {
-                Log.Debug("[#{sid}] _mp.Play returned false");
+            Log.Information("LibVLC initialized (nuget runtimes)");
+        }
+
+        public void Play(string url, long? startMs = null)
+        {
+            lock (_sync)
+            {
+                _sessionId++;
+                var sid = _sessionId;
+                Log.Information("[#{sid}] Play {url} (startMs={startMs})", sid, url, startMs);
+
+                _ready = false;
+
+                try { if (_mp.IsPlaying) _mp.Stop(); } catch { /* robust */ }
+                SafeDisposeMediaLocked(sid);
+
+                _pendingSeekMs = (startMs is > 0) ? startMs : null;
+
+                _media = CreateMedia(_lib, url);
+
+                // Hint für Startoffset (manche Inputs springen so schneller)
+                if (_pendingSeekMs is long ms && ms >= 1000)
+                {
+                    var secs = (int)(ms / 1000);
+                    try
+                    {
+                        _media.AddOption($":start-time={secs}");
+                        _media.AddOption(":input-fast-seek");
+                    }
+                    catch { /* optional */ }
+                }
+
+                var ok = _mp.Play(_media);
+
+                // Sichtbar: erst „Loading“, bis echte Signale eintreffen
+                State.IsPlaying = false;
+                State.Position = TimeSpan.Zero;
+                State.Length = null;
+                State.Capabilities = Capabilities;
+                SafeFire();
+
+                if (!ok)
+                    Log.Debug("[#{sid}] _mp.Play returned false");
             }
         }
-    }
 
-    public void TogglePause() {
-        lock (_sync) {
-            try {
-                if (_mp.CanPause) {
-                    _mp.Pause();
+        public void TogglePause()
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    if (_mp.CanPause) _mp.Pause();
+                    else _mp.Play();
+
+                    State.IsPlaying = _mp.IsPlaying;
                 }
-                else {
-                    _mp.Play();
+                catch { /* robust */ }
+
+                SafeFire();
+            }
+        }
+
+        public void SeekRelative(TimeSpan delta)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    var target = State.Position + delta;
+                    if (target < TimeSpan.Zero) target = TimeSpan.Zero;
+                    SeekTo(target);
                 }
-                // Defensiv: Status aus VLC erfragen (nicht blind toggeln)
-                State.IsPlaying = _mp.IsPlaying;
-            } catch { /* robust bleiben */ }
-            SafeFire();
+                catch { /* ignore */ }
+            }
         }
-    }
 
-    public void SeekRelative(TimeSpan delta) {
-        lock (_sync) {
-            try {
-                var target = State.Position + delta;
-                if (target < TimeSpan.Zero) target = TimeSpan.Zero;
-                SeekTo(target);
-            } catch { /* ignore */ }
-        }
-    }
-
-    public void SeekTo(TimeSpan position) {
-        lock (_sync) {
-            try {
-                var ms = (long)Math.Max(0, position.TotalMilliseconds);
-                if (_mp.IsSeekable) {
-                    _mp.Time = ms;
-                } else {
-                    var len = _mp.Length;
-                    if (len > 0) {
-                        _mp.Position = Math.Clamp((float)ms / len, 0f, 1f);
+        public void SeekTo(TimeSpan position)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    var ms = (long)Math.Max(0, position.TotalMilliseconds);
+                    if (_mp.IsSeekable)
+                    {
+                        _mp.Time = ms;
+                    }
+                    else
+                    {
+                        var len = _mp.Length;
+                        if (len > 0)
+                            _mp.Position = Math.Clamp((float)ms / len, 0f, 1f);
                     }
                 }
-            } catch { /* ignore */ }
-        }
-    }
-
-    public void SetVolume(int vol0to100) {
-        lock (_sync) {
-            try {
-                var v = Math.Clamp(vol0to100, 0, 100);
-                _mp.Volume = v;
-                State.Volume0_100 = v;
-            } catch { /* ignore */ }
-            SafeFire();
-        }
-    }
-
-    public void SetSpeed(double speed) {
-        lock (_sync) {
-            try {
-                var s = Math.Clamp(speed, 0.25, 3.0);
-                _mp.SetRate((float)s);
-                State.Speed = s;
-            } catch { /* ignore */ }
-            SafeFire();
-        }
-    }
-
-    public void Stop() {
-        lock (_sync) {
-            try {
-                if (_mp.IsPlaying) _mp.Stop();
-            } catch { /* ignore */ }
-
-            SafeDisposeMediaLocked(_sessionId);
-
-            State.IsPlaying = false;
-            SafeFire();
-        }
-    }
-
-    public void Dispose() {
-        try {
-            Stop();
-            _mp.Dispose();
-            _lib.Dispose();
-        } catch { /* ignore */ }
-    }
-
-    // == intern ==
-
-    private static VLC.Media CreateMedia(VLC.LibVLC lib, string input) {
-        // 1) Gültige URL?
-        if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme)) {
-            // http(s)/… → Location
-            return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
+                catch { /* ignore */ }
+            }
         }
 
-        // 2) Andernfalls evtl. lokaler Pfad?
-        if (File.Exists(input))
-            return new VLC.Media(lib, input, VLC.FromType.FromPath);
-
-        // 3) Fallback: als Location versuchen (VLC ist tolerant)
-        return new VLC.Media(lib, input, VLC.FromType.FromLocation);
-    }
-
-    private void SafeDisposeMediaLocked(int sid) {
-        try { _media?.Dispose(); } catch (Exception ex) { Log.Debug(ex, "[#{sid}] media.Dispose"); }
-        _media = null;
-    }
-
-    private void OnPlaying(object? _, EventArgs __) {
-        lock (_sync) {
-            try {
-                // Startoffset nachreichen (einmalig), stabiler nach „Playing“
-                var want = _pendingSeekMs;
-                _pendingSeekMs = null;
-                if (want is long ms && ms > 0) {
-                    try {
-                        if (_mp.IsSeekable) _mp.Time = ms;
-                        else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
-                    } catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
+        public void SetVolume(int vol0to100)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    var v = Math.Clamp(vol0to100, 0, 100);
+                    _mp.Volume = v;
+                    State.Volume0_100 = v;
                 }
+                catch { /* ignore */ }
 
-                // Ready-Gate (wenn Playing + irgendeine sinnvolle Info vorhanden)
-                if (!_ready) {
+                SafeFire();
+            }
+        }
+
+        public void SetSpeed(double speed)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    var s = Math.Clamp(speed, 0.25, 3.0);
+                    _mp.SetRate((float)s);
+                    State.Speed = s;
+                }
+                catch { /* ignore */ }
+
+                SafeFire();
+            }
+        }
+
+        public void Stop()
+        {
+            lock (_sync)
+            {
+                try { if (_mp.IsPlaying) _mp.Stop(); } catch { }
+                SafeDisposeMediaLocked(_sessionId);
+
+                State.IsPlaying = false;
+                SafeFire();
+            }
+        }
+
+        public void Dispose()
+        {
+            try { Stop(); } catch { }
+            try { _mp.Dispose(); } catch { }
+            try { _lib.Dispose(); } catch { }
+        }
+
+        // ----------------- intern -----------------
+
+        private static VLC.Media CreateMedia(VLC.LibVLC lib, string input)
+        {
+            // 1) Echte URL?
+            if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme))
+                return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
+
+            // 2) Lokaler Pfad?
+            if (File.Exists(input))
+                return new VLC.Media(lib, input, VLC.FromType.FromPath);
+
+            // 3) Fallback: als Location versuchen
+            return new VLC.Media(lib, input, VLC.FromType.FromLocation);
+        }
+
+        private void SafeDisposeMediaLocked(int sid)
+        {
+            try { _media?.Dispose(); }
+            catch (Exception ex) { Log.Debug(ex, "[#{sid}] media.Dispose"); }
+            _media = null;
+        }
+
+        private void OnPlaying(object? _, EventArgs __)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    // Pending-Seek einmalig nachreichen (stabil nach Playing)
+                    var want = _pendingSeekMs;
+                    _pendingSeekMs = null;
+                    if (want is long ms && ms > 0)
+                    {
+                        try
+                        {
+                            if (_mp.IsSeekable) _mp.Time = ms;
+                            else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
+                        }
+                        catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
+                    }
+
+                    if (!_ready)
+                    {
+                        var len = _mp.Length;
+                        var pos = _mp.Time;
+                        if (len > 0 || pos > 0)
+                        {
+                            _ready = true;
+                            State.IsPlaying = true;
+                            SafeFire();
+                        }
+                    }
+                }
+                catch (Exception ex) { Log.Debug(ex, "OnPlaying"); }
+            }
+        }
+
+        private void OnTimeChanged(object? _, VLC.MediaPlayerTimeChangedEventArgs e)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    State.Position = TimeSpan.FromMilliseconds(e.Time);
+
                     var len = _mp.Length;
-                    var pos = _mp.Time;
-                    if ((len > 0) || (pos > 0)) {
+                    if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+
+                    if (!_ready && (e.Time > 0 || len > 0))
+                    {
                         _ready = true;
                         State.IsPlaying = true;
-                        SafeFire();
                     }
+
+                    // nahe Ende: wenn nicht (mehr) playing und Zeit ≈ Länge
+                    if (len > 0 && !_mp.IsPlaying && e.Time >= Math.Max(0, len - 250))
+                        State.IsPlaying = false;
+
+                    SafeFire();
                 }
-            } catch (Exception ex) { Log.Debug(ex, "OnPlaying"); }
+                catch (Exception ex) { Log.Debug(ex, "OnTimeChanged"); }
+            }
         }
-    }
 
-    private void OnTimeChanged(object? _, VLC.MediaPlayerTimeChangedEventArgs e) {
-        lock (_sync) {
-            try {
-                State.Position = TimeSpan.FromMilliseconds(e.Time);
+        private void OnLengthChanged(object? _, VLC.MediaPlayerLengthChangedEventArgs e)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    State.Length = e.Length > 0
+                        ? TimeSpan.FromMilliseconds(e.Length)
+                        : (TimeSpan?)null;
 
-                var len = _mp.Length;
-                if (len > 0) State.Length = TimeSpan.FromMilliseconds(len);
+                    if (!_ready && e.Length > 0)
+                        State.IsPlaying = _ready = true;
 
-                // Ready-Gate: erstes echtes Fortschrittssignal
-                if (!_ready && (e.Time > 0 || len > 0)) {
-                    _ready = true;
-                    State.IsPlaying = true;
+                    SafeFire();
                 }
+                catch (Exception ex) { Log.Debug(ex, "OnLengthChanged"); }
+            }
+        }
 
-                // Nahe Ende: wenn Player-Länge bekannt und *nicht mehr spielend*,
-                // und Position >= len - 250ms, dann IsPlaying=false setzen
-                if (len > 0 && !_mp.IsPlaying && e.Time >= Math.Max(0, len - 250)) {
+        private void OnEndReached(object? _, EventArgs __)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    var len = _mp.Length;
+                    if (len > 0)
+                    {
+                        State.Length = TimeSpan.FromMilliseconds(len);
+                        State.Position = TimeSpan.FromMilliseconds(len);
+                    }
                     State.IsPlaying = false;
+                    SafeFire();
                 }
-
-                SafeFire();
-            } catch (Exception ex) { Log.Debug(ex, "OnTimeChanged"); }
+                catch (Exception ex) { Log.Debug(ex, "OnEndReached"); }
+            }
         }
-    }
 
-    private void OnLengthChanged(object? _, VLC.MediaPlayerLengthChangedEventArgs e) {
-        lock (_sync) {
-            try {
-                State.Length = e.Length > 0 ? TimeSpan.FromMilliseconds(e.Length) : (TimeSpan?)null;
-
-                // Ready-Gate: Länge bekannt → wir haben „echte“ Info
-                if (!_ready && e.Length > 0) {
-                    _ready = true;
-                    State.IsPlaying = _mp.IsPlaying; // wenn Playing-Event vorher kam, greift das; sonst bleibt evtl. false bis TimeChanged
+        private void OnEncounteredError(object? _, EventArgs __)
+        {
+            lock (_sync)
+            {
+                try
+                {
+                    State.IsPlaying = false;
+                    SafeFire();
                 }
-
-                SafeFire();
-            } catch (Exception ex) { Log.Debug(ex, "OnLengthChanged"); }
+                catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
+            }
         }
-    }
 
-    private void OnEndReached(object? _, EventArgs __) {
-        lock (_sync) {
-            try {
-                var len = _mp.Length;
-                if (len > 0) {
-                    State.Length   = TimeSpan.FromMilliseconds(len);
-                    State.Position = TimeSpan.FromMilliseconds(len);
-                }
-                State.IsPlaying = false;
-                SafeFire();
-            } catch (Exception ex) { Log.Debug(ex, "OnEndReached"); }
+        private void SafeFire()
+        {
+            try { StateChanged?.Invoke(State); } catch { /* UI darf Player nicht crashen */ }
         }
-    }
-
-    private void OnEncounteredError(object? _, EventArgs __) {
-        lock (_sync) {
-            try {
-                State.IsPlaying = false;
-                SafeFire();
-            } catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
-        }
-    }
-
-    private void SafeFire()
-    {
-        try { StateChanged?.Invoke(State); } catch { /* UI darf Player nicht crashen */ }
-    }
-
-    private static string[] MergeOpts(string[] a, string[] b)
-    {
-        if (a == null || a.Length == 0) return b ?? Array.Empty<string>();
-        if (b == null || b.Length == 0) return a;
-        var res = new string[a.Length + b.Length];
-        Array.Copy(a, 0, res, 0, a.Length);
-        Array.Copy(b, 0, res, a.Length, b.Length);
-        return res;
     }
 }

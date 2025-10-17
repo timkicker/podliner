@@ -6,9 +6,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="LibVLCSharp" Version="3.8.4" />
     <PackageReference Include="Serilog" Version="4.3.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
-    <PackageReference Include="Terminal.Gui" Version="1.19.0" />
+    <PackageReference Include="Terminal.Gui" Version="1.14.0" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
   </ItemGroup>
 
   <PropertyGroup>
