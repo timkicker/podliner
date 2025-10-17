@@ -47,13 +47,21 @@ namespace StuiPodcast.App
         public static readonly List<CmdHelp> Commands = new()
         {
             new(":add", "Add a new podcast feed by RSS/Atom URL.",
-                "<rss-url>", Examples: new[]{ ":add https://example.com/feed.xml" }),
+                "<rss-url>",
+                Aliases: new[]{ ":a" },
+                Examples: new[]{ ":add https://example.com/feed.xml", ":a https://example.com/feed.xml" }),
 
-            new(":refresh", "Refresh all feeds.", Aliases: new[]{":update"}),
+            new(":refresh", "Refresh all feeds.",
+                Aliases: new[]{ ":update", ":r" },
+                Examples: new[]{ ":refresh", ":r" }),
 
-            new(":q", "Quit application.", Aliases: new[]{":quit"}),
+            new(":quit", "Quit application.",
+                Aliases: new[]{ ":q" },
+                Examples: new[]{ ":quit", ":q" }),
 
-            new(":h", "Show this help.", Aliases: new[]{":help"}),
+            new(":help", "Show this help.",
+                Aliases: new[]{ ":h" },
+                Examples: new[]{ ":help", ":h" }),
 
             new(":logs", "Show logs overlay (tail).",
                 "[N]", Examples: new[]{ ":logs", ":logs 1000" }),
@@ -73,8 +81,23 @@ namespace StuiPodcast.App
             new(":save", "Toggle or set 'saved' (★) for selected episode.",
                 "[on|off|true|false|+|-]"),
 
-            new(":dl", "Mark/Unmark for download (auto-queued).",
-                "[start|cancel]", Aliases: new[]{":download"}),
+            // Primär: Langform, Kurzform nur als Alias
+            new(":download", "Mark/Unmark for download (auto-queued).",
+                "[start|cancel]",
+                Aliases: new[]{ ":dl" },
+                Examples: new[]{ ":download", ":download start", ":dl", ":dl cancel" }),
+
+            new(":downloads", "Downloads overview & actions.",
+                "[retry-failed]",
+                Examples: new[]{ ":downloads", ":downloads retry-failed" }),
+
+            new(":open", "Open episode website or audio in system default.",
+                "[site|audio]",
+                Examples: new[]{ ":open", ":open site", ":open audio" }),
+
+            new(":copy", "Copy episode info to clipboard (fallback: OSD).",
+                "url|title|guid",
+                Examples: new[]{ ":copy", ":copy url", ":copy title", ":copy guid" }),
 
             new(":player", "Place the player bar.",
                 "[top|bottom|toggle]"),
@@ -102,16 +125,18 @@ namespace StuiPodcast.App
             new(":goto", "Select absolute list position.",
                 "top|start|bottom|end"),
 
+            // Diese drei haben keine „Langform“ – daher bleiben sie primär in Kurzform.
             new(":zt / :zz / :zb", "Vim-style list positioning (top/center/bottom).",
                 Aliases: new[]{":H",":M",":L"}),
 
-            new(":rm-feed", "Remove the currently selected feed.",
-                Aliases: new[]{":remove-feed", ":feed remove"}),
+            new(":remove-feed", "Remove the currently selected feed.",
+                Aliases: new[]{ ":rm-feed", ":feed remove" },
+                Examples: new[]{ ":remove-feed", ":rm-feed" }),
 
             // Playback engine
             new(":engine", "Select or inspect playback engine.",
-                "[show|help|auto|vlc|mpv|ffplay]",
-                Examples: new[]{ ":engine", ":engine mpv", ":engine help" }),
+                "[show|help|auto|vlc|mpv|ffplay|diag]",
+                Examples: new[]{ ":engine", ":engine mpv", ":engine help", ":engine diag" }),
 
             // OPML (Import/Export)
             new(":opml", "Import or export OPML (feed migration).",
@@ -145,6 +170,7 @@ Switching engines
   :engine help      → show this guide
   :engine auto      → prefer VLC → MPV → FFplay
   :engine vlc|mpv|ffplay → set preference
+  :engine diag      → show active engine name, capabilities, preference & last-used
 
 Notes
   - On FFplay, ':seek' restarts playback from the new position ('coarse seek').

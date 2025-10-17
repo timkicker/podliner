@@ -55,6 +55,10 @@ static class CommandRouter
             case TopCommand.Osd:          ExecOsd(args, ui); return;
             case TopCommand.Opml:         ExecOpml(args, ui, data, persist); return;
             case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine); return;
+            
+            case TopCommand.Open:  ExecOpen(args, ui, data); return;
+            case TopCommand.Copy:  ExecCopy(args, ui, data); return;
+
 
             // Playback & Player
             case TopCommand.Toggle:
@@ -179,13 +183,22 @@ static class CommandRouter
         Save, Sort, Filter, PlayerBar,
         Net, PlaySource,
         AddFeed, Refresh, RemoveFeed, Feed,
-        History, Opml
+        History, Opml, Open, Copy
     }
 
     private static TopCommand MapTop(string cmd)
     {
         if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
         if (cmd.StartsWith(":opml",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;  // <-- NEU
+        
+        // Aliases
+        if (cmd.Equals(":a", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
+        if (cmd.Equals(":r", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
+
+// Neue Commands
+        if (cmd.StartsWith(":open", StringComparison.OrdinalIgnoreCase)) return TopCommand.Open;
+        if (cmd.StartsWith(":copy", StringComparison.OrdinalIgnoreCase)) return TopCommand.Copy;
+
         
         cmd = cmd?.Trim() ?? "";
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
@@ -257,6 +270,41 @@ static class CommandRouter
         Func<string, Task>? switchEngine = null)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        
+        // :engine diag  (robuster, null-safe, ohne HasFlag)
+        if (args.Length > 0 && string.Equals(args[0], "diag", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var activeName = player?.Name;
+                if (string.IsNullOrWhiteSpace(activeName))
+                    activeName = player?.GetType().Name ?? "none";
+
+                var caps = player?.Capabilities ?? 0;
+
+                // lieber bitweise prüfen (robuster als HasFlag bei evtl. nicht-[Flags]-Enums)
+                bool cSeek   = (caps & PlayerCapabilities.Seek)   != 0;
+                bool cPause  = (caps & PlayerCapabilities.Pause)  != 0;
+                bool cSpeed  = (caps & PlayerCapabilities.Speed)  != 0;
+                bool cVolume = (caps & PlayerCapabilities.Volume) != 0;
+
+                var pref = string.IsNullOrWhiteSpace(data?.PreferredEngine) ? "auto" : data!.PreferredEngine!;
+                var last = data?.LastEngineUsed ?? "";
+
+                // kompakt & OSD-freundlich
+                ui.ShowOsd(
+                    $"engine: {activeName}  caps: seek={cSeek} pause={cPause} speed={cSpeed} vol={cVolume}  pref={pref} last={last}",
+                    3000
+                );
+            }
+            catch (Exception ex)
+            {
+                ui.ShowOsd($"engine: diag error ({ex.Message})", 2000);
+            }
+            return;
+        }
+
+
 
         if (string.IsNullOrEmpty(arg) || arg == "show")
         {
@@ -857,59 +905,97 @@ static class CommandRouter
     }
 
     public static bool HandleDownloads(
-        string cmd,
-        Shell ui,
-        AppData data,
-        DownloadManager dlm,
-        Func<Task> saveAsync)
+    string cmd,
+    Shell ui,
+    AppData data,
+    DownloadManager dlm,
+    Func<Task> saveAsync)
+{
+    cmd = (cmd ?? "").Trim();
+
+    // --- :downloads (Summary / retry-failed) ---
+    if (cmd.StartsWith(":downloads", StringComparison.OrdinalIgnoreCase))
     {
-        cmd = (cmd ?? "").Trim();
-        if (!cmd.StartsWith(":dl", StringComparison.OrdinalIgnoreCase)
-            && !cmd.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
-            return false;
+        var dparts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);   // <-- war: parts
+        var sub = (dparts.Length > 1 ? dparts[1].ToLowerInvariant() : "");   // <-- war: parts
 
-        var ep = ui.GetSelectedEpisode();
-        if (ep == null) return true;
-
-        var parts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var arg = (parts.Length > 1 ? parts[1].ToLowerInvariant() : "");
-
-        switch (arg)
+        if (string.IsNullOrEmpty(sub))
         {
-            case "start":
-                dlm.ForceFront(ep.Id);
-                dlm.EnsureRunning();
-                ui.ShowOsd("Forced ⇣");
-                break;
+            var q = data.DownloadQueue.Count;
+            var running = data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Running);
+            var failed  = data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Failed);
+            ui.ShowOsd($"downloads: queue {q}, running {running}, failed {failed}", 1500);
+            return true;
+        }
 
-            case "cancel":
+        if (sub == "retry-failed")
+        {
+            int n = 0;
+            foreach (var (id, st) in data.DownloadMap.ToArray())
+            {
+                if (st.State == DownloadState.Failed)
+                {
+                    dlm.Enqueue(id);
+                    n++;
+                }
+            }
+            _ = saveAsync();
+            ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+            ui.ShowOsd($"downloads: retried {n} failed", 1500);
+            return true;
+        }
+
+        ui.ShowOsd("downloads: retry-failed", 1200);
+        return true;
+    }
+
+    if (!cmd.StartsWith(":dl", StringComparison.OrdinalIgnoreCase)
+        && !cmd.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
+        return false;
+
+    var ep = ui.GetSelectedEpisode();
+    if (ep == null) return true;
+
+    var dlParts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);     // <-- war: parts
+    var arg = (dlParts.Length > 1 ? dlParts[1].ToLowerInvariant() : "");    // <-- war: parts
+
+    switch (arg)
+    {
+        case "start":
+            dlm.ForceFront(ep.Id);
+            dlm.EnsureRunning();
+            ui.ShowOsd("Forced ⇣");
+            break;
+
+        case "cancel":
+            dlm.Cancel(ep.Id);
+            data.DownloadMap.Remove(ep.Id);
+            data.DownloadQueue.RemoveAll(x => x == ep.Id);
+            ui.ShowOsd("Canceled");
+            break;
+
+        default:
+            var st = dlm.GetState(ep.Id);
+            if (st == DownloadState.None || st == DownloadState.Canceled || st == DownloadState.Failed)
+            {
+                dlm.Enqueue(ep.Id);
+                ui.ShowOsd("Queued ⌵");
+            }
+            else
+            {
                 dlm.Cancel(ep.Id);
                 data.DownloadMap.Remove(ep.Id);
                 data.DownloadQueue.RemoveAll(x => x == ep.Id);
-                ui.ShowOsd("Canceled");
-                break;
-
-            default:
-                var st = dlm.GetState(ep.Id);
-                if (st == DownloadState.None || st == DownloadState.Canceled || st == DownloadState.Failed)
-                {
-                    dlm.Enqueue(ep.Id);
-                    ui.ShowOsd("Queued ⌵");
-                }
-                else
-                {
-                    dlm.Cancel(ep.Id);
-                    data.DownloadMap.Remove(ep.Id);
-                    data.DownloadQueue.RemoveAll(x => x == ep.Id);
-                    ui.ShowOsd("Unqueued");
-                }
-                break;
-        }
-
-        _ = saveAsync();
-        ui.RefreshEpisodesForSelectedFeed(data.Episodes);
-        return true;
+                ui.ShowOsd("Unqueued");
+            }
+            break;
     }
+
+    _ = saveAsync();
+    ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+    return true;
+}
+
 
     static void SelectAbsolute(int index, Shell ui, AppData data)
     {
@@ -1148,6 +1234,150 @@ static class CommandRouter
         if (int.TryParse(arg, out var n) && n > 0) tail = Math.Min(n, 5000);
         ui.ShowLogsOverlay(tail);
     }
+    
+    private static void ExecOpen(string[] args, Shell ui, AppData data)
+{
+    var mode = (args.Length > 0 ? args[0] : "site").Trim().ToLowerInvariant(); // "site" (default) | "audio"
+    var ep = ui.GetSelectedEpisode();
+    if (ep == null) { ui.ShowOsd("no episode selected"); return; }
+
+    string? url = null;
+
+    if (mode == "audio")
+    {
+        url = ep.AudioUrl;
+    }
+    else // site
+    {
+        // 1) Episode-Seite
+        url = GetPropString(ep, "Link", "PageUrl", "Website", "WebsiteUrl", "HtmlUrl");
+        // 2) Feed-Seite
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            var feed = data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+            url = GetPropString(feed, "Link", "Website", "WebsiteUrl", "HtmlUrl", "Home");
+        }
+        // 3) Fallback: Audio
+        if (string.IsNullOrWhiteSpace(url))
+            url = ep.AudioUrl;
+    }
+
+    if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("no URL to open"); return; }
+
+    if (!TryOpenSystem(url))
+        ui.ShowOsd(url, 2000); // Fallback: URL anzeigen
+}
+
+private static bool TryOpenSystem(string url)
+{
+    try
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true };
+            System.Diagnostics.Process.Start(psi);
+            return true;
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("open", url) { UseShellExecute = false });
+            return true;
+        }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("xdg-open", url) { UseShellExecute = false });
+        return true;
+    }
+    catch { return false; }
+}
+
+private static string? GetPropString(object? obj, params string[] names)
+{
+    if (obj == null) return null;
+    var t = obj.GetType();
+    foreach (var n in names)
+    {
+        var p = t.GetProperty(n, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+        if (p != null && p.PropertyType == typeof(string))
+        {
+            var v = (string?)p.GetValue(obj);
+            if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+        }
+    }
+    return null;
+}
+
+private static void ExecCopy(string[] args, Shell ui, AppData data)
+{
+    var what = (args.Length > 0 ? args[0] : "url").Trim().ToLowerInvariant(); // url|title|guid
+    var ep = ui.GetSelectedEpisode();
+    if (ep == null) { ui.ShowOsd("no episode selected"); return; }
+
+    string? text = what switch
+    {
+        "title" => ep.Title ?? "",
+        "guid"  => GetPropString(ep, "Guid", "EpisodeGuid") ?? ep.Id.ToString(),
+        _       => ep.AudioUrl ?? ""
+    };
+
+    if (string.IsNullOrWhiteSpace(text)) { ui.ShowOsd("nothing to copy"); return; }
+
+    if (TryCopyToClipboard(text))
+        ui.ShowOsd("copied", 800);
+    else
+        ui.ShowOsd(text, 3000);
+}
+
+private static bool TryCopyToClipboard(string text)
+{
+    try
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("powershell", $"-NoProfile -Command Set-Clipboard -Value @'\n{text}\n'@")
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            p?.WaitForExit(1200);
+            return p != null && p.ExitCode == 0;
+        }
+        if (OperatingSystem.IsMacOS())
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("pbcopy")
+            {
+                UseShellExecute = false,
+                RedirectStandardInput = true
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            p!.StandardInput.Write(text);
+            p.StandardInput.Close();
+            p.WaitForExit(800);
+            return true;
+        }
+        foreach (var tool in new[] { "xclip", "xsel" })
+        {
+            try
+            {
+                var psi = tool == "xclip"
+                    ? new System.Diagnostics.ProcessStartInfo("xclip", "-selection clipboard")
+                    : new System.Diagnostics.ProcessStartInfo("xsel", "--clipboard --input");
+                psi.UseShellExecute = false;
+                psi.RedirectStandardInput = true;
+                using var p = System.Diagnostics.Process.Start(psi);
+                p!.StandardInput.Write(text);
+                p.StandardInput.Close();
+                p.WaitForExit(800);
+                return true;
+            }
+            catch { /* try next */ }
+        }
+    }
+    catch { /* fallthrough */ }
+    return false;
+}
+
+
 
     static void DlToggle(string arg, Shell ui, AppData data, Func<Task> persist)
     {
