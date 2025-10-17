@@ -28,6 +28,9 @@ public sealed class Shell
     private static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
     private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157"); // ⏱ History
     private static readonly Guid FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE"); // ⧉ Queue
+    private static readonly Guid FEED_SEPARATOR = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
+    private static bool IsSeparator(Guid? id) => id is Guid g && g == FEED_SEPARATOR;
+
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
@@ -117,11 +120,20 @@ public sealed class Shell
 
         _feedsPane.SelectedChanged += () =>
         {
+            // Wenn Separator angeklickt / fokussiert wurde → sofort weiter springen
+            var selId = _feedsPane.GetSelectedFeedId();
+            if (IsSeparator(selId) && _feedsPane.List is { } lv)
+            {
+                var next = Math.Min(lv.SelectedItem + 1, (lv.Source?.Count ?? 1) - 1);
+                lv.SelectedItem = next;
+            }
+
             if (_activePane == Pane.Feeds)
                 RefreshListVisual(_feedsPane.List);
+
             SelectedFeedChanged?.Invoke();
         };
-        _feedsPane.OpenRequested += () => FocusPane(Pane.Episodes);
+
 
         // --- Right Root + EpisodesPane ---
         _rightRoot = new View { X = Pos.Right(_feedsPane.Frame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
@@ -210,25 +222,39 @@ public sealed class Shell
         UI(() =>
         {
             _feeds.Clear();
-            _feeds.AddRange(PrependVirtual(feeds));
+            _feeds.AddRange(BuildFeedsWithBarrier(feeds));
+
+            // ...
             _feedsPane?.SetFeeds(_feeds);
-            _episodesPane?.SetFeedsMeta(_feeds);
 
-            if (_feeds.Count == 0) return;
-
-            var idx = 0;
+// Startauswahl bestimmen
+            int idx = 0;
             if (selectId is Guid gid)
             {
                 var j = _feeds.FindIndex(f => f.Id == gid);
                 if (j >= 0) idx = j;
             }
+
+// Falls Barriere getroffen → auf die nächste gültige Zeile springen
+            if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
+            {
+                idx = Math.Min(idx + 1, _feeds.Count - 1);
+            }
+
             _feedsPane?.List?.SetSelectedItemIfPresent(idx);
+// ...
+
 
             if (_activePane == Pane.Feeds && _feedsPane?.List is { } lv) RefreshListVisual(lv);
         });
     }
 
-    public Guid? GetSelectedFeedId() => _feedsPane?.GetSelectedFeedId();
+    public Guid? GetSelectedFeedId()
+    {
+        var id = _feedsPane?.GetSelectedFeedId();
+        return IsSeparator(id) ? (Guid?)null : id;
+    }
+
     public void SelectFeed(Guid id) => _feedsPane?.SelectFeed(id);
 
     public void RefreshEpisodesForSelectedFeed(IEnumerable<Episode> episodes)
@@ -695,10 +721,28 @@ public sealed class Shell
         var lv = (_activePane == Pane.Episodes) ? _episodesPane?.List : _feedsPane?.List;
         if (lv?.Source?.Count > 0)
         {
-            lv.SelectedItem = Math.Clamp(lv.SelectedItem + delta, 0, lv.Source.Count - 1);
+            int target = Math.Clamp(lv.SelectedItem + delta, 0, lv.Source.Count - 1);
+
+            // Wenn wir im Feeds-Pane sind, skippen wir die Barriere
+            if (_activePane == Pane.Feeds && _feedsPane != null)
+            {
+                // Iteriere maximal ein paar Schritte, falls delta groß war
+                int guard = 3;
+                while (guard-- > 0)
+                {
+                    var feed = _feeds.ElementAtOrDefault(target);
+                    if (feed?.Id == FEED_SEPARATOR)
+                        target = Math.Clamp(target + Math.Sign(delta), 0, lv.Source.Count - 1);
+                    else
+                        break;
+                }
+            }
+
+            lv.SelectedItem = target;
             RefreshListVisual(lv);
         }
     }
+
 
     private void FocusPane(Pane p)
     {
@@ -774,8 +818,9 @@ public sealed class Shell
         _episodesPane?.EmptyHint?.SetNeedsDisplay();
     }
 
-    private static IEnumerable<Feed> PrependVirtual(IEnumerable<Feed> feeds)
+    private static IEnumerable<Feed> BuildFeedsWithBarrier(IEnumerable<Feed> realFeeds)
     {
+        // Virtuelle Feeds (oben)
         var virt = new List<Feed>
         {
             new Feed { Id = FEED_ALL,        Title = "All Episodes" },
@@ -784,8 +829,16 @@ public sealed class Shell
             new Feed { Id = FEED_QUEUE,      Title = "⧉ Queue" },
             new Feed { Id = FEED_HISTORY,    Title = "⏱ History" },
         };
-        return virt.Concat(feeds ?? Enumerable.Empty<Feed>());
+
+        // Barriere
+        var barrier = new Feed { Id = FEED_SEPARATOR, Title = "────────" };
+
+        // Reihenfolge: virtuelle → Barriere → reale
+        var reals = (realFeeds ?? Enumerable.Empty<Feed>()).ToList();
+        return virt.Concat(new[] { barrier }).Concat(reals);
     }
+
+
 
     public void SetQueueOrder(IReadOnlyList<Guid> ids) => _episodesPane?.SetQueueOrder(ids);
 
