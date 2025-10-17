@@ -88,6 +88,15 @@ public sealed class Shell
     public void RequestRefresh()           => _ = RefreshRequested?.Invoke();
     public void RequestQuit()              => QuitRequested?.Invoke();
 
+    
+// Shell.cs – irgendwo bei den Public helpers:
+    public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
+    {
+        UI(() => _player?.SetLoading(on, text, baseline));
+    }
+
+
+    
     public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
     public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "Refreshed ✓" : "Refreshing…");
 

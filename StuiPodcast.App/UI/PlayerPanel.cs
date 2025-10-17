@@ -43,6 +43,72 @@ internal sealed class PlayerPanel : FrameView
     private const int   DragThrottleMs   = 90;     // min interval between emits while dragging
     private const float ProgressDeltaMin = 0.01f;  // min fraction change (~1%) to emit
     private const float VolumeDeltaMin   = 0.02f;  // 2% volume step to emit
+    
+    // PlayerPanel.cs (oben in der Klasse)
+    private bool _isLoading;
+    private string _loadingText = "Loading…";
+    private TimeSpan _loadingBaseline = TimeSpan.Zero;
+    private DateTime _loadingSinceUtc = DateTime.MinValue;
+
+// Tuning
+    private static readonly TimeSpan LoadingAdvanceThreshold = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan LoadingMinVisible       = TimeSpan.FromMilliseconds(300);
+
+// optional: letzte bekannte Pos für Baseline-Fallback
+    private TimeSpan _lastPosSnapshot = TimeSpan.Zero;
+
+
+// öffentlich:
+    // PlayerPanel.cs – öffentliches API (unter Build()):
+    public void SetLoading(bool on, string? text = null, TimeSpan? baseline = null)
+    {
+        _isLoading = on;
+        if (!string.IsNullOrWhiteSpace(text))
+            _loadingText = text!;
+        if (on)
+        {
+            _loadingSinceUtc = DateTime.UtcNow;
+            _loadingBaseline = baseline ?? _lastPosSnapshot; // Startpunkt merken
+        }
+        UpdateLoadingVisuals();
+    }
+
+    private void ClearLoadingIfAdvanced(TimeSpan currentPos)
+    {
+        if (!_isLoading) return;
+
+        var advanced = (currentPos > _loadingBaseline + LoadingAdvanceThreshold);
+        var minTime  = (DateTime.UtcNow - _loadingSinceUtc) >= LoadingMinVisible;
+
+        if (advanced && minTime)
+        {
+            _isLoading = false;
+            UpdateLoadingVisuals();
+        }
+    }
+
+    private void UpdateLoadingVisuals()
+    {
+        var isUnicode = GlyphSet.Current == GlyphSet.Profile.Unicode;
+
+        if (_isLoading)
+        {
+            BtnPlayPause.Text   = _loadingText;
+            BtnPlayPause.Enabled = false;
+
+            var t = TimeLabel.Text?.ToString() ?? "";
+            if (!t.EndsWith(" ⌛") && !t.EndsWith(" …") && !t.EndsWith(" ⟳"))
+                TimeLabel.Text = t + (isUnicode ? " ⌛" : " …");
+        }
+        else
+        {
+            BtnPlayPause.Enabled = true; // Text stellt Render() wieder auf Play/Pause um
+        }
+
+        // -> sofort neu zeichnen
+        try { SetNeedsDisplay(); Application.Top?.SetNeedsDisplay(); } catch { }
+    }
+
 
     public PlayerPanel() : base("Player")
     {
@@ -66,7 +132,7 @@ internal sealed class PlayerPanel : FrameView
 
         const int gapL = 2;
         BtnBack10    = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "«10s" : "<10") { X = 2, Y = 2 };
-        BtnPlayPause = new Button("Play " + (GlyphSet.Current == GlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2 };
+        BtnPlayPause = new Button("Play " + (GlyphSet.Current == GlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2, Width = 12};
         BtnFwd10     = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "10s»" : "10>") { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
         BtnDownload  = new Button($"{GlyphSet.DownloadedMark} Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
 
@@ -201,6 +267,8 @@ internal sealed class PlayerPanel : FrameView
     private void RenderFromSnapshot(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
     {
         var pos = snap.Position < TimeSpan.Zero ? TimeSpan.Zero : snap.Position;
+        _lastPosSnapshot = pos;
+        ClearLoadingIfAdvanced(pos);
         var len = snap.Length   < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
         if (pos > len && len > TimeSpan.Zero) pos = len;
 
@@ -214,9 +282,18 @@ internal sealed class PlayerPanel : FrameView
         var lenStr = len == TimeSpan.Zero ? "--:--" : format(len);
 
         TimeLabel.Text    = $"{icon} {posStr} / {lenStr}  (-{format(rem)})";
-        BtnPlayPause.Text = snap.IsPlaying
-            ? (isUnicode ? "Pause ⏸" : "Pause ||")
-            : (isUnicode ? "Play ⏵"  : "Play >");
+
+        // <<< NEW: Loading-Logik automatisch zurücknehmen, sobald echte Wiedergabe anläuft
+        if (_isLoading && (snap.IsPlaying || pos > TimeSpan.Zero))
+            _isLoading = false;
+
+        // Button-Text hängt von Loading / Play/Pause ab
+        if (_isLoading)
+            BtnPlayPause.Text = _loadingText;
+        else
+            BtnPlayPause.Text = snap.IsPlaying
+                ? (isUnicode ? "Pause ⏸" : "Pause ||")
+                : (isUnicode ? "Play ⏵"  : "Play >");
 
         Progress.Fraction = (len.TotalMilliseconds > 0)
             ? Math.Clamp((float)(pos.TotalMilliseconds / len.TotalMilliseconds), 0f, 1f)
@@ -226,5 +303,9 @@ internal sealed class PlayerPanel : FrameView
         VolBar.Fraction  = v / 100f;
         VolPctLabel.Text = GlyphSet.VolumePercent(v);
         SpeedLabel.Text  = GlyphSet.SpeedLabel(snap.Speed);
+
+        // Button Enabled/Suffix sauber halten
+        UpdateLoadingVisuals();
     }
+
 }

@@ -53,7 +53,7 @@ namespace StuiPodcast.Infra
         public void Dispose()
         {
             try { Stop(); } catch { }
-            try { _worker?.Wait(250); } catch { }
+            // kein Wait/Join hier – lasst den Task enden
             try { _cts?.Dispose(); } catch { }
             lock (_gate)
             {
@@ -62,6 +62,7 @@ namespace StuiPodcast.Infra
             }
             _http.Dispose();
         }
+
 
         public void Enqueue(Guid episodeId)
         {

@@ -34,6 +34,8 @@ class Program
     const int SUCC_FOR_ONLINE   = 3;
     static DateTimeOffset _netLastFlip = DateTimeOffset.MinValue;
     static readonly TimeSpan _netMinDwell = TimeSpan.FromSeconds(15);
+    
+    
 
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
@@ -54,6 +56,7 @@ class Program
             }
         } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
     }
+    
 
     static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
     {
@@ -425,6 +428,8 @@ class Program
             var ep = UI.GetSelectedEpisode();
             if (ep == null || Player == null || Playback == null || UI == null) return;
 
+            
+            
             var curFeed = UI.GetSelectedFeedId();
 
             // Verlauf stempeln
@@ -453,6 +458,15 @@ class Program
             {
                 localPath = st.LocalPath;
             }
+            
+            bool isRemote =
+                string.IsNullOrWhiteSpace(localPath) &&           // kein lokaler Treffer
+                !string.IsNullOrWhiteSpace(ep.AudioUrl) &&
+                ep.AudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+
+            var baseline = TimeSpan.Zero;
+            try { baseline = Player?.State.Position ?? TimeSpan.Zero; } catch { }
+            UI.SetPlayerLoading(true, isRemote ? "Loading…" : "Opening…", baseline);
 
             var mode   = (Data.PlaySource ?? "auto").Trim().ToLowerInvariant();
             var online = Data.NetworkOnline;
@@ -466,6 +480,7 @@ class Program
 
             if (string.IsNullOrWhiteSpace(source))
             {
+                UI.SetPlayerLoading(false);
                 var msg = (localPath == null)
                     ? "∅ Offline: not downloaded"
                     : "No playable source";
@@ -479,6 +494,11 @@ class Program
             {
                 ep.AudioUrl = source;
                 Playback.Play(ep);
+            }
+            catch
+            {
+                UI.SetPlayerLoading(false);
+                throw;
             }
             finally
             {
@@ -498,24 +518,38 @@ class Program
                         var s = Player.State;
                         if (!s.IsPlaying && s.Position == TimeSpan.Zero)
                         {
-                            try { Player.Stop(); } catch { /* best effort */ }
+                            try
+                            {
+                                Player.Stop();
+                            }
+                            catch
+                            {
+                                /* best effort */
+                            }
 
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
                             var old = ep.AudioUrl;
                             try
                             {
-                                ep.AudioUrl = fileUri;   // nur für den Start
+                                ep.AudioUrl = fileUri; // nur für den Start
                                 Playback.Play(ep);
                                 UI.ShowOsd("Retry (file://)");
                             }
                             finally
                             {
-                                ep.AudioUrl = old;       // wieder zurück
+                                ep.AudioUrl = old; // wieder zurück
                             }
                         }
                     }
-                    catch { /* robust bleiben */ }
+                    catch
+                    {
+                        /* robust bleiben */
+                    }
+                    finally
+                    {
+
+                    }
 
                     return false; // one-shot
                 });
@@ -698,12 +732,16 @@ class Program
 
             try { Player?.Stop(); } catch { }
             (Player as IDisposable)?.Dispose();
+
+            try { Downloader?.Dispose(); } catch { }   // <--- NEU
+
             await SaveAsync();
             try { Application.Shutdown(); } catch { }
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }
             try { _probeHttp.Dispose(); } catch { }
         }
+
     }
 
     static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
@@ -933,18 +971,31 @@ class Program
     {
         if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
 
+        // 1) Hintergrundaktivitäten stoppen – NICHT warten
+        try { if (_netTimerToken is not null) Application.MainLoop?.RemoveTimeout(_netTimerToken); } catch { }
         try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
-        try { if (_netTimerToken is not null) Application.MainLoop.RemoveTimeout(_netTimerToken); } catch {}
 
-        try { (Player as IDisposable)?.Dispose(); } catch { }
+        try { Downloader?.Stop(); } catch { }     // lädt sofort keinen neuen Job mehr
+        try { Player?.Stop(); } catch { }         // Player stoppen, aber nicht dispose’n
 
-        try { Application.RequestStop(); } catch { }
-        try { Application.Shutdown(); } catch { }
+        // 2) UI-Loop beenden (vom UI-Thread)
+        try
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                try { Application.RequestStop(); } catch { }
+            });
+        }
+        catch { }
 
-        TerminalUtil.ResetHard();
-        try { Log.CloseAndFlush(); } catch { }
-        Environment.Exit(0);
+        // 3) Watchdog: falls Run() nicht sauber zurückkehrt -> hart beenden
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(false);
+            try { Environment.Exit(0); } catch { }
+        });
     }
+
 
     static void ConfigureLogging()
     {
