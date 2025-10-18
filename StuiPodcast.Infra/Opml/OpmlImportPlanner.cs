@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Opml
 {
     /// <summary>
     /// Status eines OPML-Imports für einen einzelnen Eintrag.

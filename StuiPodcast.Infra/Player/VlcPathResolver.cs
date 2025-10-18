@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using Serilog;
 
-namespace StuiPodcast.Infra;
+namespace StuiPodcast.Infra.Player;
 
 /// <summary>
 /// Findet die LibVLC- und Plugin-Verzeichnisse auf Windows/macOS (best effort),
@@ -114,7 +114,7 @@ public static class VlcPathResolver
         if (!string.IsNullOrWhiteSpace(pluginDir))
             opts.Add($"--plugin-path={pluginDir}");
 
-        var diag = $"win libDir={(libDir ?? "∅")} pluginDir={(pluginDir ?? "∅")}";
+        var diag = $"win libDir={libDir ?? "∅"} pluginDir={pluginDir ?? "∅"}";
         Log.Information("VLC resolver: {Diag}", diag);
 
         return new Result
@@ -191,7 +191,7 @@ public static class VlcPathResolver
         if (!string.IsNullOrWhiteSpace(pluginDir))
             opts.Add($"--plugin-path={pluginDir}");
 
-        var diag = $"mac libDir={(libDir ?? "∅")} pluginDir={(pluginDir ?? "∅")}";
+        var diag = $"mac libDir={libDir ?? "∅"} pluginDir={pluginDir ?? "∅"}";
         Log.Information("VLC resolver: {Diag}", diag);
 
         return new Result
@@ -214,7 +214,7 @@ public static class VlcPathResolver
         if (!string.IsNullOrWhiteSpace(envPlugin))
             opts.Add($"--plugin-path={Normalize(envPlugin)}");
 
-        var diag = $"linux pluginDir={(envPlugin ?? "∅")}";
+        var diag = $"linux pluginDir={envPlugin ?? "∅"}";
         Log.Information("VLC resolver: {Diag}", diag);
 
         return new Result

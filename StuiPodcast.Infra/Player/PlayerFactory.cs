@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using Serilog;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.Infra;
+namespace StuiPodcast.Infra.Player;
 
 public static class PlayerFactory
 {
@@ -118,7 +118,7 @@ public static class PlayerFactory
             // Degradierter Hinweis (für OSD)
             bool degraded =
                 string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase) ||
-                (isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase)); // optional
+                isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase); // optional
 
             infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : $"Engine: {chosen.Name}";
         }

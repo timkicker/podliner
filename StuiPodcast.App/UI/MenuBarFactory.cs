@@ -160,7 +160,7 @@ internal static class MenuBarFactory
             {
                 Act("_Keys & Commands (:h)", "Help browser", () => StuiPodcast.App.UI.HelpBrowserDialog.Show()),
                 Act("_Logs (F12)", "Show logs overlay", () => cb.Command(":logs")),
-                Act("_About", "", () => MessageBox.Query("About", "StuiPodcast: TUI podcast player", "OK")),
+                Act("_About", "", () => MessageBox.Query("About", "Podliner: TUI podcast player", "OK")),
             }),
         });
 

@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using StuiPodcast.Core;
-using StuiPodcast.Infra;
+using StuiPodcast.Infra.Player;
 
 namespace StuiPodcast.App
 {

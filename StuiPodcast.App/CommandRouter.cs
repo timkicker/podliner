@@ -7,6 +7,8 @@ using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
+using StuiPodcast.Infra.Opml;
+using StuiPodcast.Infra.Player;
 
 static class CommandRouter
 {
@@ -750,11 +752,11 @@ static class CommandRouter
             if (string.IsNullOrWhiteSpace(path))
             {
                 // Falls kein Pfad angegeben: sinnvoller Default
-                path = OpmlIo.GetDefaultExportPath(baseName: "stui-feeds.opml");
+                path = OpmlIo.GetDefaultExportPath(baseName: "podliner-feeds.opml");
             }
 
             string xml;
-            try { xml = OpmlExporter.BuildXml(data.Feeds, "stui-podcast feeds"); }
+            try { xml = OpmlExporter.BuildXml(data.Feeds, "podliner feeds"); }
             catch (Exception ex) { ui.ShowOsd($"export: build error ({ex.Message})", 2000); return; }
 
             try

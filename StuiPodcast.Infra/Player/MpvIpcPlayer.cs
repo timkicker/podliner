@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.Infra;
+namespace StuiPodcast.Infra.Player;
 
 public sealed class MpvIpcPlayer : IPlayer
 {
@@ -58,7 +58,7 @@ public sealed class MpvIpcPlayer : IPlayer
             State.Length = null;
 
             sock = _sockPath = Path.Combine(
-                Path.GetTempPath(), $"stui-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
+                Path.GetTempPath(), $"podliner-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
 
             try { if (File.Exists(sock)) File.Delete(sock); } catch { /* ignore */ }
 
@@ -219,7 +219,7 @@ public sealed class MpvIpcPlayer : IPlayer
                 }
 
                 // Ready-Gate: Erst jetzt "spielend"
-                if (!_ready && ((posVal is double pp && pp > 0) || (durVal is double dd && dd > 0)))
+                if (!_ready && (posVal is double pp && pp > 0 || durVal is double dd && dd > 0))
                 {
                     _ready = true;
                     if (!State.IsPlaying) { State.IsPlaying = true; raise = true; }

@@ -1,29 +1,12 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.Core;
 using System;
 using System.IO;
 using System.Threading.Tasks;
 using VLC = LibVLCSharp.Shared;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Player
 {
-    // --- öffentliche Player-API (unverändert) -------------------------------
-    public interface IPlayer : IDisposable
-    {
-        event Action<PlayerState>? StateChanged;
-        PlayerState State { get; }
-        string Name { get; }                      // Anzeigename der Engine
-        PlayerCapabilities Capabilities { get; }  // Fähigkeiten
-
-        void Play(string url, long? startMs = null);
-        void TogglePause();
-        void SeekRelative(TimeSpan delta);
-        void SeekTo(TimeSpan position);
-        void SetVolume(int vol0to100);
-        void SetSpeed(double speed);
-        void Stop();
-    }
-
     /// <summary>
     /// LibVLC-basierter Player, der LibVLC **aus NuGet-Runtime-Assets** lädt.
     /// Kein Pfad-Resolver, kein externes VLC nötig.
@@ -55,7 +38,7 @@ namespace StuiPodcast.Infra
             VLC.Core.Initialize();
 
             // Optionale Log-Datei (hilfreich bei Supportfällen)
-            var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "stui-vlc.log");
+            var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
             try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
 
             // Runtime-Optionen: leise + robuste Netzwerk-Buffer
@@ -105,7 +88,7 @@ namespace StuiPodcast.Infra
                 try { if (_mp.IsPlaying) _mp.Stop(); } catch { /* robust */ }
                 SafeDisposeMediaLocked(sid);
 
-                _pendingSeekMs = (startMs is > 0) ? startMs : null;
+                _pendingSeekMs = startMs is > 0 ? startMs : null;
 
                 _media = CreateMedia(_lib, url);
 
@@ -332,7 +315,7 @@ namespace StuiPodcast.Infra
                 {
                     State.Length = e.Length > 0
                         ? TimeSpan.FromMilliseconds(e.Length)
-                        : (TimeSpan?)null;
+                        : null;
 
                     if (!_ready && e.Length > 0)
                         State.IsPlaying = _ready = true;

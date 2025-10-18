@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Opml
 {
     /// <summary>
     /// Repräsentiert ein OPML-Dokument mit flacher Feed-Liste (Gruppen werden bewusst ignoriert).

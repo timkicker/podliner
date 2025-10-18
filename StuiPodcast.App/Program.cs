@@ -15,6 +15,7 @@ using StuiPodcast.Infra;
 using System.Text;
 using System.Runtime.InteropServices;
 using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
+using StuiPodcast.Infra.Player;
 
 class Program
 {
@@ -1032,7 +1033,7 @@ UI.SetTheme(desired);
             .Enrich.WithProperty("pid", Environment.ProcessId)
             .WriteTo.Sink(MemLog)
             .WriteTo.File(
-                Path.Combine(logDir, "stui-podcast-.log"),
+                Path.Combine(logDir, "podliner-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7,
                 shared: true,

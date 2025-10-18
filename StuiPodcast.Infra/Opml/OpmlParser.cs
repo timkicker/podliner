@@ -5,7 +5,7 @@ using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Opml
 {
     /// <summary>
     /// Parser & Serializer für OPML 2.0 (flache Feed-Liste; Gruppen/Ordner werden ignoriert).

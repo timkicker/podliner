@@ -67,7 +67,7 @@ namespace StuiPodcast.Infra
             {
                 Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS) // Obergrenze; wir ergänzen pro-Request-CTS für Feinschnitt
             };
-            _http.DefaultRequestHeaders.UserAgent.ParseAdd("stui-podcast/1.0");
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("deflate"));
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
@@ -326,7 +326,7 @@ namespace StuiPodcast.Infra
             reqCts.CancelAfter(REQUEST_TIMEOUT_MS);
 
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            req.Headers.UserAgent.ParseAdd("stui-podcast/1.0");
+            req.Headers.UserAgent.ParseAdd("podliner/1.0");
 
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, reqCts.Token).ConfigureAwait(false);
 

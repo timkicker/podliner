@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Opml
 {
     /// <summary>
     /// Datei-IO für OPML: robustes Lesen/Schreiben, Pfad-Sanitizing und Default-Exportpfade.
@@ -69,13 +69,13 @@ namespace StuiPodcast.Infra
         /// - targetDir null/leer → MyDocuments, sonst Home-Expansion.
         /// - baseName wird sanitizt und um ".opml" ergänzt (falls nötig).
         /// </summary>
-        public static string GetDefaultExportPath(string? targetDir = null, string? baseName = "stui-feeds.opml")
+        public static string GetDefaultExportPath(string? targetDir = null, string? baseName = "podliner-feeds.opml")
         {
             var dir = string.IsNullOrWhiteSpace(targetDir) ? GetDefaultDir() : ExpandHome(targetDir!);
             Directory.CreateDirectory(dir);
 
             var name = baseName;
-            if (string.IsNullOrWhiteSpace(name)) name = "stui-feeds.opml";
+            if (string.IsNullOrWhiteSpace(name)) name = "podliner-feeds.opml";
             name = PathSanitizer.SanitizeFileName(name!);
             if (!name.EndsWith(".opml", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(Path.GetExtension(name)))
                 name += ".opml";

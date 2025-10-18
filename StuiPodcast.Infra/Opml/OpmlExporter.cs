@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.Infra
+namespace StuiPodcast.Infra.Opml
 {
     /// <summary>
     /// Erzeugt aus der bestehenden Feed-Liste ein OPML-Dokument (flach, ohne Gruppen).
@@ -17,7 +17,7 @@ namespace StuiPodcast.Infra
         /// - Exportiert nur Feeds mit formal gültiger http/https-URL.
         /// - Setzt <see cref="OpmlDocument.Title"/> optional für den OPML-Header.
         /// </summary>
-        public static OpmlDocument FromFeeds(IEnumerable<Feed> feeds, string? documentTitle = "stui-podcast feeds")
+        public static OpmlDocument FromFeeds(IEnumerable<Feed> feeds, string? documentTitle = "podliner feeds")
         {
             var doc = new OpmlDocument
             {
@@ -49,7 +49,7 @@ namespace StuiPodcast.Infra
         /// <summary>
         /// Komfort: Erzeugt direkt den OPML-XML-String (UTF-8, OPML 2.0) aus Feeds.
         /// </summary>
-        public static string BuildXml(IEnumerable<Feed> feeds, string? documentTitle = "stui-podcast feeds")
+        public static string BuildXml(IEnumerable<Feed> feeds, string? documentTitle = "podliner feeds")
             => OpmlParser.Build(FromFeeds(feeds, documentTitle));
 
         // -------------------- Internals --------------------

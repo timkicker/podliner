@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.Infra;
+namespace StuiPodcast.Infra.Player;
 
 // Minimal-Fallback: keine Live-Pause/Seek/Speed/Volume – nur via Neustart.
 // Sichere Argument-Übergabe (ArgumentList) & Event-Dispatch außerhalb Locks.

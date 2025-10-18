@@ -5,8 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Terminal.Gui;
 using StuiPodcast.Core;
-using StuiPodcast.Infra;
 using StuiPodcast.App.Debug;
+using StuiPodcast.Infra.Player;
 
 /// <summary>
 /// Koordiniert Playback-Fortschritt, Persistenz, Auto-Advance und liefert

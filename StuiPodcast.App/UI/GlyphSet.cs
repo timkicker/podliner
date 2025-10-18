@@ -24,7 +24,7 @@ namespace StuiPodcast.App.UI
             try
             {
                 // Opt-out per Env
-                var force = Environment.GetEnvironmentVariable("STUI_GLYPHS");
+                var force = Environment.GetEnvironmentVariable("PODLINER_GLYPHS");
                 if (!string.IsNullOrWhiteSpace(force))
                 {
                     if (force.Equals("ascii", StringComparison.OrdinalIgnoreCase)) return Profile.Ascii;

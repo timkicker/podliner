@@ -11,7 +11,7 @@ public static class AppStorage
 
     private static readonly string BaseDir = Path.Combine(
         Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") ?? ConfigDir,
-        "stui-podcast");
+        "podliner");
 
     private static readonly string DataPath = Path.Combine(BaseDir, "appdata.json");
     private static readonly string Bak1Path = Path.Combine(BaseDir, "appdata.json.bak1");
