@@ -1,6 +1,5 @@
 name: release
 
-# wichtig: Token darf Releases schreiben
 permissions:
   contents: write
 
@@ -34,11 +33,14 @@ jobs:
 
       - name: Restore
         run: dotnet restore
+        shell: bash
 
       - name: Publish (self-contained)
+        shell: bash
         run: |
           dotnet publish ./StuiPodcast.App/StuiPodcast.App.csproj \
-            -c Release -r ${{ matrix.rid }} \
+            -c Release \
+            -r ${{ matrix.rid }} \
             -p:SelfContained=true \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
@@ -48,6 +50,7 @@ jobs:
             -o publish/${{ matrix.rid }}
 
       - name: Package tar.gz
+        shell: bash
         run: |
           mkdir -p dist
           mkdir -p package/podliner
@@ -56,7 +59,6 @@ jobs:
           cp LICENSE package/podliner/ 2>/dev/null || true
           cp README.md package/podliner/ 2>/dev/null || true
           tar -C package -czf dist/podliner-${{ matrix.rid }}.tar.gz podliner
-        shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -86,6 +88,7 @@ jobs:
         run: dotnet restore
 
       - name: Publish (self-contained)
+        shell: pwsh
         run: >
           dotnet publish .\StuiPodcast.App\StuiPodcast.App.csproj
           -c Release -r win-x64
@@ -137,20 +140,24 @@ jobs:
 
       - name: Restore
         run: dotnet restore
+        shell: bash
 
       - name: Publish (self-contained)
+        shell: bash
         run: |
           dotnet publish ./StuiPodcast.App/StuiPodcast.App.csproj \
-            -c Release -r ${{ matrix.rid }} \
+            -c Release \
+            -r ${{ matrix.rid }} \
             -p:SelfContained=true \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
             -p:DebugType=None \
             -p:Version=${{ steps.meta.outputs.version }} \
-            -p:AssemblyInformationalVersion=${{ steps.meta.outputs.version }}
+            -p:AssemblyInformationalVersion=${{ steps.meta.outputs.version }} \
             -o publish/${{ matrix.rid }}
 
       - name: Package tar.gz
+        shell: bash
         run: |
           mkdir -p dist
           mkdir -p package/podliner
@@ -185,15 +192,16 @@ jobs:
           path: gathered
 
       - name: Gather into dist/
+        shell: bash
         run: |
           mkdir -p dist
           find gathered -type f -name 'podliner-*' -exec cp {} dist/ \;
-          # Installer als Asset beilegen (stabilere Release-URL)
           cp scripts/install.ps1 dist/install.ps1
           cp scripts/install.sh dist/install.sh
           cp scripts/install-macos.sh dist/install-macos.sh
 
       - name: Generate SHA256SUMS
+        shell: bash
         run: |
           cd dist
           sha256sum * > SHA256SUMS
