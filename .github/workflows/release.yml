@@ -1,5 +1,9 @@
 name: release
 
+# wichtig: Token darf Releases schreiben
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -181,6 +185,10 @@ jobs:
         run: |
           mkdir -p dist
           find gathered -type f -name 'podliner-*' -exec cp {} dist/ \;
+          # Installer als Asset beilegen (stabilere Release-URL)
+          cp scripts/install.ps1 dist/install.ps1
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install-macos.sh dist/install-macos.sh
 
       - name: Generate SHA256SUMS
         run: |
@@ -202,4 +210,8 @@ jobs:
             dist/podliner-osx-x64.tar.gz
             dist/podliner-osx-arm64.tar.gz
             dist/podliner-win-x64.zip
+            dist/install.sh
+            dist/install.ps1
+            dist/install-macos.sh
             dist/SHA256SUMS
+

@@ -12,8 +12,4 @@
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="NowPlaying\" />
-  </ItemGroup>
-
 </Project>
