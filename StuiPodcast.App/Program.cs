@@ -14,6 +14,7 @@ using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using System.Text;
 using System.Runtime.InteropServices;
+using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
 
 class Program
 {
@@ -277,14 +278,31 @@ class Program
 
         UI = new Shell(MemLog);
         UI.Build();
-        
-        if (OperatingSystem.IsWindows())
-        {
-            // Aktiviere beim Start das gleiche Theme, das ein einzelner "t"-Druck wählen würde.
-            // So bleiben wir immer im Gleichschritt mit deinem Toggle-Zyklus.
-            UI.ToggleTheme();
-        }
 
+	// 3a) Theme-Änderungen persistieren
+UI.ThemeChanged += mode =>
+{
+    Data.ThemePref = mode.ToString(); // Enum-Name als string
+    _ = SaveAsync();
+};
+
+// 3b) Beim Start anwenden:
+// Falls gespeichert: laden; sonst OS-Default (Windows=MenuAccent, andere=Base)
+ThemeMode desired;
+if (!string.IsNullOrWhiteSpace(Data.ThemePref) &&
+    Enum.TryParse<ThemeMode>(Data.ThemePref, out var saved))
+{
+    desired = saved;
+}
+else
+{
+    desired = OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent;
+}
+
+// Wichtig: kein flicker—direkt setzen, NICHT togglen
+UI.SetTheme(desired);
+
+       
 
         // sofort einmal prüfen – nichts zuweisen, einfach ausführen
         _ = Task.Run(async () =>

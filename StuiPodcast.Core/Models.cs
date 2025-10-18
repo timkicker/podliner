@@ -66,6 +66,8 @@ public class AppData {
     public bool   NetworkOnline { get; set; } = true;
 
     public List<Guid> Queue { get; set; } = new();
+    public string? ThemePref { get; set; } // "Base", "MenuAccent", "Native" (Enum-Name)
+
 
     public string? DownloadDir { get; set; }
     public List<Guid> DownloadQueue { get; set; } = new();

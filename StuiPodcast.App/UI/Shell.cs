@@ -10,6 +10,11 @@ namespace StuiPodcast.App.UI;
 public sealed class Shell
 {
     // ---- Events/API wie vorher ----
+
+
+public ThemeMode CurrentTheme => _theme;
+public event Action<ThemeMode>? ThemeChanged;
+
     private bool _suppressFeedSelectionEvents = false;
     private Terminal.Gui.MenuBar? _menu;
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
@@ -50,9 +55,9 @@ public sealed class Shell
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
-    private enum ThemeMode { MenuAccent, Base, Native }
+    public enum ThemeMode { MenuAccent, Base, Native }
 
-    private ThemeMode _theme = OperatingSystem.IsWindows() ? ThemeMode.MenuAccent : ThemeMode.Base;
+    private ThemeMode _theme;
     private bool _playerAtTop   = false;
     private bool _startupPinned = false;
 
@@ -97,15 +102,27 @@ public sealed class Shell
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
     public void ToggleTheme()
+{
+    _theme = _theme switch
     {
-        _theme = _theme switch
-        {
-            ThemeMode.MenuAccent => ThemeMode.Base,
-            ThemeMode.Base       => ThemeMode.Native,
-            _                    => ThemeMode.MenuAccent
-        };
-        ApplyTheme();
-    }
+        ThemeMode.Base       => ThemeMode.MenuAccent,
+        ThemeMode.MenuAccent => ThemeMode.Native,
+        _                    => ThemeMode.Base
+    };
+
+    ApplyTheme();
+    ThemeChanged?.Invoke(_theme); // <-- NEU: speichern lassen
+
+}
+
+public void SetTheme(ThemeMode mode)
+{
+    _theme = mode;
+    ApplyTheme();
+    ThemeChanged?.Invoke(_theme); // <-- NEU
+}
+
+
 
     public void SetQueueLookup(Func<Guid, bool> isQueued) => _episodesPane?.SetQueueLookup(isQueued);
 
@@ -850,25 +867,19 @@ public sealed class Shell
         }
     }
 
-    private void SetDefaultThemeForOS()
+private void SetDefaultThemeForOS()
+{
+    if (OperatingSystem.IsWindows())
     {
-        // Mapping von "Theme-Nummer" → ThemeMode:
-        // 1 = Base, 2 = MenuAccent, 3 = Native
-        ThemeMode FromNumber(int n) => n switch
-        {
-            1 => ThemeMode.Base,
-            2 => ThemeMode.MenuAccent,
-            3 => ThemeMode.Native,
-            _ => ThemeMode.Base
-        };
-
-        // Wunsch: Linux ← Theme 1, Windows ← Theme 2
-        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
-            _theme = FromNumber(2);
-        else
-            _theme = FromNumber(1);
+        // Windows: „blaues“ Theme (das, was nach deinem 't' kommt)
+        _theme = ThemeMode.Base;   // Theme #2
     }
-
+    else
+    {
+        // Linux/macOS: Standard-Theme davor
+        _theme = ThemeMode.MenuAccent;         // Theme #1
+    }
+}
 
     private void RefreshListVisual(ListView lv)
     {
