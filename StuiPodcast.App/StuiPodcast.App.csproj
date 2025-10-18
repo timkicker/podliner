@@ -14,24 +14,24 @@
   </ItemGroup>
 
     <PropertyGroup>
-        <!-- Wird von CI via -p:Version=… (z.B. 0.0.1-rc3) überschrieben -->
-        <Version>0.0.0</Version>
+    <OutputType>Exe</OutputType>           <!-- nur bei App -->
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+</PropertyGroup>
 
-        <!-- Numerische Assembly/File-Versionen (ohne rc/beta/etc.) -->
-        <AssemblyVersion>$(VersionMajor).$(VersionMinor).0.0</AssemblyVersion>
-        <FileVersion>$(VersionMajor).$(VersionMinor).$(VersionPatch).0</FileVersion>
+        <!-- ⬇️ Deine Versions-PropertyGroup kommt ALS ZWEITE hinzu, NICHT ersetzen -->
+<PropertyGroup>
+<Version>0.0.0</Version> <!-- CI überschreibt -->
+<AssemblyVersion>$(VersionMajor).$(VersionMinor).0.0</AssemblyVersion>
+<FileVersion>$(VersionMajor).$(VersionMinor).$(VersionPatch).0</FileVersion>
+<AssemblyInformationalVersion>$(Version)</AssemblyInformationalVersion>
 
-        <!-- Menschlich lesbare Version: darf Suffix haben -->
-        <AssemblyInformationalVersion>$(Version)</AssemblyInformationalVersion>
-
-        <!-- Metadaten -->
-        <Company>podliner</Company>
-        <Product>podliner</Product>
-        <Authors>Tim Kicker</Authors>
-        <Copyright>© Tim Kicker</Copyright>
-        <RepositoryUrl>https://github.com/timkicker/podliner</RepositoryUrl>
-        <PackageProjectUrl>https://github.com/timkicker/podliner</PackageProjectUrl>
-    </PropertyGroup>
+<Company>podliner</Company>
+<Product>podliner</Product>
+<Authors>Tim Kicker</Authors>
+<RepositoryUrl>https://github.com/timkicker/podliner</RepositoryUrl>
+</PropertyGroup>
 
 
 </Project>
