@@ -13,16 +13,25 @@
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
   </ItemGroup>
 
-  <PropertyGroup>
-      <AssemblyVersion>$(Version)</AssemblyVersion>
-      <FileVersion>$(Version)</FileVersion>
-      <AssemblyInformationalVersion>$(Version)</AssemblyInformationalVersion>
-      
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-      <RepositoryUrl>https://github.com/timkicker/podliner</RepositoryUrl>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+    <PropertyGroup>
+        <!-- Wird von CI via -p:Version=… (z.B. 0.0.1-rc3) überschrieben -->
+        <Version>0.0.0</Version>
+
+        <!-- Numerische Assembly/File-Versionen (ohne rc/beta/etc.) -->
+        <AssemblyVersion>$(VersionMajor).$(VersionMinor).0.0</AssemblyVersion>
+        <FileVersion>$(VersionMajor).$(VersionMinor).$(VersionPatch).0</FileVersion>
+
+        <!-- Menschlich lesbare Version: darf Suffix haben -->
+        <AssemblyInformationalVersion>$(Version)</AssemblyInformationalVersion>
+
+        <!-- Metadaten -->
+        <Company>podliner</Company>
+        <Product>podliner</Product>
+        <Authors>Tim Kicker</Authors>
+        <Copyright>© Tim Kicker</Copyright>
+        <RepositoryUrl>https://github.com/timkicker/podliner</RepositoryUrl>
+        <PackageProjectUrl>https://github.com/timkicker/podliner</PackageProjectUrl>
+    </PropertyGroup>
+
 
 </Project>
