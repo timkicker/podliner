@@ -44,6 +44,7 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true \
             -p:DebugType=None \
             -p:Version=${{ steps.meta.outputs.version }} \
+            -p:AssemblyInformationalVersion=${{ steps.meta.outputs.version }} \
             -o publish/${{ matrix.rid }}
 
       - name: Package tar.gz
@@ -93,6 +94,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=None
           -p:Version=${{ steps.meta.outputs.version }}
+          -p:AssemblyInformationalVersion=${{ steps.meta.outputs.version }}
           -o publish\win-x64
 
       - name: Package zip
@@ -145,6 +147,7 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true \
             -p:DebugType=None \
             -p:Version=${{ steps.meta.outputs.version }} \
+            -p:AssemblyInformationalVersion=${{ steps.meta.outputs.version }}
             -o publish/${{ matrix.rid }}
 
       - name: Package tar.gz
