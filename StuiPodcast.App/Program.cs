@@ -9,6 +9,7 @@ using StuiPodcast.App.UI;
 using Terminal.Gui;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Reflection;
 using StuiPodcast.App;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
@@ -181,8 +182,20 @@ class Program
 
     static DownloadManager? Downloader;
 
-    static async Task Main()
+    static async Task Main(string[]? args)
     {
+        
+        if (args?.Any(a => a is "--version" or "-v" or "-V") == true)
+        {
+            PrintVersion();
+            return;
+        }
+        if (args?.Any(a => a is "--help" or "-h" or "-?") == true)
+        {
+            PrintHelp();
+            return;
+        }
+        
         // --- Windows-Konsole für Unicode/ANSI fit machen ---
         EnableWindowsConsoleAnsi();
 
@@ -1108,4 +1121,29 @@ UI.SetTheme(desired);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+    
+    static void PrintVersion()
+    {
+        var asm = typeof(Program).Assembly;
+        var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var ver  = string.IsNullOrWhiteSpace(info) ? asm.GetName().Version?.ToString() ?? "0.0.0" : info;
+
+        // optional: RID/Arch drucken (hilft bei Support)
+        string rid;
+        try { rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier; }
+        catch { rid = $"{Environment.OSVersion.Platform}-{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}".ToLowerInvariant(); }
+
+        Console.WriteLine($"podliner {ver} ({rid})");
+    }
+    
+    static void PrintHelp()
+    {
+        PrintVersion();
+        Console.WriteLine();
+        Console.WriteLine("Usage: podliner [options]");
+        Console.WriteLine("Options:");
+        Console.WriteLine("  --version, -v   Show version and exit");
+        Console.WriteLine("  --help, -h      Show this help and exit");
+        // spätere Flags kannst du hier ergänzen (z.B. --diag)
+    }
 }

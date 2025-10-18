@@ -14,9 +14,14 @@
   </ItemGroup>
 
   <PropertyGroup>
+      <AssemblyVersion>$(Version)</AssemblyVersion>
+      <FileVersion>$(Version)</FileVersion>
+      <AssemblyInformationalVersion>$(Version)</AssemblyInformationalVersion>
+      
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+      <RepositoryUrl>https://github.com/timkicker/podliner</RepositoryUrl>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
