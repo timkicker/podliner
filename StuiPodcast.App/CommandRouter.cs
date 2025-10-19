@@ -9,6 +9,7 @@ using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Opml;
 using StuiPodcast.Infra.Player;
+using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode; // neu: für :theme
 
 static class CommandRouter
 {
@@ -57,29 +58,26 @@ static class CommandRouter
             case TopCommand.Osd:          ExecOsd(args, ui); return;
             case TopCommand.Opml:         ExecOpml(args, ui, data, persist); return;
             case TopCommand.Engine:       ExecEngine(args, player, ui, data, persist, switchEngine); return;
-            
-            case TopCommand.Open:  ExecOpen(args, ui, data); return;
-            case TopCommand.Copy:  ExecCopy(args, ui, data); return;
-            
+
+            case TopCommand.Open:         ExecOpen(args, ui, data); return;
+            case TopCommand.Copy:         ExecCopy(args, ui, data); return;
+
             case TopCommand.QuitBang:
                 // :q! → ohne finalen Save beenden
                 try { Program.SkipSaveOnExit = true; } catch { /* falls andere Assembly-Grenzen */ }
                 ui.RequestQuit();
                 return;
 
-            case TopCommand.Write:
-                ExecWrite(persist, ui);
-                return;
+            // Write/quit
+            case TopCommand.Write:            ExecWrite(persist, ui); return;
+            case TopCommand.WriteQuit:        ExecWriteQuit(persist, ui, bang: false); return;
+            case TopCommand.WriteQuitBang:    ExecWriteQuit(persist, ui, bang: true);  return;
 
-            case TopCommand.WriteQuit:
-                ExecWriteQuit(persist, ui, bang: false);
-                return;
-
-            case TopCommand.WriteQuitBang:
-                ExecWriteQuit(persist, ui, bang: true);
-                return;
-
-
+            // Neue QoL-Commands
+            case TopCommand.Search:       ExecSearch(args, ui, data); return;
+            case TopCommand.Now:          ExecNow(ui, data); return;
+            case TopCommand.Jump:         ExecJump(args, player, ui); return;
+            case TopCommand.Theme:        ExecTheme(args, ui, data, persist); return;
 
             // Playback & Player
             case TopCommand.Toggle:
@@ -89,7 +87,6 @@ static class CommandRouter
                     return;
                 }
                 player.TogglePause();
-                // ← kein UI.Update mehr; Anzeige kommt via Snapshot
                 return;
 
             case TopCommand.Seek:         ExecSeek(args, player, ui); return;
@@ -204,10 +201,11 @@ static class CommandRouter
         Save, Sort, Filter, PlayerBar,
         Net, PlaySource,
         AddFeed, Refresh, RemoveFeed, Feed,
-        History, Opml, Open, Copy, Write, WriteQuit, WriteQuitBang, QuitBang
+        History, Opml, Open, Copy,
+        Write, WriteQuit, WriteQuitBang, QuitBang,
+        Search, Now, Jump, Theme // neu
     }
 
-    
     // ---- Vim-style write/quit helpers ----
     private static void ExecWrite(Func<Task> persist, Shell ui)
     {
@@ -224,10 +222,8 @@ static class CommandRouter
 
     private static void ExecWriteQuit(Func<Task> persist, Shell ui, bool bang)
     {
-        // Anzeige sofort feedbacken (UI bleibt responsiv)
         ui.ShowOsd(bang ? "saving… quitting!" : "saving… quitting…", 800);
 
-        // Speichern im Hintergrund, danach Quit auf dem UI-Loop
         _ = Task.Run(async () =>
         {
             try
@@ -236,7 +232,6 @@ static class CommandRouter
             }
             catch
             {
-                // Bei Fehler: trotzdem quit? Wir bleiben wie Vim konservativ -> nicht automatisch quitten.
                 Terminal.Gui.Application.MainLoop?.Invoke(() =>
                 {
                     ui.ShowOsd("save failed – aborting :wq", 1800);
@@ -244,7 +239,6 @@ static class CommandRouter
                 return;
             }
 
-            // Quit sauber vom UI-Thread auslösen
             Terminal.Gui.Application.MainLoop?.Invoke(() =>
             {
                 ui.RequestQuit();
@@ -252,12 +246,11 @@ static class CommandRouter
         });
     }
 
-    
     private static TopCommand MapTop(string cmd)
     {
         if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
-        if (cmd.StartsWith(":opml",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;  // <-- NEU
-        
+        if (cmd.StartsWith(":opml",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;
+
         // Aliases
         if (cmd.Equals(":a", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
         if (cmd.Equals(":r", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
@@ -266,30 +259,35 @@ static class CommandRouter
         if (cmd.StartsWith(":open", StringComparison.OrdinalIgnoreCase)) return TopCommand.Open;
         if (cmd.StartsWith(":copy", StringComparison.OrdinalIgnoreCase)) return TopCommand.Copy;
 
-        
         cmd = cmd?.Trim() ?? "";
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
         if (cmd.Equals(":q!", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit!", StringComparison.OrdinalIgnoreCase)) return TopCommand.QuitBang;
 
         // Vim writes
-        if (cmd.Equals(":w", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":write", StringComparison.OrdinalIgnoreCase)) return TopCommand.Write;
-        if (cmd.Equals(":wq", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":x", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuit;
-        if (cmd.Equals(":wq!", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuitBang;
+        if (cmd.Equals(":w",  StringComparison.OrdinalIgnoreCase) || cmd.Equals(":write", StringComparison.OrdinalIgnoreCase)) return TopCommand.Write;
+        if (cmd.Equals(":wq", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":x",     StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuit;
+        if (cmd.Equals(":wq!",StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuitBang;
+
+        // Neu
+        if (cmd.StartsWith(":search", StringComparison.OrdinalIgnoreCase)) return TopCommand.Search;
+        if (cmd.Equals(":now", StringComparison.OrdinalIgnoreCase)) return TopCommand.Now;
+        if (cmd.StartsWith(":jump", StringComparison.OrdinalIgnoreCase)) return TopCommand.Jump;
+        if (cmd.StartsWith(":theme", StringComparison.OrdinalIgnoreCase)) return TopCommand.Theme;
 
         if (cmd.StartsWith(":logs", StringComparison.OrdinalIgnoreCase)) return TopCommand.Logs;
-        if (cmd.StartsWith(":osd", StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
+        if (cmd.StartsWith(":osd",  StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
 
         if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase)) return TopCommand.Toggle;
-        if (cmd.StartsWith(":seek", StringComparison.OrdinalIgnoreCase)) return TopCommand.Seek;
-        if (cmd.StartsWith(":vol", StringComparison.OrdinalIgnoreCase)) return TopCommand.Volume;
-        if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Speed;
+        if (cmd.StartsWith(":seek",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Seek;
+        if (cmd.StartsWith(":vol",    StringComparison.OrdinalIgnoreCase)) return TopCommand.Volume;
+        if (cmd.StartsWith(":speed",  StringComparison.OrdinalIgnoreCase)) return TopCommand.Speed;
         if (cmd.StartsWith(":replay", StringComparison.OrdinalIgnoreCase)) return TopCommand.Replay;
 
-        if (cmd.Equals(":next", StringComparison.OrdinalIgnoreCase)) return TopCommand.Next;
-        if (cmd.Equals(":prev", StringComparison.OrdinalIgnoreCase)) return TopCommand.Prev;
-        if (cmd.Equals(":play-next", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayNext;
-        if (cmd.Equals(":play-prev", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayPrev;
+        if (cmd.Equals(":next",       StringComparison.OrdinalIgnoreCase)) return TopCommand.Next;
+        if (cmd.Equals(":prev",       StringComparison.OrdinalIgnoreCase)) return TopCommand.Prev;
+        if (cmd.Equals(":play-next",  StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayNext;
+        if (cmd.Equals(":play-prev",  StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayPrev;
 
         if (cmd.StartsWith(":goto", StringComparison.OrdinalIgnoreCase)) return TopCommand.Goto;
         if (cmd.Equals(":zt", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":H", StringComparison.OrdinalIgnoreCase)) return TopCommand.VimTop;
@@ -298,19 +296,17 @@ static class CommandRouter
         if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.NextUnplayed;
         if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.PrevUnplayed;
 
-        if (cmd.StartsWith(":save", StringComparison.OrdinalIgnoreCase)) return TopCommand.Save;
-
-        if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase)) return TopCommand.Sort;
+        if (cmd.StartsWith(":save",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Save;
+        if (cmd.StartsWith(":sort",   StringComparison.OrdinalIgnoreCase)) return TopCommand.Sort;
         if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase)) return TopCommand.Filter;
         if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayerBar;
 
-        if (cmd.StartsWith(":net", StringComparison.OrdinalIgnoreCase)) return TopCommand.Net;
-        if (cmd.StartsWith(":play-source", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlaySource;
+        if (cmd.StartsWith(":net",          StringComparison.OrdinalIgnoreCase)) return TopCommand.Net;
+        if (cmd.StartsWith(":play-source",  StringComparison.OrdinalIgnoreCase)) return TopCommand.PlaySource;
 
-        if (cmd.StartsWith(":add", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
-        if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase) || cmd.StartsWith(":update", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
-        if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) ||
-            cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
+        if (cmd.StartsWith(":add",      StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
+        if (cmd.StartsWith(":refresh",  StringComparison.OrdinalIgnoreCase) || cmd.StartsWith(":update", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
+        if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
         if (cmd.StartsWith(":feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Feed;
 
         if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase)) return TopCommand.History;
@@ -335,6 +331,57 @@ static class CommandRouter
         else ui.ShowOsd("usage: :osd <text>");
     }
 
+    // ---- NEW: :search "<term>" / :search clear
+    private static void ExecSearch(string[] args, Shell ui, AppData data)
+    {
+        var query = string.Join(' ', args ?? Array.Empty<string>()).Trim();
+
+        if (string.Equals(query, "clear", StringComparison.OrdinalIgnoreCase))
+        {
+            var fid = ui.GetSelectedFeedId();
+            if (fid != null) ui.SetEpisodesForFeed(fid.Value, data.Episodes);
+            ui.ShowOsd("search cleared", 800);
+            return;
+        }
+
+        var feedId = ui.GetSelectedFeedId();
+        var list = data.Episodes.AsEnumerable();
+
+        if (feedId != null) list = list.Where(e => e.FeedId == feedId.Value);
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            list = list.Where(e =>
+                (e.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.DescriptionText?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        if (feedId != null) ui.SetEpisodesForFeed(feedId.Value, list);
+        ui.ShowOsd($"search: {query}", 900);
+    }
+
+    // ---- NEW: :now
+    private static void ExecNow(Shell ui, AppData data)
+    {
+        var nowId = ui.GetNowPlayingId();
+        if (nowId == null) { ui.ShowOsd("no episode playing"); return; }
+
+        var list = BuildCurrentList(ui, data);
+        var idx = list.FindIndex(e => e.Id == nowId);
+        if (idx < 0) { ui.ShowOsd("playing episode not in current view"); return; }
+
+        ui.SelectEpisodeIndex(idx);
+        ui.ShowOsd("jumped to now", 700);
+    }
+
+    // ---- NEW: :jump
+    private static void ExecJump(string[] args, IPlayer player, Shell ui)
+    {
+        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
+        if (string.IsNullOrEmpty(arg)) { ui.ShowOsd("usage: :jump <hh:mm[:ss]|+/-sec|%>"); return; }
+        Seek(arg, player);
+    }
+
     private static void ExecEngine(
         string[] args,
         IPlayer player,
@@ -344,8 +391,8 @@ static class CommandRouter
         Func<string, Task>? switchEngine = null)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
-        
-        // :engine diag  (robuster, null-safe, ohne HasFlag)
+
+        // :engine diag
         if (args.Length > 0 && string.Equals(args[0], "diag", StringComparison.OrdinalIgnoreCase))
         {
             try
@@ -355,8 +402,6 @@ static class CommandRouter
                     activeName = player?.GetType().Name ?? "none";
 
                 var caps = player?.Capabilities ?? 0;
-
-                // lieber bitweise prüfen (robuster als HasFlag bei evtl. nicht-[Flags]-Enums)
                 bool cSeek   = (caps & PlayerCapabilities.Seek)   != 0;
                 bool cPause  = (caps & PlayerCapabilities.Pause)  != 0;
                 bool cSpeed  = (caps & PlayerCapabilities.Speed)  != 0;
@@ -365,7 +410,6 @@ static class CommandRouter
                 var pref = string.IsNullOrWhiteSpace(data?.PreferredEngine) ? "auto" : data!.PreferredEngine!;
                 var last = data?.LastEngineUsed ?? "";
 
-                // kompakt & OSD-freundlich
                 ui.ShowOsd(
                     $"engine: {activeName}  caps: seek={cSeek} pause={cPause} speed={cSpeed} vol={cVolume}  pref={pref} last={last}",
                     3000
@@ -377,8 +421,6 @@ static class CommandRouter
             }
             return;
         }
-
-
 
         if (string.IsNullOrEmpty(arg) || arg == "show")
         {
@@ -444,7 +486,6 @@ static class CommandRouter
             return;
         }
 
-        // Hinweis für ffplay: coarse seek (Restart)
         if (string.Equals(player.Name, "ffplay", StringComparison.OrdinalIgnoreCase))
             ui.ShowOsd("coarse seek (ffplay): restarts stream", 1100);
 
@@ -500,6 +541,40 @@ static class CommandRouter
 
         ui.SetUnplayedFilterVisual(data.UnplayedOnly);
         _ = persist();
+    }
+
+    // ---- NEW: :theme
+    private static void ExecTheme(string[] args, Shell ui, AppData data, Func<Task> persist)
+    {
+        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(arg) || arg == "toggle")
+        {
+            ui.ToggleTheme();
+            data.ThemePref = null; // UI entscheidet selbst, Persist folgt über UI.ThemeChanged oder hier:
+            _ = persist();
+            return;
+        }
+
+        ThemeMode mode = arg switch
+        {
+            "base"   => ThemeMode.Base,
+            "accent" => ThemeMode.MenuAccent,
+            "native" => ThemeMode.Native,
+            "auto"   => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent),
+            _        => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent)
+        };
+
+        try
+        {
+            ui.SetTheme(mode);
+            data.ThemePref = mode.ToString();
+            _ = persist();
+            ui.ShowOsd($"theme: {mode}");
+        }
+        catch
+        {
+            ui.ShowOsd("theme: failed");
+        }
     }
 
     private static void ExecPlayerBar(string[] args, Shell ui, AppData data, Func<Task> persist)
@@ -569,6 +644,12 @@ static class CommandRouter
     private static void ExecPlaySource(string[] args, Shell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        if (arg is "show" or "")
+        {
+            ui.ShowOsd($"play-source: {data.PlaySource ?? "auto"}");
+            return;
+        }
+
         if (arg is "auto" or "local" or "remote")
         {
             data.PlaySource = arg;
@@ -577,7 +658,7 @@ static class CommandRouter
         }
         else
         {
-            ui.ShowOsd("usage: :play-source auto|local|remote");
+            ui.ShowOsd("usage: :play-source auto|local|remote|show");
         }
     }
 
@@ -752,30 +833,18 @@ static class CommandRouter
         int removedEps = data.Episodes.RemoveAll(e => e.FeedId == fid);
         data.Feeds.RemoveAll(f => f.Id == fid);
 
-        // Persistieren
         _ = persist();
 
-        // --- NEU: sichere Zielauswahl bestimmen ---
-        // Wenn keine realen Feeds mehr existieren → immer auf "All Episodes" gehen.
-        // Sonst: auf den ersten realen Feed hinter der Barriere selektieren (das macht Shell.SetFeeds intern),
-        // aber wir geben explizit FEED_ALL als Fallback vor, um den Separator sicher zu vermeiden.
         data.LastSelectedFeedId = FEED_ALL;
 
-        // Feeds neu setzen und gewünschte Auswahl explizit übergeben
         ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
-
-        // Episodenliste entsprechend der (nun sicheren) Auswahl neu anwenden
         ApplyList(ui, data);
 
         ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
     }
 
-    
     private static void ExecOpml(string[] args, Shell ui, AppData data, Func<Task> persist)
     {
-        // Syntax:
-        // :opml import <path> [--update-titles]
-        // :opml export [<path>]
         var argv = args ?? Array.Empty<string>();
         if (argv.Length == 0) { ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]"); return; }
 
@@ -798,21 +867,19 @@ static class CommandRouter
             var plan = OpmlImportPlanner.Plan(doc, data.Feeds, updateTitles);
             ui.ShowOsd($"OPML: new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 1600);
 
-            // Sicherheitsabfrage minimal (ohne Dialog): bei 0 new → fertig
             if (plan.NewCount == 0) return;
 
-            // Import seriell: wir nutzen den bestehenden Flow via ui.RequestAddFeed(url)
             int added = 0;
             foreach (var item in plan.NewItems())
             {
                 var url = item.Entry.XmlUrl?.Trim();
                 if (string.IsNullOrWhiteSpace(url)) continue;
 
-                ui.RequestAddFeed(url); // triggert bestehenden Add-Mechanismus
+                ui.RequestAddFeed(url);
                 added++;
             }
 
-            _ = persist(); // speichere AppData nach Import
+            _ = persist();
             ui.RequestRefresh();
             ui.ShowOsd($"Imported {added} feed(s).", 1200);
             return;
@@ -823,7 +890,6 @@ static class CommandRouter
             string? path = (argv.Length >= 2 ? argv[1] : null);
             if (string.IsNullOrWhiteSpace(path))
             {
-                // Falls kein Pfad angegeben: sinnvoller Default
                 path = OpmlIo.GetDefaultExportPath(baseName: "podliner-feeds.opml");
             }
 
@@ -845,7 +911,6 @@ static class CommandRouter
 
         ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]");
     }
-
 
     static List<Episode> BuildCurrentList(Shell ui, AppData data)
     {
@@ -956,6 +1021,35 @@ static class CommandRouter
                 _ = PersistLocal();
                 return true;
 
+            // ---- NEW: shuffle / uniq
+            case "shuffle":
+            {
+                var rnd = new Random();
+                // Fisher–Yates
+                for (int i = data.Queue.Count - 1; i > 0; i--)
+                {
+                    int j = rnd.Next(i + 1);
+                    (data.Queue[i], data.Queue[j]) = (data.Queue[j], data.Queue[i]);
+                }
+                Refresh();
+                _ = PersistLocal();
+                ui.ShowOsd("queue: shuffled", 900);
+                return true;
+            }
+            case "uniq":
+            {
+                var seen = new HashSet<Guid>();
+                var compact = new List<Guid>(data.Queue.Count);
+                foreach (var id in data.Queue)
+                    if (seen.Add(id)) compact.Add(id);
+                data.Queue.Clear();
+                data.Queue.AddRange(compact);
+                Refresh();
+                _ = PersistLocal();
+                ui.ShowOsd("queue: uniq", 900);
+                return true;
+            }
+
             case "move":
             {
                 var dir = (parts.Length >= 3 ? parts[2].ToLowerInvariant() : "down");
@@ -998,11 +1092,11 @@ static class CommandRouter
     {
         cmd = (cmd ?? "").Trim();
 
-        // --- :downloads (Summary / retry-failed) ---
+        // --- :downloads (Summary / retry-failed / open-dir / clear-queue) ---
         if (cmd.StartsWith(":downloads", StringComparison.OrdinalIgnoreCase))
         {
-            var dparts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);   // <-- war: parts
-            var sub = (dparts.Length > 1 ? dparts[1].ToLowerInvariant() : "");   // <-- war: parts
+            var dparts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var sub = (dparts.Length > 1 ? dparts[1].ToLowerInvariant() : "");
 
             if (string.IsNullOrEmpty(sub))
             {
@@ -1030,7 +1124,31 @@ static class CommandRouter
                 return true;
             }
 
-            ui.ShowOsd("downloads: retry-failed", 1200);
+            if (sub == "clear-queue")
+            {
+                int n = data.DownloadQueue.Count;
+                data.DownloadQueue.Clear();
+                _ = saveAsync();
+                ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui.ShowOsd($"downloads: cleared queue ({n})", 1200);
+                return true;
+            }
+
+            if (sub == "open-dir")
+            {
+                var dir = GuessDownloadDir(data);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    TryOpenSystem(dir);
+                }
+                else
+                {
+                    ui.ShowOsd("downloads: no directory found", 1200);
+                }
+                return true;
+            }
+
+            ui.ShowOsd("downloads: retry-failed | clear-queue | open-dir", 1200);
             return true;
         }
 
@@ -1041,8 +1159,8 @@ static class CommandRouter
         var ep = ui.GetSelectedEpisode();
         if (ep == null) return true;
 
-        var dlParts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);     // <-- war: parts
-        var arg = (dlParts.Length > 1 ? dlParts[1].ToLowerInvariant() : "");    // <-- war: parts
+        var dlParts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var arg = (dlParts.Length > 1 ? dlParts[1].ToLowerInvariant() : "");
 
         switch (arg)
         {
@@ -1081,6 +1199,18 @@ static class CommandRouter
         return true;
     }
 
+    static string? GuessDownloadDir(AppData data)
+    {
+        try
+        {
+            var any = data.DownloadMap.Values
+                .Where(v => v.State == DownloadState.Done && !string.IsNullOrWhiteSpace(v.LocalPath))
+                .Select(v => System.IO.Path.GetDirectoryName(v.LocalPath!)!)
+                .FirstOrDefault(p => p != null && System.IO.Directory.Exists(p));
+            return any;
+        }
+        catch { return null; }
+    }
 
     static void SelectAbsolute(int index, Shell ui, AppData data)
     {
@@ -1102,7 +1232,6 @@ static class CommandRouter
 
     static void Replay(string arg, IPlayer player, Shell ui)
     {
-        // Kein direktes UI.Update; Snapshot kümmert sich
         if (string.IsNullOrWhiteSpace(arg))
         {
             player.SeekTo(TimeSpan.Zero);
@@ -1290,7 +1419,6 @@ static class CommandRouter
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = player.State.Speed;
 
-        // Komma als Dezimaltrenner erlauben
         arg = arg.Replace(',', '.');
 
         if ((arg.StartsWith("+") || arg.StartsWith("-")) &&
@@ -1319,7 +1447,7 @@ static class CommandRouter
         if (int.TryParse(arg, out var n) && n > 0) tail = Math.Min(n, 5000);
         ui.ShowLogsOverlay(tail);
     }
-    
+
     private static void ExecOpen(string[] args, Shell ui, AppData data)
     {
         var mode = (args.Length > 0 ? args[0] : "site").Trim().ToLowerInvariant(); // "site" (default) | "audio"
@@ -1334,15 +1462,12 @@ static class CommandRouter
         }
         else // site
         {
-            // 1) Episode-Seite
             url = GetPropString(ep, "Link", "PageUrl", "Website", "WebsiteUrl", "HtmlUrl");
-            // 2) Feed-Seite
             if (string.IsNullOrWhiteSpace(url))
             {
                 var feed = data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
                 url = GetPropString(feed, "Link", "Website", "WebsiteUrl", "HtmlUrl", "Home");
             }
-            // 3) Fallback: Audio
             if (string.IsNullOrWhiteSpace(url))
                 url = ep.AudioUrl;
         }
@@ -1350,7 +1475,7 @@ static class CommandRouter
         if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("no URL to open"); return; }
 
         if (!TryOpenSystem(url))
-            ui.ShowOsd(url, 2000); // Fallback: URL anzeigen
+            ui.ShowOsd(url, 2000);
     }
 
     private static bool TryOpenSystem(string url)
@@ -1461,8 +1586,6 @@ static class CommandRouter
         catch { /* fallthrough */ }
         return false;
     }
-
-
 
     static void DlToggle(string arg, Shell ui, AppData data, Func<Task> persist)
     {

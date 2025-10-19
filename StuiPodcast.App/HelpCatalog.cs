@@ -46,6 +46,7 @@ namespace StuiPodcast.App
 
         public static readonly List<CmdHelp> Commands = new()
         {
+            // Feeds & Refresh
             new(":add", "Add a new podcast feed by RSS/Atom URL.",
                 "<rss-url>",
                 Aliases: new[]{ ":a" },
@@ -55,20 +56,42 @@ namespace StuiPodcast.App
                 Aliases: new[]{ ":update", ":r" },
                 Examples: new[]{ ":refresh", ":r" }),
 
-            new(":quit", "Quit application.",
-                Aliases: new[]{ ":q" },
-                Examples: new[]{ ":quit", ":q" }),
+            new(":remove-feed", "Remove the currently selected feed.",
+                Aliases: new[]{ ":rm-feed", ":feed remove" },
+                Examples: new[]{ ":remove-feed", ":rm-feed" }),
 
+            new(":feed", "Switch to virtual feeds.",
+                "all|saved|downloaded|history|queue",
+                Examples: new[]{ ":feed all", ":feed queue" }),
+
+            // App / General
             new(":help", "Show this help.",
                 Aliases: new[]{ ":h" },
                 Examples: new[]{ ":help", ":h" }),
 
+            new(":quit", "Quit application.",
+                Aliases: new[]{ ":q" },
+                Examples: new[]{ ":quit", ":q" }),
+
             new(":logs", "Show logs overlay (tail).",
                 "[N]", Examples: new[]{ ":logs", ":logs 1000" }),
 
+            new(":osd", "Show a transient on-screen message.",
+                "<text>", Examples: new[]{ ":osd Hello world" }),
+
+            // Playback & Navigation
+            new(":toggle", "Toggle pause/resume (if supported)"),
+
             new(":seek", "Seek in current episode.",
-                "[+/-N sec | NN% | mm:ss]",
-                Examples: new[]{ ":seek +10", ":seek 80%", ":seek 12:34" }),
+                "[+/-N sec | NN% | mm:ss | hh:mm:ss]",
+                Examples: new[]{ ":seek +10", ":seek 80%", ":seek 12:34", ":seek 01:02:03" }),
+
+            new(":jump", "Seek using the same syntax as :seek (alias/QoL).",
+                "<hh:mm[:ss]|+/-sec|%>",
+                Examples: new[]{ ":jump 10%", ":jump +90", ":jump 00:30" }),
+
+            new(":replay", "Replay from 0:00 or jump back N seconds.",
+                "[N]", Examples: new[]{ ":replay", ":replay 30" }),
 
             new(":vol", "Set or change volume.",
                 "[N | +/-N]  (0–100)",
@@ -78,36 +101,6 @@ namespace StuiPodcast.App
                 "[S | +/-D]  (0.25–3.0)",
                 Examples: new[]{ ":speed 1.0", ":speed +0.1", ":speed -0.25" }),
 
-            new(":save", "Toggle or set 'saved' (★) for selected episode.",
-                "[on|off|true|false|+|-]"),
-
-            // Primär: Langform, Kurzform nur als Alias
-            new(":download", "Mark/Unmark for download (auto-queued).",
-                "[start|cancel]",
-                Aliases: new[]{ ":dl" },
-                Examples: new[]{ ":download", ":download start", ":dl", ":dl cancel" }),
-
-            new(":downloads", "Downloads overview & actions.",
-                "[retry-failed]",
-                Examples: new[]{ ":downloads", ":downloads retry-failed" }),
-
-            new(":open", "Open episode website or audio in system default.",
-                "[site|audio]",
-                Examples: new[]{ ":open", ":open site", ":open audio" }),
-
-            new(":copy", "Copy episode info to clipboard (fallback: OSD).",
-                "url|title|guid",
-                Examples: new[]{ ":copy", ":copy url", ":copy title", ":copy guid" }),
-
-            new(":player", "Place the player bar.",
-                "[top|bottom|toggle]"),
-
-            new(":filter", "Set or toggle unplayed filter.",
-                "[unplayed|all|toggle]"),
-
-            new(":sort", "Sort the episode list.",
-                "show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]"),
-
             new(":next", "Select next item (no auto-play)."),
             new(":prev", "Select previous item (no auto-play)."),
             new(":play-next", "Play next item."),
@@ -116,29 +109,88 @@ namespace StuiPodcast.App
             new(":next-unplayed", "Play next unplayed."),
             new(":prev-unplayed", "Play previous unplayed."),
 
-            new(":replay", "Replay from 0:00 or jump back N seconds.",
-                "[N]"),
-
-            new(":history", "History actions (view-only feed)",
-                "clear | size <n>"),
-
             new(":goto", "Select absolute list position.",
-                "top|start|bottom|end"),
+                "top|start|bottom|end",
+                Examples: new[]{ ":goto top", ":goto end" }),
 
-            // Diese drei haben keine „Langform“ – daher bleiben sie primär in Kurzform.
+            new(":now", "Jump selection to the currently playing episode."),
+
             new(":zt / :zz / :zb", "Vim-style list positioning (top/center/bottom).",
                 Aliases: new[]{":H",":M",":L"}),
 
-            new(":remove-feed", "Remove the currently selected feed.",
-                Aliases: new[]{ ":rm-feed", ":feed remove" },
-                Examples: new[]{ ":remove-feed", ":rm-feed" }),
+            // Sorting / Filtering / Player / Theme
+            new(":sort", "Sort the episode list.",
+                "show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]",
+                Examples: new[]{ ":sort show", ":sort reverse", ":sort by title asc" }),
 
-            // Playback engine
+            new(":filter", "Set or toggle unplayed filter.",
+                "[unplayed|all|toggle]",
+                Examples: new[]{ ":filter unplayed", ":filter toggle" }),
+
+            new(":player", "Place the player bar.",
+                "[top|bottom|toggle]",
+                Examples: new[]{ ":player top", ":player toggle" }),
+
+            new(":theme", "Switch theme or toggle.",
+                "[toggle|base|accent|native|auto]",
+                Examples: new[]{ ":theme", ":theme toggle", ":theme native" }),
+
+            // Flags & Save
+            new(":save", "Toggle or set 'saved' (★) for selected episode.",
+                "[on|off|true|false|+|-]",
+                Examples: new[]{ ":save", ":save on", ":save -" }),
+
+            new(":download", "Mark/Unmark for download (auto-queued).",
+                "[start|cancel]",
+                Aliases: new[]{ ":dl" },
+                Examples: new[]{ ":download", ":download start", ":dl", ":dl cancel" }),
+
+            new(":downloads", "Downloads overview & actions.",
+                "[retry-failed | clear-queue | open-dir]",
+                Examples: new[]{ ":downloads", ":downloads retry-failed", ":downloads clear-queue", ":downloads open-dir" }),
+
+            // Queue
+            new(":queue", "Queue operations (selection-based).",
+                "add|toggle|rm|remove|clear|move <up|down|top|bottom>|shuffle|uniq",
+                Aliases: new[]{ "q" },
+                Examples: new[]{
+                    ":queue add",
+                    "q",
+                    ":queue move up",
+                    ":queue shuffle",
+                    ":queue uniq",
+                    ":queue clear"
+                }),
+
+            // Links & Clipboard
+            new(":open", "Open episode website or audio in system default.",
+                "[site|audio]",
+                Examples: new[]{ ":open", ":open site", ":open audio" }),
+
+            new(":copy", "Copy episode info to clipboard (fallback: OSD).",
+                "url|title|guid",
+                Examples: new[]{ ":copy", ":copy url", ":copy title", ":copy guid" }),
+
+            // Network / Source
+            new(":net", "Set/toggle offline mode (affects list & window title).",
+                "online|offline|toggle",
+                Examples: new[]{ ":net", ":net offline", ":net toggle" }),
+
+            new(":play-source", "Prefer playback source.",
+                "[auto|local|remote|show]",
+                Examples: new[]{ ":play-source", ":play-source show", ":play-source local" }),
+
+            // History
+            new(":history", "History actions (view-only feed).",
+                "clear | size <n>",
+                Examples: new[]{ ":history clear", ":history size 500" }),
+
+            // Engine
             new(":engine", "Select or inspect playback engine.",
                 "[show|help|auto|vlc|mpv|ffplay|diag]",
                 Examples: new[]{ ":engine", ":engine mpv", ":engine help", ":engine diag" }),
 
-            // OPML (Import/Export)
+            // OPML
             new(":opml", "Import or export OPML (feed migration).",
                 "import <path> [--update-titles] | export [<path>]",
                 Examples: new[]{
@@ -152,7 +204,7 @@ namespace StuiPodcast.App
         public static readonly string EngineDoc =
 @"Playback engines & capabilities
 
-• VLC (libVLC) — default
+• VLC (libVLC) : default
   - Supports: seek, pause, volume, speed, local files, HTTP
   - Recommended. Mature & feature-complete.
 
@@ -166,11 +218,11 @@ namespace StuiPodcast.App
   - Intended as last-resort fallback.
 
 Switching engines
-  :engine           → show current engine & capabilities
-  :engine help      → show this guide
-  :engine auto      → prefer VLC → MPV → FFplay
-  :engine vlc|mpv|ffplay → set preference
-  :engine diag      → show active engine name, capabilities, preference & last-used
+  :engine                 → show current engine & capabilities
+  :engine help            → show this guide
+  :engine auto            → prefer VLC → MPV → FFplay
+  :engine vlc|mpv|ffplay  → set preference
+  :engine diag            → show active engine, caps, preference & last-used
 
 Notes
   - On FFplay, ':seek' restarts playback from the new position ('coarse seek').
@@ -179,7 +231,6 @@ Notes
   - macOS: brew install vlc mpv ffmpeg
   - Windows: install VLC/MPV/FFmpeg and ensure they are in PATH.";
 
-        // Optional: kurzer Leitfaden für OPML (falls du ihn im UI anzeigen willst)
         public static readonly string OpmlDoc =
 @"OPML import/export (feed migration)
 
