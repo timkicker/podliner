@@ -21,6 +21,8 @@ using StuiPodcast.Infra.Opml;
 
 class Program
 {
+    internal static bool SkipSaveOnExit = false;
+    
     // ---------- CLI parsed options ----------
     sealed class CliOptions
     {
@@ -907,7 +909,10 @@ class Program
 
             try { Downloader?.Dispose(); } catch { }
 
-            await SaveAsync();
+            if (!SkipSaveOnExit)
+            {
+                await SaveAsync();
+            }
             try { Application.Shutdown(); } catch { }
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }

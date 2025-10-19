@@ -60,6 +60,25 @@ static class CommandRouter
             
             case TopCommand.Open:  ExecOpen(args, ui, data); return;
             case TopCommand.Copy:  ExecCopy(args, ui, data); return;
+            
+            case TopCommand.QuitBang:
+                // :q! → ohne finalen Save beenden
+                try { Program.SkipSaveOnExit = true; } catch { /* falls andere Assembly-Grenzen */ }
+                ui.RequestQuit();
+                return;
+
+            case TopCommand.Write:
+                ExecWrite(persist, ui);
+                return;
+
+            case TopCommand.WriteQuit:
+                ExecWriteQuit(persist, ui, bang: false);
+                return;
+
+            case TopCommand.WriteQuitBang:
+                ExecWriteQuit(persist, ui, bang: true);
+                return;
+
 
 
             // Playback & Player
@@ -185,9 +204,55 @@ static class CommandRouter
         Save, Sort, Filter, PlayerBar,
         Net, PlaySource,
         AddFeed, Refresh, RemoveFeed, Feed,
-        History, Opml, Open, Copy
+        History, Opml, Open, Copy, Write, WriteQuit, WriteQuitBang, QuitBang
     }
 
+    
+    // ---- Vim-style write/quit helpers ----
+    private static void ExecWrite(Func<Task> persist, Shell ui)
+    {
+        try
+        {
+            persist().GetAwaiter().GetResult(); // sync write
+            ui.ShowOsd("saved", 900);
+        }
+        catch (Exception ex)
+        {
+            ui.ShowOsd($"save failed: {ex.Message}", 1800);
+        }
+    }
+
+    private static void ExecWriteQuit(Func<Task> persist, Shell ui, bool bang)
+    {
+        // Anzeige sofort feedbacken (UI bleibt responsiv)
+        ui.ShowOsd(bang ? "saving… quitting!" : "saving… quitting…", 800);
+
+        // Speichern im Hintergrund, danach Quit auf dem UI-Loop
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await persist().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Bei Fehler: trotzdem quit? Wir bleiben wie Vim konservativ -> nicht automatisch quitten.
+                Terminal.Gui.Application.MainLoop?.Invoke(() =>
+                {
+                    ui.ShowOsd("save failed – aborting :wq", 1800);
+                });
+                return;
+            }
+
+            // Quit sauber vom UI-Thread auslösen
+            Terminal.Gui.Application.MainLoop?.Invoke(() =>
+            {
+                ui.RequestQuit();
+            });
+        });
+    }
+
+    
     private static TopCommand MapTop(string cmd)
     {
         if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
@@ -205,6 +270,13 @@ static class CommandRouter
         cmd = cmd?.Trim() ?? "";
         if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
+        if (cmd.Equals(":q!", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit!", StringComparison.OrdinalIgnoreCase)) return TopCommand.QuitBang;
+
+        // Vim writes
+        if (cmd.Equals(":w", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":write", StringComparison.OrdinalIgnoreCase)) return TopCommand.Write;
+        if (cmd.Equals(":wq", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":x", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuit;
+        if (cmd.Equals(":wq!", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuitBang;
+
         if (cmd.StartsWith(":logs", StringComparison.OrdinalIgnoreCase)) return TopCommand.Logs;
         if (cmd.StartsWith(":osd", StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
 
