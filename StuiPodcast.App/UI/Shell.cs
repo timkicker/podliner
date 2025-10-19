@@ -138,6 +138,26 @@ public void SetTheme(ThemeMode mode)
 
     public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
     public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "Refreshed ✓" : "Refreshing…");
+    
+    public void EnsureSelectedFeedVisibleAndTop()
+    {
+        UI(() =>
+        {
+            var lv = _feedsPane?.List;
+            if (lv == null) return;
+
+            // Ganz nach oben scrollen, damit die Pseudo-Feeds ("All", "Saved", …) sichtbar sind
+            lv.TopItem = 0;
+
+            // Falls noch nichts selektiert ist: ersten Eintrag wählen
+            if (lv.SelectedItem < 0) lv.SelectedItem = 0;
+
+            // Repaint + Fokus
+            lv.SetNeedsDisplay();
+            lv.SetFocus();
+        });
+    }
+
 
     // ---- Build ----
     public void Build()
@@ -940,6 +960,29 @@ private void SetDefaultThemeForOS()
     // ---- Help & Logs (öffentliche API unverändert) ----
     public void ShowKeysHelp() => HelpBrowserDialog.Show();
     public void ShowError(string title, string msg) => MessageBox.ErrorQuery(title, msg, "OK");
+
+
+// Zugriff auf die spezielle "All"-Feed-GUID aus Program.cs
+    public Guid AllFeedId => FEED_ALL;
+
+// Episodenliste ganz nach oben scrollen und Fokus setzen
+    public void ScrollEpisodesToTopAndFocus()
+    {
+        UI(() =>
+        {
+            _episodesPane?.List?.SetFocus();
+
+            if (_episodesPane?.List != null)
+            {
+                _episodesPane.List.TopItem = 0;
+                _episodesPane.List.SelectedItem = 0;
+                _episodesPane.List.SetNeedsDisplay();
+            }
+        });
+    }
+
+
+    
     public void ShowLogsOverlay(int tail = 500)
     {
         try

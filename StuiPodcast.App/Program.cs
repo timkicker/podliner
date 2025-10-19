@@ -291,7 +291,59 @@ class Program
         Application.Init();
 
         UI = new Shell(MemLog);
+        // === Startfeed festlegen, bevor das UI seine Listen baut ===
+        try
+        {
+            // Wir wollen mit "All Episodes" starten:
+            // setze die letzte Selektion so, dass Shell/FeedsPane diesen Feed beim Build wählen
+            Data.LastSelectedFeedId = UI.AllFeedId;
+        }
+        catch
+        {
+            // robust bleiben
+        }
+
         UI.Build();
+        
+        // === Im nächsten Frame: Feeds-Liste ganz nach oben und sichtbar machen ===
+        Application.MainLoop?.AddIdle(() =>
+        {
+            try
+            {
+                UI.EnsureSelectedFeedVisibleAndTop();
+            }
+            catch { /* robust bleiben */ }
+            return false; // nur einmal ausführen
+        });
+
+        
+        // Beim Boot automatisch auf "All Episodes" gehen und nach oben scrollen
+        // Beim Boot: erst "All" setzen, dann im nächsten Frame nach oben scrollen & fokussieren
+        Application.MainLoop?.AddIdle(() =>
+        {
+            try
+            {
+                // 1) Episoden für den "All"-Feed in die UI setzen (dies triggert Rebuild der Liste)
+                UI.SetEpisodesForFeed(UI.AllFeedId, Data.Episodes);
+
+                // 2) Im *nächsten* Frame ganz nach oben scrollen & Fokus setzen
+                Application.MainLoop!.AddIdle(() =>
+                {
+                    try
+                    {
+                        UI.ScrollEpisodesToTopAndFocus();
+                    }
+                    catch { /* robust bleiben */ }
+                    return false; // nur einmal
+                });
+            }
+            catch { /* robust bleiben */ }
+
+            return false; // nur einmal
+        });
+
+
+
 
 	// 3a) Theme-Änderungen persistieren
 UI.ThemeChanged += mode =>
