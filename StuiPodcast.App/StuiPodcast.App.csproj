@@ -6,11 +6,21 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="LibVLCSharp" Version="3.8.4" />
+        <!-- Logging -->
         <PackageReference Include="Serilog" Version="4.3.0" />
         <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
-        <PackageReference Include="Terminal.Gui" Version="1.14.0" />
-        <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
+
+        <!-- Terminal.Gui wieder auf die Version, die bei dir lief -->
+        <PackageReference Include="Terminal.Gui" Version="1.19.0" />
+
+        <!-- LibVLCSharp managed bindings (plattformunabhängig) -->
+        <PackageReference Include="LibVLCSharp" Version="3.8.4" />
+
+        <!-- Native Runtimes NUR OS-spezifisch:
+             - Windows: NuGet-paketiert
+             - Linux/macOS: KEINE NuGet-Natives; System-Installation verwenden -->
+        <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20"
+                          Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     </ItemGroup>
 
     <PropertyGroup>
