@@ -313,6 +313,9 @@ public void SetTheme(ThemeMode mode)
             _feeds.AddRange(viewList);
             _feedsPane?.SetFeeds(_feeds);
 
+            // >>> FEED-METADATEN AUCH AN DIE EPISODEN-PANE GEBEN (für rechte Feed-Spalte)
+            _episodesPane?.SetFeedsMeta(feeds);
+
             // Zielauswahl bestimmen
             var FEED_ALL = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
 
@@ -347,6 +350,7 @@ public void SetTheme(ThemeMode mode)
         // Jetzt, wo eine valide Auswahl steht, Episoden aktualisieren
         RefreshEpisodesForSelectedFeed(_episodes);
     }
+
 
 
 
