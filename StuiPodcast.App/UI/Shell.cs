@@ -15,8 +15,12 @@ public sealed class Shell
 public ThemeMode CurrentTheme => _theme;
 public event Action<ThemeMode>? ThemeChanged;
 
-    private bool _suppressFeedSelectionEvents = false;
-    private Terminal.Gui.MenuBar? _menu;
+
+private bool _suppressFeedSelectionEvents = false;
+
+private Terminal.Gui.Label? _dlBadge;
+
+private Terminal.Gui.MenuBar? _menu;
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
@@ -260,7 +264,24 @@ public void SetTheme(ThemeMode mode)
             ShowSearch:  () => ShowSearchBox("/"),
             ToggleTheme: () => ToggleThemeRequested?.Invoke()
         ));
+        // Menü hinzufügen (gibt's schon bei dir)
         Application.Top.Add(menu);
+
+// --- NEU: kompakter Download-Indicator rechts neben der Menüzeile ---
+        _dlBadge = new Terminal.Gui.Label("")
+        {
+            Y = 0,
+            // ~28 Zeichen rechts reservieren; an deine Breite anpassen, falls du mehr Text willst
+            X = Terminal.Gui.Pos.AnchorEnd(28),
+            Width = Terminal.Gui.Dim.Sized(28),
+            TextAlignment = Terminal.Gui.TextAlignment.Right,
+            Visible = false // nur zeigen, wenn Text gesetzt
+        };
+// Farbschema an das Menü anlehnen, wenn vorhanden
+        try { _dlBadge.ColorScheme = menu?.ColorScheme ?? _dlBadge.ColorScheme; } catch { /* best effort */ }
+
+        Application.Top.Add(_dlBadge);
+
 
         // --- Theme ---
         ApplyTheme();
@@ -526,6 +547,31 @@ public void SetTheme(ThemeMode mode)
             RequestRepaint();
         });
     }
+    
+    /// <summary>
+    /// Setzt/verbirgt den Download-Badge oben rechts.
+    /// Übergib null/leer um auszublenden.
+    /// </summary>
+    public void SetDownloadBadge(string? text)
+    {
+        try
+        {
+            Terminal.Gui.Application.MainLoop?.Invoke(() =>
+            {
+                if (_dlBadge == null) return;
+
+                var show = !string.IsNullOrWhiteSpace(text);
+                _dlBadge.Visible = show;
+                _dlBadge.Text = show ? text : string.Empty;
+
+                // sicherstellen, dass neu gezeichnet wird
+                _dlBadge.SetNeedsDisplay();
+                Application.Top?.SetNeedsDisplay();
+            });
+        }
+        catch { /* UI darf App nicht crashen */ }
+    }
+
 
     public void TogglePlayerPlacement() => SetPlayerPlacement(!_playerAtTop);
     public void ShowDetails(Episode e) => UI(() => _episodesPane?.ShowDetails(e));

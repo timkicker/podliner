@@ -23,6 +23,7 @@ class Program
 {
     internal static bool SkipSaveOnExit = false;
     
+    
     // ---------- CLI parsed options ----------
     sealed class CliOptions
     {
@@ -39,6 +40,49 @@ class Program
         public bool ShowVersion;               // --version|-v|-V
         public bool ShowHelp;                  // --help|-h|-?
     }
+    
+    static void UpdateWindowTitleWithDownloads()
+    {
+        if (UI == null || Data == null) return;
+
+        // --- Basistitel bestimmen ---
+        // OFFLINE-Präfix wie an anderer Stelle genutzt
+        var offlinePrefix = (Data.NetworkOnline == false) ? "[OFFLINE] " : "";
+
+        string baseTitle = "Podliner";
+        try
+        {
+            var nowId = UI.GetNowPlayingId();
+            if (nowId != null)
+            {
+                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                if (ep != null && !string.IsNullOrWhiteSpace(ep.Title))
+                    baseTitle = ep.Title!;
+            }
+        }
+        catch { /* best effort */ }
+
+        // --- Download-HUD zusammenbauen (nur Zählwerte, kein Byte-Progress) ---
+        int running = 0, queued = 0;
+
+        try
+        {
+            running = Data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Running);
+            queued  = Data.DownloadQueue.Count;
+        }
+        catch { /* defensiv */ }
+
+        string hud = "";
+        int totalActive = running + queued;
+        if (totalActive > 0)
+        {
+            // Beispiel: " · ⇣ 1/3"  (running/active)
+            hud = $" · ⇣ {running}/{totalActive}";
+        }
+
+        UI.SetWindowTitle($"{offlinePrefix}{baseTitle}{hud}");
+    }
+
 
     static CliOptions ParseArgs(string[]? args)
     {
@@ -344,6 +388,7 @@ class Program
         try { Data.LastSelectedFeedId = UI.AllFeedId; } catch { }
 
         UI.Build();
+        UpdateWindowTitleWithDownloads();
 
         // Theme per CLI?
         if (!string.IsNullOrWhiteSpace(cli.Theme))
@@ -433,6 +478,7 @@ class Program
                 Application.MainLoop?.Invoke(() =>
                 {
                     UI?.RefreshEpisodesForSelectedFeed(Data.Episodes);
+                    UpdateWindowTitleWithDownloads();
                     if (UI != null)
                     {
                         switch (st.State)
@@ -468,18 +514,56 @@ class Program
         // --- wire shell events ---
         UI.QuitRequested += () => QuitApp();
 
+        // --- wire shell events ---
+        UI.QuitRequested += () => QuitApp();
+
         UI.AddFeedRequested += async url =>
         {
-            var f = await Feeds!.AddFeedAsync(url);
+            if (UI == null || Feeds == null) return;
 
-            Data.LastSelectedFeedId = f.Id;
-            Data.LastSelectedEpisodeIndexByFeed[f.Id] = 0;
-            _ = SaveAsync();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                UI.ShowOsd("Add feed: URL fehlt", 1500);
+                return;
+            }
 
-            UI.SetFeeds(Data.Feeds, f.Id);
-            UI.SetEpisodesForFeed(f.Id, Data.Episodes);
-            UI.SelectEpisodeIndex(0);
+            // Sofortiges Feedback
+            UI.ShowOsd("Adding feed…", 800);
+
+            // Doppelte Feeds vermeiden
+            try
+            {
+                if (HasFeedWithUrl(url))
+                {
+                    UI.ShowOsd("Already added", 1200);
+                    return;
+                }
+            }
+            catch { /* not fatal */ }
+
+            try
+            {
+                var f = await Feeds.AddFeedAsync(url);
+
+                // State & UI aktualisieren
+                Data.LastSelectedFeedId = f.Id;
+                Data.LastSelectedEpisodeIndexByFeed[f.Id] = 0;
+                _ = SaveAsync();
+
+                UI.SetFeeds(Data.Feeds, f.Id);
+                UI.SetEpisodesForFeed(f.Id, Data.Episodes);
+                UI.SelectEpisodeIndex(0);
+
+                // Erfolg
+                UI.ShowOsd("Feed added ✓", 1200);
+            }
+            catch (Exception ex)
+            {
+                // Misserfolg mit Grund
+                UI.ShowOsd($"Add failed: {ex.Message}", 2200);
+            }
         };
+
 
         UI.RefreshRequested += async () =>
         {

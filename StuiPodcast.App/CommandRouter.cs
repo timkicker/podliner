@@ -1167,14 +1167,14 @@ static class CommandRouter
             case "start":
                 dlm.ForceFront(ep.Id);
                 dlm.EnsureRunning();
-                ui.ShowOsd("Forced ⇣");
+                ui.ShowOsd("Downloading ⇣ (forced)");
                 break;
 
             case "cancel":
                 dlm.Cancel(ep.Id);
                 data.DownloadMap.Remove(ep.Id);
                 data.DownloadQueue.RemoveAll(x => x == ep.Id);
-                ui.ShowOsd("Canceled");
+                ui.ShowOsd("Download canceled ✖");
                 break;
 
             default:
@@ -1182,14 +1182,14 @@ static class CommandRouter
                 if (st == DownloadState.None || st == DownloadState.Canceled || st == DownloadState.Failed)
                 {
                     dlm.Enqueue(ep.Id);
-                    ui.ShowOsd("Queued ⌵");
+                    ui.ShowOsd("Download queued ⌵");
                 }
                 else
                 {
                     dlm.Cancel(ep.Id);
                     data.DownloadMap.Remove(ep.Id);
                     data.DownloadQueue.RemoveAll(x => x == ep.Id);
-                    ui.ShowOsd("Unqueued");
+                    ui.ShowOsd("Download unqueued");
                 }
                 break;
         }
@@ -1605,6 +1605,6 @@ static class CommandRouter
         _ = persist();
 
         ApplyList(ui, data);
-        ui.ShowOsd(newVal ? "Marked ⬇ Downloaded" : "Removed ⬇");
+        ui.ShowOsd(newVal ? "Marked as downloaded ⬇" : "Removed download mark ⬇");
     }
 }
