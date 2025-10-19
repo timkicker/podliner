@@ -17,9 +17,90 @@ using System.Text;
 using System.Runtime.InteropServices;
 using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
 using StuiPodcast.Infra.Player;
+using StuiPodcast.Infra.Opml;
 
 class Program
 {
+    // ---------- CLI parsed options ----------
+    sealed class CliOptions
+    {
+        public string? Engine;                 // --engine
+        public string? Theme;                  // --theme
+        public string? Feed;                   // --feed
+        public string? Search;                 // --search
+        public string? OpmlImport;             // --opml-import
+        public string? OpmlImportMode;         // --import-mode (merge|replace|dry-run)
+        public string? OpmlExport;             // --opml-export
+        public bool Offline;                   // --offline
+        public bool Ascii;                     // --ascii
+        public string? LogLevel;               // --log-level
+        public bool ShowVersion;               // --version|-v|-V
+        public bool ShowHelp;                  // --help|-h|-?
+    }
+
+    static CliOptions ParseArgs(string[]? args)
+    {
+        var o = new CliOptions();
+        if (args == null || args.Length == 0) return o;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var a = args[i];
+
+            switch (a)
+            {
+                case "--version":
+                case "-v":
+                case "-V":
+                    o.ShowVersion = true; break;
+
+                case "--help":
+                case "-h":
+                case "-?":
+                    o.ShowHelp = true; break;
+
+                case "--engine":
+                    if (i + 1 < args.Length) o.Engine = args[++i].Trim().ToLowerInvariant();
+                    break;
+
+                case "--theme":
+                    if (i + 1 < args.Length) o.Theme = args[++i].Trim().ToLowerInvariant();
+                    break;
+
+                case "--feed":
+                    if (i + 1 < args.Length) o.Feed = args[++i].Trim();
+                    break;
+
+                case "--search":
+                    if (i + 1 < args.Length) o.Search = args[++i];
+                    break;
+
+                case "--opml-import":
+                    if (i + 1 < args.Length) o.OpmlImport = args[++i];
+                    break;
+
+                case "--import-mode":
+                    if (i + 1 < args.Length) o.OpmlImportMode = args[++i].Trim().ToLowerInvariant();
+                    break;
+
+                case "--opml-export":
+                    if (i + 1 < args.Length) o.OpmlExport = args[++i];
+                    break;
+
+                case "--offline":
+                    o.Offline = true; break;
+
+                case "--ascii":
+                    o.Ascii = true; break;
+
+                case "--log-level":
+                    if (i + 1 < args.Length) o.LogLevel = args[++i].Trim().ToLowerInvariant();
+                    break;
+            }
+        }
+        return o;
+    }
+
     // SaveAsync-Throttle (klassenweite States)
     static readonly object _saveGate = new();
     static DateTimeOffset _lastSave = DateTimeOffset.MinValue;
@@ -122,12 +203,10 @@ class Program
             Log.Debug("net/probe nics-available={Avail}", anyUp);
         } catch { }
 
-        // Low-level TCP first (DNS-frei)
         var tcpOk =
             await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
             await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
 
-        // HTTP (Captive-Portal-tauglich)
         var httpOk =
             await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
             await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
@@ -147,7 +226,6 @@ class Program
 
         Application.MainLoop?.Invoke(() =>
         {
-            // UI könnte beim ersten Probe-Result noch null sein
             if (UI == null) return;
 
             CommandRouter.ApplyList(UI, Data);
@@ -161,7 +239,7 @@ class Program
                     UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
             }
 
-            if (!online) UI.ShowOsd("net: offline", 800); // online → kein OSD
+            if (!online) UI.ShowOsd("net: offline", 800);
         });
 
         _ = SaveAsync();
@@ -171,7 +249,7 @@ class Program
     static FeedService? Feeds;
 
     static SwappablePlayer? Player;
-    static string? _initialEngineInfo; // für OSD nach UI-Build
+    static string? _initialEngineInfo;
 
     static Shell? UI;
     static PlaybackCoordinator? Playback;
@@ -184,64 +262,52 @@ class Program
 
     static async Task Main(string[]? args)
     {
-        
-        if (args?.Any(a => a is "--version" or "-v" or "-V") == true)
+        var cli = ParseArgs(args);
+
+        if (cli.ShowVersion)
         {
             PrintVersion();
             return;
         }
-        if (args?.Any(a => a is "--help" or "-h" or "-?") == true)
+        if (cli.ShowHelp)
         {
             PrintHelp();
             return;
         }
-        
+
         // --- Windows-Konsole für Unicode/ANSI fit machen ---
         EnableWindowsConsoleAnsi();
 
-        ConfigureLogging();
+        // ASCII-only Glyphs (falls gewünscht) – vor Application.Init
+        if (cli.Ascii)
+        {
+            try { GlyphSet.Use(GlyphSet.Profile.Ascii); } catch { /* best effort */ }
+        }
+
+        ConfigureLogging(cli.LogLevel);
         InstallGlobalErrorHandlers();
 
         Data  = await AppStorage.LoadAsync();
         Feeds = new FeedService(Data);
+
+        // CLI: preferred engine vor Player-Erzeugung übernehmen
+        if (!string.IsNullOrWhiteSpace(cli.Engine))
+            Data.PreferredEngine = cli.Engine!.Trim().ToLowerInvariant();
 
         _ = Task.Run(async () =>
         {
             bool online = await QuickNetCheckAsync();
             _netConsecOk   = online ? 1 : 0;
             _netConsecFail = online ? 0 : 1;
-            _netLastFlip   = DateTimeOffset.UtcNow; // Dwell startet jetzt
+            _netLastFlip   = DateTimeOffset.UtcNow;
             OnNetworkChanged(online);
         });
-
-        /*
-        // Default-Feed beim allerersten Start
-        if (Data.Feeds.Count == 0)
-        {
-            try { await Feeds.AddFeedAsync("https://themadestages.podigee.io/feed/mp3"); }
-            catch (Exception ex) { Log.Warning(ex, "Could not add default feed"); }
-        }
-
-        // Anchor-Feed nur hinzufügen, wenn noch nicht da
-        var anchorUrl = "https://anchor.fm/s/fc0e8c18/podcast/rss";
-        try
-        {
-            if (!HasFeedWithUrl(anchorUrl))
-                await Feeds!.AddFeedAsync(anchorUrl);
-        }
-        catch (Exception ex) { Log.Warning(ex, "Could not add anchor feed"); }
-
-        */
 
         // 1) Core-Engine erzeugen …
         try
         {
             var core = PlayerFactory.Create(Data, out var engineInfo);
-
-            // 2) … und als SwappablePlayer wrappen
             Player = new SwappablePlayer(core);
-
-            // UI existiert hier noch nicht -> Text merken, OSD erst nach UI.Build()
             _initialEngineInfo = engineInfo;
         }
         catch (Exception)
@@ -250,31 +316,11 @@ class Program
             throw;
         }
 
-        // 3) Coordinator bekommt den SwappablePlayer (implementiert IPlayer)
+        // 3) Coordinator
         Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
-
         Downloader = new DownloadManager(Data);
 
-        // Auto-Advance: EINZIGE Quelle ist der Coordinator
-        Playback.AutoAdvanceSuggested += next =>
-        {
-            if (UI == null || Playback == null) return;
-
-            var list = Data.Episodes
-                .Where(e => e.FeedId == next.FeedId)
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
-
-            var i = list.FindIndex(e => e.Id == next.Id);
-            if (i >= 0) UI.SelectEpisodeIndex(i);
-
-            Playback.Play(next);
-            UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + next.Title);
-            UI.ShowDetails(next);
-            UI.SetNowPlaying(next.Id);
-        };
-
-        // >> Restore Player prefs (Truth = Player; Data = Snapshot)
+        // Restore Player prefs
         try
         {
             var v = Math.Clamp(Data.Volume0_100, 0, 100);
@@ -282,7 +328,7 @@ class Program
             var s = Data.Speed;
             if (s <= 0) s = 1.0;
             Player.SetSpeed(Math.Clamp(s, 0.25, 3.0));
-        } catch { /* falls ältere Player impls */ }
+        } catch { }
 
         Console.TreatControlCAsInput = false;
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; QuitApp(); };
@@ -291,127 +337,100 @@ class Program
         Application.Init();
 
         UI = new Shell(MemLog);
-        // === Startfeed festlegen, bevor das UI seine Listen baut ===
-        try
-        {
-            // Wir wollen mit "All Episodes" starten:
-            // setze die letzte Selektion so, dass Shell/FeedsPane diesen Feed beim Build wählen
-            Data.LastSelectedFeedId = UI.AllFeedId;
-        }
-        catch
-        {
-            // robust bleiben
-        }
+
+        // Startfeed („All“) als initiale Selektion
+        try { Data.LastSelectedFeedId = UI.AllFeedId; } catch { }
 
         UI.Build();
-        
-        // === Im nächsten Frame: Feeds-Liste ganz nach oben und sichtbar machen ===
+
+        // Theme per CLI?
+        if (!string.IsNullOrWhiteSpace(cli.Theme))
+        {
+            var t = cli.Theme!.Trim().ToLowerInvariant();
+            ThemeMode tm = t switch
+            {
+                "base"   => ThemeMode.Base,
+                "accent" => ThemeMode.MenuAccent,
+                "native" => ThemeMode.Native,
+                "auto"   => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent),
+                _        => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent)
+            };
+            try { UI.SetTheme(tm); Data.ThemePref = tm.ToString(); _ = SaveAsync(); } catch { }
+        }
+        else
+        {
+            // ansonsten: gespeicherten/Default anwenden
+            ThemeMode desired;
+            if (!string.IsNullOrWhiteSpace(Data.ThemePref) &&
+                Enum.TryParse<ThemeMode>(Data.ThemePref, out var saved))
+                desired = saved;
+            else
+                desired = OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent;
+
+            UI.SetTheme(desired);
+        }
+
+        // Scroll die Feeds-Liste nach oben & selektiere sichtbaren Start
         Application.MainLoop?.AddIdle(() =>
         {
-            try
-            {
-                UI.EnsureSelectedFeedVisibleAndTop();
-            }
-            catch { /* robust bleiben */ }
-            return false; // nur einmal ausführen
+            try { UI.EnsureSelectedFeedVisibleAndTop(); } catch { }
+            return false;
         });
 
-        
-        // Beim Boot automatisch auf "All Episodes" gehen und nach oben scrollen
-        // Beim Boot: erst "All" setzen, dann im nächsten Frame nach oben scrollen & fokussieren
+        // Episoden initial auf "All" + ganz nach oben
         Application.MainLoop?.AddIdle(() =>
         {
             try
             {
-                // 1) Episoden für den "All"-Feed in die UI setzen (dies triggert Rebuild der Liste)
                 UI.SetEpisodesForFeed(UI.AllFeedId, Data.Episodes);
-
-                // 2) Im *nächsten* Frame ganz nach oben scrollen & Fokus setzen
                 Application.MainLoop!.AddIdle(() =>
                 {
-                    try
-                    {
-                        UI.ScrollEpisodesToTopAndFocus();
-                    }
-                    catch { /* robust bleiben */ }
-                    return false; // nur einmal
+                    try { UI.ScrollEpisodesToTopAndFocus(); } catch { }
+                    return false;
                 });
-            }
-            catch { /* robust bleiben */ }
-
-            return false; // nur einmal
+            } catch { }
+            return false;
         });
 
+        // Theme persistieren, wenn im UI geändert
+        UI.ThemeChanged += mode =>
+        {
+            Data.ThemePref = mode.ToString();
+            _ = SaveAsync();
+        };
 
-
-
-	// 3a) Theme-Änderungen persistieren
-UI.ThemeChanged += mode =>
-{
-    Data.ThemePref = mode.ToString(); // Enum-Name als string
-    _ = SaveAsync();
-};
-
-// 3b) Beim Start anwenden:
-// Falls gespeichert: laden; sonst OS-Default (Windows=MenuAccent, andere=Base)
-ThemeMode desired;
-if (!string.IsNullOrWhiteSpace(Data.ThemePref) &&
-    Enum.TryParse<ThemeMode>(Data.ThemePref, out var saved))
-{
-    desired = saved;
-}
-else
-{
-    desired = OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent;
-}
-
-// Wichtig: kein flicker—direkt setzen, NICHT togglen
-UI.SetTheme(desired);
-
-       
-
-        // sofort einmal prüfen – nichts zuweisen, einfach ausführen
+        // Netzwerkperiodik
         _ = Task.Run(async () =>
         {
             var online = await QuickNetCheckAsync();
             OnNetworkChanged(online);
         });
-
         try
         {
-            NetworkChange.NetworkAvailabilityChanged += (s, e) =>
-            {
-                // OS-Event ist nur ein Hint → echte Entscheidung trifft die Probe + Hysterese
-                TriggerNetProbe();
-            };
-        }
-        catch { /* kann auf manchen Plattformen fehlen → egal */ }
-
+            NetworkChange.NetworkAvailabilityChanged += (s, e) => { TriggerNetProbe(); };
+        } catch { }
         _netTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(3), _ =>
         {
             TriggerNetProbe();
-            return true; // weiterlaufen
+            return true;
         });
 
         // Lookups
         UI.SetQueueLookup(id => Data.Queue.Contains(id));
         UI.SetDownloadStateLookup(id => Data.DownloadMap.TryGetValue(id, out var s) ? s.State : DownloadState.None);
-        UI.SetOfflineLookup(() => !Data.NetworkOnline); // true = offline
+        UI.SetOfflineLookup(() => !Data.NetworkOnline);
 
-        // Download-Status → UI
+        // Downloader → UI
         Downloader.StatusChanged += (id, st) =>
         {
             var prev = _dlLast.TryGetValue(id, out var p) ? p : DownloadState.None;
             _dlLast[id] = st.State;
 
-            // Nur wenn sich der STATE ändert, die UI refreshen (Badge wechselt)
             if (prev != st.State)
             {
                 Application.MainLoop?.Invoke(() =>
                 {
                     UI?.RefreshEpisodesForSelectedFeed(Data.Episodes);
-
-                    // Ultra-kurze OSDs, nur bei Übergängen – nie bei jedem Chunk
                     if (UI != null)
                     {
                         switch (st.State)
@@ -429,7 +448,6 @@ UI.SetTheme(desired);
                 return;
             }
 
-            // Gleichbleibender State (Running): Liste sanft pulsen
             if (st.State == DownloadState.Running && (DateTime.UtcNow - _dlLastUiPulse) > TimeSpan.FromMilliseconds(500))
             {
                 _dlLastUiPulse = DateTime.UtcNow;
@@ -437,13 +455,11 @@ UI.SetTheme(desired);
             }
         };
 
-        // Worker starten
         Downloader.EnsureRunning();
 
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
         UI.SetHistoryLimit(Data.HistorySize);
 
-        // >> Restore Player-Bar position & Filter
         UI.SetPlayerPlacement(Data.PlayerAtTop);
         UI.SetUnplayedFilterVisual(Data.UnplayedOnly);
 
@@ -477,7 +493,7 @@ UI.SetTheme(desired);
                 if (Data.LastSelectedEpisodeIndexByFeed.TryGetValue(selected.Value, out var idx))
                     UI.SelectEpisodeIndex(idx);
             }
-            CommandRouter.ApplyList(UI, Data); // respektiert UnplayedOnly
+            CommandRouter.ApplyList(UI, Data);
         };
 
         UI.SelectedFeedChanged += () =>
@@ -490,7 +506,7 @@ UI.SetTheme(desired);
                 int idx = 0;
                 if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(fid.Value, out idx))
                 {
-                    if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy; // alt
+                    if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy;
                 }
 
                 UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
@@ -500,7 +516,6 @@ UI.SetTheme(desired);
             _ = SaveAsync();
         };
 
-        // Auswahlwechsel → pro-Feed Index speichern
         UI.EpisodeSelectionChanged += () =>
         {
             var fid = UI.GetSelectedFeedId();
@@ -518,11 +533,9 @@ UI.SetTheme(desired);
 
             var curFeed = UI.GetSelectedFeedId();
 
-            // Verlauf stempeln
             ep.LastPlayedAt = DateTimeOffset.Now;
             _ = SaveAsync();
 
-            // Queue-Feed: alle davor + diese entfernen
             if (curFeed is Guid fid && fid == UI.QueueFeedId)
             {
                 int ix = Data.Queue.FindIndex(id => id == ep.Id);
@@ -535,7 +548,6 @@ UI.SetTheme(desired);
                 }
             }
 
-            // === Quelle bestimmen (ohne DownloadManager-API) ===
             string? localPath = null;
             if (Data.DownloadMap.TryGetValue(ep.Id, out var st)
                 && st.State == DownloadState.Done
@@ -546,7 +558,7 @@ UI.SetTheme(desired);
             }
 
             bool isRemote =
-                string.IsNullOrWhiteSpace(localPath) &&           // kein lokaler Treffer
+                string.IsNullOrWhiteSpace(localPath) &&
                 !string.IsNullOrWhiteSpace(ep.AudioUrl) &&
                 ep.AudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
@@ -561,7 +573,7 @@ UI.SetTheme(desired);
             {
                 "local"  => localPath,
                 "remote" => ep.AudioUrl,
-                _        => localPath ?? (online ? ep.AudioUrl : null) // auto: lokal bevorzugt, sonst remote wenn online
+                _        => localPath ?? (online ? ep.AudioUrl : null)
             };
 
             if (string.IsNullOrWhiteSpace(source))
@@ -574,7 +586,6 @@ UI.SetTheme(desired);
                 return;
             }
 
-            // Minimale Injektion: ep.AudioUrl kurz auf gewählte Quelle setzen
             var oldUrl = ep.AudioUrl;
             try
             {
@@ -594,7 +605,6 @@ UI.SetTheme(desired);
             UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + ep.Title);
             UI.SetNowPlaying(ep.Id);
 
-            // Einmaliger Retry für lokale Dateien, falls der Start „hängt“.
             if (localPath != null)
             {
                 Application.MainLoop?.AddTimeout(TimeSpan.FromMilliseconds(600), _ =>
@@ -604,29 +614,22 @@ UI.SetTheme(desired);
                         var s = Player.State;
                         if (!s.IsPlaying && s.Position == TimeSpan.Zero)
                         {
-                            try { Player.Stop(); } catch { /* best effort */ }
+                            try { Player.Stop(); } catch { }
 
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
                             var old = ep.AudioUrl;
                             try
                             {
-                                ep.AudioUrl = fileUri; // nur für den Start
+                                ep.AudioUrl = fileUri;
                                 Playback.Play(ep);
                                 UI.ShowOsd("Retry (file://)");
                             }
-                            finally
-                            {
-                                ep.AudioUrl = old; // wieder zurück
-                            }
+                            finally { ep.AudioUrl = old; }
                         }
                     }
-                    catch
-                    {
-                        /* robust bleiben */
-                    }
-
-                    return false; // one-shot
+                    catch { }
+                    return false;
                 });
             }
         };
@@ -642,12 +645,12 @@ UI.SetTheme(desired);
 
             if (ep.Played)
             {
-                if (ep.LengthMs is long len) ep.LastPosMs = len; // ✔ → ans Ende
+                if (ep.LengthMs is long len) ep.LastPosMs = len;
                 ep.LastPlayedAt = DateTimeOffset.Now;
             }
             else
             {
-                ep.LastPosMs = 0; // ◯ → leerer Kreis
+                ep.LastPosMs = 0;
             }
 
             _ = SaveAsync();
@@ -657,12 +660,10 @@ UI.SetTheme(desired);
             UI.ShowDetails(ep);
         };
 
-        // Program.cs – Command-Handler
         UI.Command += cmd =>
         {
             if (UI == null || Player == null || Playback == null || Downloader == null) return;
 
-            // 1) Queue-Commands zuerst
             if (CommandRouter.HandleQueue(cmd, UI, Data, SaveAsync))
             {
                 UI.SetQueueOrder(Data.Queue);
@@ -670,11 +671,9 @@ UI.SetTheme(desired);
                 return;
             }
 
-            // 2) Download-Commands
             if (CommandRouter.HandleDownloads(cmd, UI, Data, Downloader, SaveAsync))
                 return;
 
-            // 3) Rest
             CommandRouter.Handle(cmd, Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
         };
 
@@ -695,7 +694,7 @@ UI.SetTheme(desired);
         // --- initial lists ---
         UI.SetFeeds(Data.Feeds, Data.LastSelectedFeedId);
         UI.SetUnplayedHint(Data.UnplayedOnly);
-        CommandRouter.ApplyList(UI, Data); // respektiert UnplayedOnly, behält Auswahl
+        CommandRouter.ApplyList(UI, Data);
 
         var initialFeed = UI.GetSelectedFeedId();
         if (initialFeed != null)
@@ -703,14 +702,13 @@ UI.SetTheme(desired);
             int idx = 0;
             if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(initialFeed.Value, out idx))
             {
-                if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy; // alt
+                if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy;
             }
 
             UI.SetEpisodesForFeed(initialFeed.Value, Data.Episodes);
             UI.SelectEpisodeIndex(idx);
         }
 
-        // zuletzt gespielte Episode (History-Priorität)
         var last = Data.Episodes
             .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
             .ThenByDescending(e => e.LastPosMs ?? 0)
@@ -733,7 +731,7 @@ UI.SetTheme(desired);
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed);
         }
 
-        // === Snapshot → Player-UI (einzige Quelle für Anzeige) ===
+        // === Snapshot → Player-UI ===
         Playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -742,7 +740,6 @@ UI.SetTheme(desired);
                 {
                     UI.UpdatePlayerSnapshot(snap, Player.State.Volume0_100);
 
-                    // Optional: Fenstertitel für aktuelle Episode aktualisieren
                     var nowId = UI.GetNowPlayingId();
                     if (nowId is Guid nid && snap.EpisodeId == nid)
                     {
@@ -752,10 +749,9 @@ UI.SetTheme(desired);
                     }
                 }
             }
-            catch { /* UI robust halten */ }
+            catch { }
         });
 
-        // **NEU**: Playback-Status steuert das Loading-Banner sichtbar & korrekt
         Playback.StatusChanged += st => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -776,10 +772,9 @@ UI.SetTheme(desired);
                         break;
                 }
             }
-            catch { /* robust */ }
+            catch { }
         });
 
-        // Player-State treibt Persist/Auto-Advance (UI-Update kommt aus Snapshot)
         Player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -795,13 +790,9 @@ UI.SetTheme(desired);
                         Data.Episodes);
                 }
             }
-            catch
-            {
-                // UI robust halten
-            }
+            catch { }
         });
 
-        // UI-Refresh Watchdog (redundant, aber pragmatisch): nur Persist-Tick
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             try
@@ -817,9 +808,92 @@ UI.SetTheme(desired);
                         Data.Episodes);
                 }
             }
-            catch { /* robust bleiben */ }
+            catch { }
 
             return true;
+        });
+
+        // ---------- APPLY CLI FLAGS (post-UI) ----------
+        Application.MainLoop?.Invoke(() =>
+        {
+            try
+            {
+                if (UI == null || Player == null || Playback == null || Downloader == null) return;
+
+                // --offline
+                if (cli.Offline)
+                {
+                    CommandRouter.Handle(":net offline", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                }
+
+                // --engine (falls zur Laufzeit erneut gesetzt werden soll)
+                if (!string.IsNullOrWhiteSpace(cli.Engine))
+                {
+                    CommandRouter.Handle($":engine {cli.Engine}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                }
+
+                // --opml-export
+                if (!string.IsNullOrWhiteSpace(cli.OpmlExport))
+                {
+                    var path = cli.OpmlExport!;
+                    CommandRouter.Handle($":opml export {path}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                }
+
+                // --opml-import (+ --import-mode)
+                if (!string.IsNullOrWhiteSpace(cli.OpmlImport))
+                {
+                    var mode = (cli.OpmlImportMode ?? "merge").Trim().ToLowerInvariant();
+
+                    if (mode == "dry-run")
+                    {
+                        try
+                        {
+                            var xml = OpmlIo.ReadFile(cli.OpmlImport!);
+                            var doc = OpmlParser.Parse(xml);
+                            var plan = OpmlImportPlanner.Plan(doc, Data.Feeds, updateTitles: false);
+                            UI.ShowOsd($"OPML dry-run → new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 2400);
+                        }
+                        catch (Exception ex)
+                        {
+                            UI.ShowOsd($"OPML dry-run failed: {ex.Message}", 2000);
+                        }
+                    }
+                    else
+                    {
+                        if (mode == "replace")
+                        {
+                            // Bestehende Feeds + Episoden leeren
+                            Data.Feeds.Clear();
+                            Data.Episodes.Clear();
+                            Data.LastSelectedFeedId = UI.AllFeedId;
+                            _ = SaveAsync();
+
+                            // UI entsprechend leeren
+                            UI.SetFeeds(Data.Feeds, Data.LastSelectedFeedId);
+                            CommandRouter.ApplyList(UI, Data);
+                        }
+
+                        // Merge/Replace arbeiten über vorhandenen :opml import Mechanismus
+                        var path = cli.OpmlImport!.Contains(' ') ? $"\"{cli.OpmlImport}\"" : cli.OpmlImport!;
+                        CommandRouter.Handle($":opml import {path}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                    }
+                }
+
+                // --feed
+                if (!string.IsNullOrWhiteSpace(cli.Feed))
+                {
+                    var f = cli.Feed!.Trim();
+                    // akzeptiere Schlüsselwörter und GUIDs 1:1
+                    CommandRouter.Handle($":feed {f}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                }
+
+                // --search
+                if (!string.IsNullOrWhiteSpace(cli.Search))
+                {
+                    CommandRouter.Handle($":search {cli.Search}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
+                }
+            }
+            catch { /* robust */ }
         });
 
         try { Application.Run(); }
@@ -853,7 +927,7 @@ UI.SetTheme(desired);
             var pos = (double)(e.LastPosMs ?? 0);
             var len = (double)(e.LengthMs  ?? 0);
             if (len <= 0) return 0.0;
-            var r = pos / Math.Max(len, pos); // nie >1, nie NaN
+            var r = pos / Math.Max(len, pos);
             return Math.Clamp(r, 0.0, 1.0);
         }
 
@@ -907,7 +981,6 @@ UI.SetTheme(desired);
     {
         try
         {
-            // Wunsch merken (falls PlayerFactory auf Data.PreferredEngine schaut)
             Data.PreferredEngine = string.IsNullOrWhiteSpace(pref) ? "auto" : pref.Trim().ToLowerInvariant();
             _ = SaveAsync();
 
@@ -919,7 +992,6 @@ UI.SetTheme(desired);
                 await Player.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
                 UI?.ShowOsd($"engine switched → {Player.Name}", 1400);
 
-                // Nach Engine-Switch: Persist-Tick einmal triggern (UI snappt über SnapshotAvailable)
                 if (Playback != null)
                 {
                     Playback.PersistProgressTick(
@@ -1023,7 +1095,7 @@ UI.SetTheme(desired);
 
     static void TriggerNetProbe()
     {
-        if (_netProbeRunning) return;   // schon unterwegs → nix tun
+        if (_netProbeRunning) return;
         _netProbeRunning = true;
 
         _ = Task.Run(async () =>
@@ -1051,7 +1123,7 @@ UI.SetTheme(desired);
                 if (flipToOn || flipToOff)
                 {
                     _netLastFlip = DateTimeOffset.UtcNow;
-                    LogNicsSnapshot();   // optional
+                    LogNicsSnapshot();
                     OnNetworkChanged(flipToOn);
                 }
             }
@@ -1063,14 +1135,12 @@ UI.SetTheme(desired);
     {
         if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
 
-        // 1) Hintergrundaktivitäten stoppen – NICHT warten
         try { if (_netTimerToken is not null) Application.MainLoop?.RemoveTimeout(_netTimerToken); } catch { }
         try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
 
-        try { Downloader?.Stop(); } catch { }     // lädt sofort keinen neuen Job mehr
-        try { Player?.Stop(); } catch { }         // Player stoppen, aber nicht dispose’n
+        try { Downloader?.Stop(); } catch { }
+        try { Player?.Stop(); } catch { }
 
-        // 2) UI-Loop beenden (vom UI-Thread)
         try
         {
             Application.MainLoop?.Invoke(() =>
@@ -1080,7 +1150,6 @@ UI.SetTheme(desired);
         }
         catch { }
 
-        // 3) Watchdog: falls Run() nicht sauber zurückkehrt -> hart beenden
         _ = System.Threading.Tasks.Task.Run(async () =>
         {
             await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(false);
@@ -1088,13 +1157,25 @@ UI.SetTheme(desired);
         });
     }
 
-    static void ConfigureLogging()
+    static void ConfigureLogging(string? level)
     {
         var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(logDir);
 
+        // Map CLI level
+        var min = Serilog.Events.LogEventLevel.Debug;
+        switch ((level ?? "").Trim().ToLowerInvariant())
+        {
+            case "info":  min = Serilog.Events.LogEventLevel.Information; break;
+            case "warn":
+            case "warning": min = Serilog.Events.LogEventLevel.Warning; break;
+            case "error": min = Serilog.Events.LogEventLevel.Error; break;
+            case "debug":
+            default:      min = Serilog.Events.LogEventLevel.Debug; break;
+        }
+
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Debug()
+            .MinimumLevel.Is(min)
             .Enrich.WithProperty("pid", Environment.ProcessId)
             .WriteTo.Sink(MemLog)
             .WriteTo.File(
@@ -1136,7 +1217,6 @@ UI.SetTheme(desired);
         });
     }
 
-    // Legacy-Compat: aktuell No-Op (wurde früher für End-Transition genutzt)
     static void ResetAutoAdvance() { }
 
     // ---------- Windows VT/UTF-8 Enable ----------
@@ -1144,7 +1224,6 @@ UI.SetTheme(desired);
     {
         try
         {
-            // UTF-8 ohne BOM für saubere Glyphen
             Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return;
@@ -1162,7 +1241,7 @@ UI.SetTheme(desired);
                 SetConsoleMode(handle, newMode);
             }
         }
-        catch { /* best effort */ }
+        catch { }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -1180,7 +1259,6 @@ UI.SetTheme(desired);
         var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         var ver  = string.IsNullOrWhiteSpace(info) ? asm.GetName().Version?.ToString() ?? "0.0.0" : info;
 
-        // optional: RID/Arch drucken (hilft bei Support)
         string rid;
         try { rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier; }
         catch { rid = $"{Environment.OSVersion.Platform}-{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}".ToLowerInvariant(); }
@@ -1194,8 +1272,16 @@ UI.SetTheme(desired);
         Console.WriteLine();
         Console.WriteLine("Usage: podliner [options]");
         Console.WriteLine("Options:");
-        Console.WriteLine("  --version, -v   Show version and exit");
-        Console.WriteLine("  --help, -h      Show this help and exit");
-        // spätere Flags kannst du hier ergänzen (z.B. --diag)
+        Console.WriteLine("  --version, -v            Show version and exit");
+        Console.WriteLine("  --help, -h               Show this help and exit");
+        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay>");
+        Console.WriteLine("  --theme <base|accent|native|auto>");
+        Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
+        Console.WriteLine("  --search \"<term>\"");
+        Console.WriteLine("  --opml-import <FILE> [--import-mode merge|replace|dry-run]");
+        Console.WriteLine("  --opml-export <FILE>");
+        Console.WriteLine("  --offline");
+        Console.WriteLine("  --ascii");
+        Console.WriteLine("  --log-level <debug|info|warn|error>");
     }
 }
