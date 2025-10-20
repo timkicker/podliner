@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using AngleSharp.Html.Parser;
 using CodeHollow.FeedReader;
+using Serilog;
 using StuiPodcast.Core;
 
 // Aliases
@@ -32,18 +33,24 @@ public class FeedService
 
     public async Task<CoreFeed> AddFeedAsync(string url)
     {
+        Log.Information("feed/add url={Url}", url);
+
+        
         // 1) Probe (best effort)
         var probeFeed = new CoreFeed { Url = url, Title = url, LastChecked = DateTimeOffset.Now };
         try
         {
             var f = await FeedReader.ReadAsync(url).ConfigureAwait(false);
+            Log.Information("feed/probe ok url={Url} title={Title} items={Count}", url, f.Title, f.Items?.Count ?? 0); // <--- NEU
             probeFeed.Title = string.IsNullOrWhiteSpace(f.Title) ? url : f.Title!;
             probeFeed.LastChecked = DateTimeOffset.Now;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "feed/probe fail url={Url}", url); // <--- NEU
             probeFeed.LastChecked = DateTimeOffset.Now;
         }
+
 
         // 2) Persistenter Upsert (vergibt stabile Id)
         var saved = _app.AddOrUpdateFeed(probeFeed);
@@ -81,9 +88,12 @@ public class FeedService
         try
         {
             f = await FeedReader.ReadAsync(feed.Url).ConfigureAwait(false);
+            Log.Information("feed/refresh probe ok id={Id} title={Title} items={Items}",
+                feed.Id, f.Title ?? feed.Title, f.Items?.Count ?? 0); // <--- NEU
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "feed/refresh fail url={Url}", feed.Url); // <--- NEU
             feed.LastChecked = DateTimeOffset.Now;
             // Persistiere trotzdem "LastChecked"
             var persistedFail = _app.AddOrUpdateFeed(feed);
@@ -99,11 +109,13 @@ public class FeedService
         var persistedFeed = _app.AddOrUpdateFeed(feed);
         UpsertFeedIntoData(persistedFeed);
 
+        int added = 0, updated = 0, skippedNoAudio = 0; // <--- NEU
+        
         // Items verarbeiten
         foreach (var item in f.Items ?? Array.Empty<FeedItem>())
         {
             var audioUrl = TryGetAudioUrl(item);
-            if (string.IsNullOrWhiteSpace(audioUrl)) continue;
+            if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
 
             var pub   = ParseDate(item);
             var lenMs = (long)(TryGetDurationMs(item) ?? 0);
@@ -132,6 +144,7 @@ public class FeedService
 
                 // UI updaten (neuer Eintrag)
                 _data.Episodes.Add(persistedEp);
+                added++;
             }
             else
             {
@@ -150,8 +163,14 @@ public class FeedService
 
                 // Persistenter Upsert, damit library.json aktualisiert wird
                 _app.AddOrUpdateEpisode(existing);
+                updated++;
             }
+            
+            
         }
+        Log.Information("feed/refresh done id={Id} title={Title} items={Items} added={Added} updated={Updated} skippedNoAudio={Skipped}",
+            feed.Id, feed.Title, f.Items?.Count ?? 0, added, updated, skippedNoAudio); // <--- NEU
+
     }
 
     // ---------------------------------------------------------------------

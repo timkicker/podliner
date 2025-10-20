@@ -25,6 +25,9 @@ class Program
 {
     // ===== Runtime Flags =====
     internal static bool SkipSaveOnExit = false;
+    static DateTimeOffset _netLastHeartbeat = DateTimeOffset.MinValue;
+    static readonly TimeSpan _netHeartbeatEvery = TimeSpan.FromMinutes(2);
+
 
     // ===== CLI parsed options =====
     sealed class CliOptions
@@ -187,8 +190,13 @@ class Program
         App = new AppFacade(ConfigStore, LibraryStore, downloadLookup);
 
         // ---- Laden & Bridge → AppData (UI bleibt unverändert) ----
-        var cfg = App.LoadConfig();     // Prefs laden
-        var lib = App.LoadLibrary();    // Inhalte laden
+        var cfg = App.LoadConfig();
+        var lib = App.LoadLibrary();
+        Log.Information("loaded config theme={Theme} playerAtTop={PlayerTop} sort={SortBy}/{SortDir}",
+            cfg.Theme, cfg.Ui.PlayerAtTop, cfg.ViewDefaults.SortBy, cfg.ViewDefaults.SortDir);
+
+        Log.Information("loaded library feeds={FeedCount} episodes={EpCount} queue={QCount} history={HCount}",
+            lib.Feeds.Count, lib.Episodes.Count, lib.Queue?.Count ?? 0, lib.History?.Count ?? 0);
 
         Bridge.SyncFromFacadeToAppData(App, Data);
 
@@ -290,6 +298,10 @@ class Program
                         : DefaultThemeForPlatform());
 
             UI.SetTheme(desired);
+            Log.Information("theme resolved saved={Saved} osDefault={OsDefault} chosen={Chosen}",
+                Data.ThemePref, OperatingSystem.IsWindows() ? "Base" : OperatingSystem.IsMacOS() ? "Native" : "MenuAccent",
+                desired);
+
             // HIER NICHT Data.ThemePref ändern – "auto" bleibt "auto",
             // bis der User aktiv ein Theme setzt.
         }
@@ -331,11 +343,18 @@ class Program
         {
             NetworkChange.NetworkAvailabilityChanged += (s, e) => { TriggerNetProbe(); };
         } catch { }
-        _netTimerToken = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(3), _ =>
+        _netTimerToken = Application.MainLoop.AddTimeout(NetProbeInterval(), _ =>
         {
             TriggerNetProbe();
-            return true;
+            // nächstes Intervall dynamisch setzen
+            Application.MainLoop.AddTimeout(NetProbeInterval(), __ =>
+            {
+                TriggerNetProbe();
+                return true; // weiter wiederholen
+            });
+            return false; // diesen ersten Timeout nicht wiederholen
         });
+
 
         // Lookups für UI (Queue/Downloaded/Offline)
         UI.SetQueueLookup(id => Data.Queue.Contains(id));
@@ -386,6 +405,7 @@ class Program
             if (UI == null || Feeds == null) return;
             if (string.IsNullOrWhiteSpace(url)) { UI.ShowOsd("Add feed: URL fehlt", 1500); return; }
 
+            Log.Information("ui/addfeed url={Url}", url); // <--- NEU
             UI.ShowOsd("Adding feed…", 800);
 
             try
@@ -398,6 +418,7 @@ class Program
             {
                 var f = await Feeds.AddFeedAsync(url);
                 App?.SaveNow();  // sofort in library.json schreiben
+                Log.Information("ui/addfeed ok id={Id} title={Title}", f.Id, f.Title); // <--- NEU
 
                 Data.LastSelectedFeedId = f.Id;
                 // Index-Map ggf. leer; UI zeigt Liste neu
@@ -411,6 +432,7 @@ class Program
             }
             catch (Exception ex)
             {
+                Log.Error(ex, "ui/addfeed failed url={Url}", url); // <--- NEU
                 UI.ShowOsd($"Add failed: {ex.Message}", 2200);
             }
         };
@@ -582,6 +604,7 @@ class Program
         // Commands
         UI.Command += cmd =>
         {
+            Log.Debug("cmd {Cmd}", cmd); // <--- NEU
             if (UI == null || Player == null || Playback == null || Downloader == null) return;
 
             if (CommandRouter.HandleQueue(cmd, UI, Data, SaveAsync))
@@ -752,6 +775,7 @@ class Program
                 if (!string.IsNullOrWhiteSpace(cli.OpmlExport))
                 {
                     var path = cli.OpmlExport!;
+                    Log.Information("cli/opml export path={Path}", path); // <--- NEU
                     CommandRouter.Handle($":opml export {path}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
                 }
 
@@ -767,17 +791,22 @@ class Program
                             var xml = OpmlIo.ReadFile(cli.OpmlImport!);
                             var doc = OpmlParser.Parse(xml);
                             var plan = OpmlImportPlanner.Plan(doc, Data.Feeds, updateTitles: false);
+                            Log.Information("cli/opml dryrun path={Path} new={New} dup={Dup} invalid={Invalid}",
+                                cli.OpmlImport, plan.NewCount, plan.DuplicateCount, plan.InvalidCount); // <--- NEU
                             UI.ShowOsd($"OPML dry-run → new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 2400);
                         }
                         catch (Exception ex)
                         {
+                            Log.Warning(ex, "cli/opml dryrun failed path={Path}", cli.OpmlImport); // <--- NEU
                             UI.ShowOsd($"OPML dry-run failed: {ex.Message}", 2000);
                         }
                     }
                     else
                     {
+                        Log.Information("cli/opml import path={Path} mode={Mode}", cli.OpmlImport, mode); // <--- NEU
                         if (mode == "replace")
                         {
+                            Log.Information("cli/opml replace clearing existing feeds/episodes"); // <--- NEU
                             // Bestehende Feeds + Episoden leeren (UI-Logik bleibt)
                             Data.Feeds.Clear();
                             Data.Episodes.Clear();
@@ -812,6 +841,7 @@ class Program
         try { Application.Run(); }
         finally
         {
+            Log.Information("shutdown begin"); // <--- NEU
             try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
             try { if (_netTimerToken is not null) Application.MainLoop.RemoveTimeout(_netTimerToken); } catch {}
 
@@ -826,6 +856,7 @@ class Program
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }
             try { _probeHttp.Dispose(); } catch { }
+            Log.Information("shutdown end");   // <--- NEU
         }
     }
 
@@ -940,11 +971,14 @@ class Program
             _ = SaveAsync();
 
             var next = PlayerFactory.Create(Data, out var info);
+            Log.Information("engine created name={Engine} caps={Caps} info={Info}",
+                Player?.Name, (Player?.Capabilities).ToString(), _initialEngineInfo);
             ApplyPrefsTo(next);
 
             if (Player != null)
             {
                 await Player.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
+                Log.Information("engine switched current={Name} caps={Caps}", Player.Name, Player.Capabilities); // <--- NEU
                 UI?.ShowOsd($"engine switched → {Player.Name}", 1400);
 
                 if (Playback != null)
@@ -1094,12 +1128,29 @@ class Program
                 {
                     _netLastFlip = DateTimeOffset.UtcNow;
                     LogNicsSnapshot();
+                    Log.Information("net/state change → {State}", flipToOn ? "online" : "offline");
                     OnNetworkChanged(flipToOn);
                 }
+                else
+                {
+                    // Seltenen Heartbeat loggen (Debug), damit man Aktivität sieht
+                    var now = DateTimeOffset.UtcNow;
+                    if (now - _netLastHeartbeat >= _netHeartbeatEvery)
+                    {
+                        _netLastHeartbeat = now;
+                        Log.Debug("net/steady state={State} ok={Ok} fail={Fail}",
+                            Data.NetworkOnline ? "online" : "offline", _netConsecOk, _netConsecFail);
+                    }
+                }
+
             }
             finally { _netProbeRunning = false; }
         });
     }
+    
+    static TimeSpan NetProbeInterval()
+        => Data.NetworkOnline ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(5);
+
 
     static void OnNetworkChanged(bool online)
     {
@@ -1158,12 +1209,12 @@ class Program
             var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
             await task.ConfigureAwait(false);
             var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
-            Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
+            Log.Verbose("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
             return true;
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
+            Log.Verbose(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
             return false;
         }
     }
@@ -1176,7 +1227,7 @@ class Program
             using var req = new HttpRequestMessage(HttpMethod.Head, url);
             using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
             sw.Stop();
-            Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
+            Log.Verbose("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
             return ((int)resp.StatusCode) is >= 200 and < 400;
         }
         catch (Exception exHead)
@@ -1186,13 +1237,12 @@ class Program
                 var sw2 = System.Diagnostics.Stopwatch.StartNew();
                 using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
                 sw2.Stop();
-                Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
-                    url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
+                Log.Verbose("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",                    url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
                 return ((int)resp.StatusCode) is >= 200 and < 400;
             }
             catch (Exception ex)
             {
-                Log.Debug(ex, "net/probe http fail {Url}", url);
+                Log.Verbose(ex, "net/probe http fail {Url}", url);
                 return false;
             }
         }
@@ -1203,7 +1253,8 @@ class Program
         var swAll = System.Diagnostics.Stopwatch.StartNew();
 
         bool anyUp = false;
-        try { anyUp = NetworkInterface.GetIsNetworkAvailable(); Log.Debug("net/probe nics-available={Avail}", anyUp); } catch { }
+        try { anyUp = NetworkInterface.GetIsNetworkAvailable(); Log.Verbose("net/probe nics-available={Avail}", anyUp);
+            ; } catch { }
 
         var tcpOk =
             await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
@@ -1214,7 +1265,7 @@ class Program
             await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
 
         swAll.Stop();
-        Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
+        Log.Verbose("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
             tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
 
         var online = (tcpOk || httpOk) && anyUp;
@@ -1290,6 +1341,13 @@ class Program
                 outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] {Message:lj} {Exception}{NewLine}"
             )
             .CreateLogger();
+        
+        Log.Information("startup v={Version} rid={Rid} pid={Pid} cwd={Cwd}",
+            typeof(Program).Assembly.GetName().Version,
+            System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier,
+            Environment.ProcessId,
+            Environment.CurrentDirectory);
+
     }
 
     static void InstallGlobalErrorHandlers()
