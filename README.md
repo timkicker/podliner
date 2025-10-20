@@ -17,7 +17,7 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 </p>
 
 <p align="center">
-  <b>{{ONE-LINER: Terminal podcast player — fast, keyboard-first, offline-ready}}</b>
+  <b>Podcasts in any terminal. Fast, clean, offline. </b>
 </p>
 
 <p align="center">
@@ -59,16 +59,16 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 ---
 
 ## Why podliner?
-<!-- Keep this crisp (3–6 bullets). Avoid hype; be honest. -->
-- {{FAST}}: keyboard-first TUI, instant feedback.
-- {{OFFLINE}}: download episodes, auto-resume, queue.
-- {{SIMPLE}}: OPML import/export, minimal config.
-- {{PORTABLE}}: single-file binaries for Linux/macOS/Windows.
-- {{CHOICE}}: works with mpv, ffplay, or VLC (where available).
+
+- **Keyboard-first & mouse-friendly.** Full mouse support (click, select, scroll) with fast TUI feedback.
+- **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `dd` for remove from queue, `/` to search) plus concise colon-commands (`:add <url>`, `:queue`, `:play`, `:export-opml`, `:import-opml`).
+- **Offline-ready.** Download episodes, resume where you left off, manage a queue.
+- **Easy migration.** OPML import/export to move subscriptions between players.
+- **Cross-platform.** Single-file builds for Linux, macOS, and Windows.
+- **Engine choice.** Works with mpv, ffplay (FFmpeg), or VLC where available.
 
 > No telemetry. Config lives in your user profile. All local.
 
----
 
 ## Screenshots
 <!-- Replace images; keep descriptive ALT text. -->
@@ -83,7 +83,6 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 </p>
 -->
 
----
 
 ## Install (stable releases)
 > RCs/Betas are **not** exposed via `/releases/latest`. The commands below always fetch the latest **stable**.
@@ -153,7 +152,6 @@ macOS:
 shasum -a 256 podliner-osx-{{arm64|x64}}.tar.gz | grep -F "$(grep 'podliner-osx-{{rid}}.tar.gz$' SHA256SUMS)"
 ```
 
----
 
 ## Quick start
 ```bash
@@ -165,7 +163,6 @@ podliner                 # launch the TUI
 ```
 > If you see “No audio engine found”, install one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
 
----
 
 ## Migrate from other players (OPML)
 Most podcast players support **OPML** export/import.
@@ -178,7 +175,6 @@ Most podcast players support **OPML** export/import.
 
 > OPML contains feed URLs only (no playback positions). For progress sync, use your current backup method if any.
 
----
 
 ## Commands (essentials)
 > Full help: `podliner --help`
@@ -194,7 +190,6 @@ Inside the TUI (defaults; adjust after confirming):
 
 *(Keep this list short; expand later under `docs/commands.md` if needed.)*
 
----
 
 ## Configuration & data
 > Replace with the exact paths from code before publishing.
@@ -210,7 +205,6 @@ Inside the TUI (defaults; adjust after confirming):
 
 > Back up `appdata.json` (or your config filename) to migrate settings to another machine.
 
----
 
 ## Audio engines
 podliner can use different players:
@@ -229,7 +223,6 @@ Engine selection & fallback:
 - Default is `auto` (prefer local download if available; else remote if online).
 - You can switch engines from within the UI (hot swap) {{CONFIRM KEY}}.
 
----
 
 ## FAQ / Troubleshooting
 **`podliner: command not found`**  
@@ -247,7 +240,6 @@ Update to the latest stable release; if still reproducible, include logs and OS/
 **Reset config**  
 Quit, then move the config directory away (see [Configuration & data](#configuration--data)), restart to re-initialize.
 
----
 
 ## Contributing
 We welcome small, focused PRs.
@@ -269,7 +261,6 @@ dotnet run --project StuiPodcast.App
 
 *(Optionally move details to `docs/contributing.md` later.)*
 
----
 
 ## Bug reports & logs
 When filing an issue, please include:
@@ -281,7 +272,6 @@ When filing an issue, please include:
 
 Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_CONTACT}}.
 
----
 
 ## Roadmap
 - Stabilization & bugfixes
@@ -291,7 +281,6 @@ Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_
 
 *(Track progress via Issues / Milestones.)*
 
----
 
 ## License & credits
 - License: [MIT](LICENSE)
