@@ -173,7 +173,8 @@ class Program
         var appConfigDir = Path.Combine(baseConfigDir, "podliner");
 
         ConfigStore  = new ConfigStore(appConfigDir);
-        LibraryStore = new LibraryStore(appConfigDir);
+        LibraryStore = new LibraryStore(appConfigDir, subFolder: "", fileName: "library.json");
+
         
         Console.WriteLine($"Config:  {ConfigStore.FilePath}");
         Console.WriteLine($"Library: {LibraryStore.FilePath}");

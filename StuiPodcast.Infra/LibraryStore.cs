@@ -61,16 +61,22 @@ namespace StuiPodcast.Infra
         volatile bool _readOnly;
         volatile string? _readOnlyReason;
 
-        public LibraryStore(string configDirectory, string subFolder = "library", string fileName = "library.json")
+        public LibraryStore(string configDirectory, string? subFolder = "library", string fileName = "library.json")
         {
             if (string.IsNullOrWhiteSpace(configDirectory))
                 throw new ArgumentException("configDirectory must be provided", nameof(configDirectory));
 
             ConfigDirectory  = configDirectory;
-            LibraryDirectory = Path.Combine(ConfigDirectory, subFolder);
+
+            // WICHTIG: wenn subFolder leer/null → direkt ins ConfigDirectory schreiben
+            LibraryDirectory = string.IsNullOrWhiteSpace(subFolder)
+                ? ConfigDirectory
+                : Path.Combine(ConfigDirectory, subFolder);
+
             FilePath = Path.Combine(LibraryDirectory, fileName);
             TmpPath  = FilePath + ".tmp";
         }
+
 
         /// <summary>
         /// Lädt oder erstellt eine leere Library. Ignoriert/entsorgt evtl. .tmp.
