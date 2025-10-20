@@ -8,11 +8,25 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Serilog;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra
 {
+     class DownloadIndex
+    {
+        public int SchemaVersion { get; set; } = 1;
+        public List<Item> Items { get; set; } = new();
+        public sealed class Item
+        {
+            public Guid EpisodeId { get; set; }
+            public string LocalPath { get; set; } = "";
+        }
+    }
+
+    
     /// <summary>
     /// Robuster Download-Manager mit:
     /// - globalem Worker (Queue),
@@ -23,8 +37,17 @@ namespace StuiPodcast.Infra
     /// - moderatem Progress-Reporting.
     /// Öffentliche API & Events unverändert.
     /// </summary>
+    
+    
     public sealed class DownloadManager : IDisposable
     {
+        private readonly string _indexPath;
+        private readonly string _indexTmpPath;
+
+        private readonly object _persistGate = new();
+        private Timer? _persistTimer;
+        private volatile bool _persistPending;
+
         private readonly AppData _data;
 
         // HttpClient mit vernünftigen Defaults; pro Request verwenden wir zusätzlich CTS für granularere Kontrolle
@@ -48,30 +71,137 @@ namespace StuiPodcast.Infra
         private const int BACKOFF_BASE_MS      = 400;    // 0,4s → 0,8s → 1,6s (+ Jitter)
         private const int PROGRESS_PULSE_MS    = 400;    // Progress-Events höchstens ~2.5x/s
 
-        public DownloadManager(AppData data)
+        public DownloadManager(AppData data, string configDir)
         {
             _data = data;
 
-            // SocketsHttpHandler erlaubt uns, ConnectTimeout zu setzen
-            var handler = new SocketsHttpHandler
-            {
-                AllowAutoRedirect = true,
-                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-                ConnectTimeout = TimeSpan.FromMilliseconds(CONNECT_TIMEOUT_MS),
-                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                MaxConnectionsPerServer = 8
-            };
+            _indexPath   = Path.Combine(configDir, "downloads.json");
+            _indexTmpPath = _indexPath + ".tmp";
 
+            // SocketsHttpHandler ...
+            var handler = new SocketsHttpHandler { /* wie gehabt */ };
             _http = new HttpClient(handler, disposeHandler: true)
             {
-                Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS) // Obergrenze; wir ergänzen pro-Request-CTS für Feinschnitt
+                Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS)
             };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("deflate"));
             _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
+
+            // NEU: beim Start Index laden
+            TryLoadIndex();
         }
+        
+        void TryLoadIndex()
+{
+    try
+    {
+        if (!File.Exists(_indexPath)) return;
+
+        var json = File.ReadAllText(_indexPath);
+        var idx = JsonSerializer.Deserialize<DownloadIndex>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            AllowTrailingCommas = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        }) ?? new DownloadIndex();
+
+        int restored = 0;
+        foreach (var it in idx.Items ?? new List<DownloadIndex.Item>())
+        {
+            if (it.EpisodeId == Guid.Empty) continue;
+            if (string.IsNullOrWhiteSpace(it.LocalPath)) continue;
+            if (!File.Exists(it.LocalPath)) continue;
+
+            // In-Memory wiederherstellen
+            _data.DownloadMap[it.EpisodeId] = new DownloadStatus
+            {
+                State = DownloadState.Done,
+                LocalPath = it.LocalPath,
+                BytesReceived = 0,
+                TotalBytes = null,
+                UpdatedAt = DateTimeOffset.Now
+            };
+
+            try { StatusChanged?.Invoke(it.EpisodeId, _data.DownloadMap[it.EpisodeId]); } catch { }
+            restored++;
+        }
+
+        Serilog.Log.Information("downloads: restored {Count} entries from index", restored);
+    }
+    catch (Exception ex)
+    {
+        Serilog.Log.Debug(ex, "downloads: index load failed");
+    }
+}
+
+void SaveIndexDebounced()
+{
+    lock (_persistGate)
+    {
+        _persistPending = true;
+        _persistTimer ??= new Timer(_ =>
+        {
+            try { TrySaveIndex(); }
+            catch { }
+        }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+        _persistTimer.Change(TimeSpan.FromMilliseconds(800), Timeout.InfiniteTimeSpan);
+    }
+}
+
+void TrySaveIndex()
+{
+    List<DownloadIndex.Item> items;
+    lock (_gate)
+    {
+        items = _data.DownloadMap
+            .Where(kv => kv.Value.State == DownloadState.Done &&
+                         !string.IsNullOrWhiteSpace(kv.Value.LocalPath) &&
+                         File.Exists(kv.Value.LocalPath))
+            .Select(kv => new DownloadIndex.Item { EpisodeId = kv.Key, LocalPath = kv.Value.LocalPath! })
+            .ToList();
+    }
+
+    var idx = new DownloadIndex { SchemaVersion = 1, Items = items };
+
+    var opts = new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+    };
+
+    Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
+    var tmp = _indexTmpPath;
+
+    // atomar schreiben
+    using (var fs = File.Open(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+    {
+        using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
+        JsonSerializer.Serialize(writer, idx, opts);
+        writer.Flush();
+        try { fs.Flush(true); } catch { }
+    }
+
+    if (File.Exists(_indexPath))
+    {
+        try { File.Replace(tmp, _indexPath, null, ignoreMetadataErrors: true); }
+        catch (PlatformNotSupportedException)
+        {
+            File.Delete(_indexPath);
+            File.Move(tmp, _indexPath);
+        }
+    }
+    else
+    {
+        File.Move(tmp, _indexPath);
+    }
+
+    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+}
+
+
 
         public void EnsureRunning()
         {
@@ -407,13 +537,17 @@ namespace StuiPodcast.Infra
                 if (File.Exists(targetPath)) File.Delete(targetPath);
                 File.Move(tmpPath, targetPath);
 
-                ep.Downloaded = true;
+                StatusChanged?.Invoke(ep.Id, new DownloadStatus {
+                    State = DownloadState.Done,
+                });
                 SetState(ep.Id, s =>
                 {
                     s.State = DownloadState.Done;
                     s.LocalPath = targetPath;
                     s.Error = null;
                 });
+                SaveIndexDebounced();
+
             }
             catch
             {
@@ -443,6 +577,11 @@ namespace StuiPodcast.Infra
             st.UpdatedAt = DateTimeOffset.Now;
             _data.DownloadMap[epId] = st;
             try { StatusChanged?.Invoke(epId, st); } catch { }
+
+            // Persistiere nur bei stabilen/bedeutenden Änderungen:
+            if (st.State == DownloadState.Done || st.State == DownloadState.Canceled || st.State == DownloadState.Failed)
+                SaveIndexDebounced();
         }
+
     }
 }

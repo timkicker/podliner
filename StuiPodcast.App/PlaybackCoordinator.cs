@@ -91,7 +91,7 @@ sealed class PlaybackCoordinator
         _endHandledForSession = false;
         _progressSeenForSession = false;
 
-        _current.LastPlayedAt = DateTimeOffset.Now;
+        _current.Progress.LastPlayedAt = DateTimeOffset.Now;
         _ = _saveAsync(); // Save ist intern gedrosselt
 
         CancelResume();
@@ -100,10 +100,10 @@ sealed class PlaybackCoordinator
         // Startoffset heuristisch:
         // - sehr nahe am Anfang → nicht resumen
         // - sehr nahe am Ende → nicht resumen (sonst „hängen“ wir am Ende)
-        long? startMs = ep.LastPosMs;
+        long? startMs = ep.Progress.LastPosMs;
         if (startMs is long ms)
         {
-            long knownLen = ep.LengthMs ?? 0;
+            long knownLen = ep.DurationMs;
             if ((knownLen > 0 && (ms < 5_000 || ms > knownLen - 10_000)) ||
                 (knownLen == 0 && ms < 5_000))
             {
@@ -166,8 +166,8 @@ sealed class PlaybackCoordinator
 
         // 2) Persistiere bekannte Länge & Position (clamps)
         if (effLenMs > 0)
-            _current.LengthMs = effLenMs;
-        _current.LastPosMs = Math.Max(0, posMs);
+            _current.DurationMs = effLenMs;
+        _current.Progress.LastPosMs = Math.Max(0, posMs);
 
         // 3) Snapshot bilden (einmalig) und ausgeben
         var snap = PlaybackSnapshot.From(
@@ -193,10 +193,10 @@ sealed class PlaybackCoordinator
             var remainCut   = isVeryShort ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(30);
             var ratioCut    = isVeryShort ? 0.98 : 0.90;
 
-            if (!_current.Played && (ratio >= ratioCut || remain <= remainCut))
+            if (!_current.ManuallyMarkedPlayed && (ratio >= ratioCut || remain <= remainCut))
             {
-                _current.Played = true;
-                _current.LastPlayedAt = DateTimeOffset.Now;
+                _current.ManuallyMarkedPlayed = true;
+                _current.Progress.LastPlayedAt = DateTimeOffset.Now;
                 _ = _saveAsync(); // schnelles Save bei Statuswechsel
             }
         }
@@ -317,7 +317,7 @@ sealed class PlaybackCoordinator
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
         var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
-        var lenMsMeta   = (long)(_current?.LengthMs ?? 0);
+        var lenMsMeta   = (long)(_current?.DurationMs);
         posMs = (long)Math.Max(0, s.Position.TotalMilliseconds);
 
         effLenMs = Math.Max(Math.Max(lenMsPlayer, lenMsMeta), posMs); // nie kleiner als Pos
@@ -387,7 +387,7 @@ sealed class PlaybackCoordinator
             var cand = list[i];
             if (_data.UnplayedOnly)
             {
-                if (!cand.Played) { next = cand; return true; }
+                if (!cand.ManuallyMarkedPlayed) { next = cand; return true; }
             }
             else
             {
@@ -403,7 +403,7 @@ sealed class PlaybackCoordinator
                 var cand = list[i];
                 if (_data.UnplayedOnly)
                 {
-                    if (!cand.Played) { next = cand; return true; }
+                    if (!cand.ManuallyMarkedPlayed) { next = cand; return true; }
                 }
                 else
                 {

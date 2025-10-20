@@ -450,8 +450,8 @@ public void SetTheme(ThemeMode mode)
             _nowPlayingId = ep.Id;
 
             SetWindowTitle(ep.Title);
-            long len = ep.LengthMs ?? 0;
-            long pos = ep.LastPosMs ?? 0;
+            long len = ep.DurationMs;
+            long pos = ep.Progress.LastPosMs;
             if (_player != null)
                 _player.Progress.Fraction = (len > 0) ? Math.Clamp((float)pos / len, 0f, 1f) : 0f;
 
@@ -926,7 +926,7 @@ public void SetTheme(ThemeMode mode)
             var old = list.SelectedItem;
             list.SelectedItem = idx;
             var ep = _episodesPane.GetSelected();
-            if (ep != null && !ep.Played)
+            if (ep != null && !ep.ManuallyMarkedPlayed)
             {
                 _episodesPane.SelectIndex(idx);
                 var e = _episodesPane.GetSelected();

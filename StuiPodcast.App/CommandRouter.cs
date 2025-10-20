@@ -41,7 +41,7 @@ static class CommandRouter
             var arg = raw.Contains(' ')
                 ? raw[(raw.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
                 : "";
-            DlToggle(arg, ui, data, persist);
+            DlToggle(arg, ui, data, persist, dlm);
             ApplyList(ui, data);
             return;
         }
@@ -713,7 +713,7 @@ static class CommandRouter
             int count = 0;
             foreach (var e in data.Episodes)
             {
-                if (e.LastPlayedAt != null) { e.LastPlayedAt = null; count++; }
+                if (e.Progress.LastPlayedAt != null) { e.Progress.LastPlayedAt = null; count++; }
             }
             _ = persist();
             ApplyList(ui, data);
@@ -749,7 +749,7 @@ static class CommandRouter
         if (feedId is null) return;
 
         IEnumerable<Episode> list = data.Episodes;
-        if (data.UnplayedOnly) list = list.Where(e => !e.Played);
+        if (data.UnplayedOnly) list = list.Where(e => !e.ManuallyMarkedPlayed);
 
         if (feedId is Guid fid)
             ui.SetEpisodesForFeed(fid, list);
@@ -923,18 +923,18 @@ static class CommandRouter
         var FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
 
         if (feedId == null) return new List<Episode>();
-        if (data.UnplayedOnly) baseList = baseList.Where(e => !e.Played);
+        if (data.UnplayedOnly) baseList = baseList.Where(e => !e.ManuallyMarkedPlayed);
 
         if (feedId == FEED_SAVED)           baseList = baseList.Where(e => e.Saved);
-        else if (feedId == FEED_DOWNLOADED) baseList = baseList.Where(e => e.Downloaded);
-        else if (feedId == FEED_HISTORY)    baseList = baseList.Where(e => e.LastPlayedAt != null);
+        else if (feedId == FEED_DOWNLOADED) baseList = baseList.Where(e => Program.IsDownloaded(e.Id));
+        else if (feedId == FEED_HISTORY)    baseList = baseList.Where(e => e.Progress.LastPlayedAt != null);
         else if (feedId != FEED_ALL)        baseList = baseList.Where(e => e.FeedId == feedId);
 
         if (feedId == FEED_HISTORY)
         {
             return baseList
-                .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
-                .ThenByDescending(e => e.LastPosMs ?? 0)
+                .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
+                .ThenByDescending(e => e.Progress.LastPosMs)
                 .ToList();
         }
 
@@ -1263,9 +1263,9 @@ static class CommandRouter
         if (feedId == FEED_SAVED)
             baseList = baseList.Where(e => e.Saved);
         else if (feedId == FEED_DOWNLOADED)
-            baseList = baseList.Where(e => e.Downloaded);
+            baseList = baseList.Where(e => Program.IsDownloaded(e.Id));
         else if (feedId == FEED_HISTORY)
-            baseList = baseList.Where(e => e.LastPlayedAt != null);
+            baseList = baseList.Where(e => e.Progress.LastPlayedAt != null);
         else if (feedId != FEED_ALL)
             baseList = baseList.Where(e => e.FeedId == feedId);
 
@@ -1273,8 +1273,8 @@ static class CommandRouter
         if (feedId == FEED_HISTORY)
         {
             eps = baseList
-                .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
-                .ThenByDescending(e => e.LastPosMs ?? 0)
+                .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
+                .ThenByDescending(e => e.Progress.LastPosMs)
                 .ToList();
         }
         else
@@ -1296,7 +1296,7 @@ static class CommandRouter
                 ? (i + 1 + eps.Count) % eps.Count
                 : (i - 1 + eps.Count) % eps.Count;
 
-            if (!eps[i].Played)
+            if (!eps[i].ManuallyMarkedPlayed)
             {
                 var target = eps[i];
                 playback.Play(target);
@@ -1587,24 +1587,34 @@ static class CommandRouter
         return false;
     }
 
-    static void DlToggle(string arg, Shell ui, AppData data, Func<Task> persist)
+    static void DlToggle(string arg, Shell ui, AppData data, Func<Task> persist, DownloadManager dlm)
     {
         var ep = ui.GetSelectedEpisode();
         if (ep is null) return;
 
-        bool newVal = ep.Downloaded;
+        // Zielzustand bestimmen
+        bool wantOn;
+        if (arg is "on" or "true" or "+")      wantOn = true;
+        else if (arg is "off" or "false" or "-") wantOn = false;
+        else                                     wantOn = !Program.IsDownloaded(ep.Id);
 
-        if (arg is "on" or "true" or "+")
-            newVal = true;
-        else if (arg is "off" or "false" or "-")
-            newVal = false;
+        if (wantOn)
+        {
+            // Start / Queue
+            dlm.Enqueue(ep.Id);
+            dlm.EnsureRunning();
+            ui.ShowOsd("Download queued ⌵");
+        }
         else
-            newVal = !ep.Downloaded;
+        {
+            // Abbrechen / aus Queue nehmen (bereits geladene Dateien lassen wir in Ruhe)
+            dlm.Cancel(ep.Id);
+            data.DownloadQueue.RemoveAll(x => x == ep.Id);
+            data.DownloadMap.Remove(ep.Id); // nur Runtime-Status leeren
+            ui.ShowOsd("Download canceled ✖");
+        }
 
-        ep.Downloaded = newVal;
         _ = persist();
-
         ApplyList(ui, data);
-        ui.ShowOsd(newVal ? "Marked as downloaded ⬇" : "Removed download mark ⬇");
     }
 }

@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Serilog;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
@@ -10,21 +11,22 @@ using Terminal.Gui;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Reflection;
+using System.Text;
+using System.Runtime.InteropServices;
+
 using StuiPodcast.App;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
-using System.Text;
-using System.Runtime.InteropServices;
-using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
 using StuiPodcast.Infra.Player;
 using StuiPodcast.Infra.Opml;
+using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
 
 class Program
 {
+    // ===== Runtime Flags =====
     internal static bool SkipSaveOnExit = false;
-    
-    
-    // ---------- CLI parsed options ----------
+
+    // ===== CLI parsed options =====
     sealed class CliOptions
     {
         public string? Engine;                 // --engine
@@ -40,49 +42,6 @@ class Program
         public bool ShowVersion;               // --version|-v|-V
         public bool ShowHelp;                  // --help|-h|-?
     }
-    
-    static void UpdateWindowTitleWithDownloads()
-    {
-        if (UI == null || Data == null) return;
-
-        // --- Basistitel bestimmen ---
-        // OFFLINE-Präfix wie an anderer Stelle genutzt
-        var offlinePrefix = (Data.NetworkOnline == false) ? "[OFFLINE] " : "";
-
-        string baseTitle = "Podliner";
-        try
-        {
-            var nowId = UI.GetNowPlayingId();
-            if (nowId != null)
-            {
-                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
-                if (ep != null && !string.IsNullOrWhiteSpace(ep.Title))
-                    baseTitle = ep.Title!;
-            }
-        }
-        catch { /* best effort */ }
-
-        // --- Download-HUD zusammenbauen (nur Zählwerte, kein Byte-Progress) ---
-        int running = 0, queued = 0;
-
-        try
-        {
-            running = Data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Running);
-            queued  = Data.DownloadQueue.Count;
-        }
-        catch { /* defensiv */ }
-
-        string hud = "";
-        int totalActive = running + queued;
-        if (totalActive > 0)
-        {
-            // Beispiel: " · ⇣ 1/3"  (running/active)
-            hud = $" · ⇣ {running}/{totalActive}";
-        }
-
-        UI.SetWindowTitle($"{offlinePrefix}{baseTitle}{hud}");
-    }
-
 
     static CliOptions ParseArgs(string[]? args)
     {
@@ -92,18 +51,15 @@ class Program
         for (int i = 0; i < args.Length; i++)
         {
             var a = args[i];
-
             switch (a)
             {
                 case "--version":
                 case "-v":
-                case "-V":
-                    o.ShowVersion = true; break;
+                case "-V": o.ShowVersion = true; break;
 
                 case "--help":
                 case "-h":
-                case "-?":
-                    o.ShowHelp = true; break;
+                case "-?": o.ShowHelp = true; break;
 
                 case "--engine":
                     if (i + 1 < args.Length) o.Engine = args[++i].Trim().ToLowerInvariant();
@@ -133,11 +89,8 @@ class Program
                     if (i + 1 < args.Length) o.OpmlExport = args[++i];
                     break;
 
-                case "--offline":
-                    o.Offline = true; break;
-
-                case "--ascii":
-                    o.Ascii = true; break;
+                case "--offline": o.Offline = true; break;
+                case "--ascii":   o.Ascii   = true; break;
 
                 case "--log-level":
                     if (i + 1 < args.Length) o.LogLevel = args[++i].Trim().ToLowerInvariant();
@@ -147,199 +100,102 @@ class Program
         return o;
     }
 
-    // SaveAsync-Throttle (klassenweite States)
-    static readonly object _saveGate = new();
-    static DateTimeOffset _lastSave = DateTimeOffset.MinValue;
-    static bool _savePending = false;
+    // ===== Global singletons for this program =====
+    static AppFacade?      App;          // neue Fassade (Persistenz + Download-ReadModel)
+    static ConfigStore?    ConfigStore;  // appsettings.json
+    static LibraryStore?   LibraryStore; // library/library.json
 
-    static bool _saveRunning = false;
+    static AppData         Data = new(); // UI-kompatibler Laufzeit-State (Bridge)
+    static FeedService?    Feeds;
+
+    static SwappablePlayer?   Player;
+    static string?            _initialEngineInfo;
+    static Shell?             UI;
+    static PlaybackCoordinator? Playback;
+    static MemoryLogSink      MemLog = new(2000);
+    static DownloadManager?   Downloader;
+
+    // ===== Timers / State =====
+    static object? _uiTimer;
     static object? _netTimerToken;
+    static int     _exitOnce = 0;
 
-    static readonly System.Collections.Generic.Dictionary<Guid, DownloadState> _dlLast = new();
+    // Save throttle (AppFacade)
+    static readonly object _saveGate = new();
+    static DateTimeOffset  _lastSave = DateTimeOffset.MinValue;
+    static bool            _savePending = false;
+    static bool            _saveRunning = false;
+
+    // Download-UI pulse (nur für UI refresh)
     static DateTime _dlLastUiPulse = DateTime.MinValue;
 
+    // Network probing
     static volatile bool _netProbeRunning = false;
     static int _netConsecOk = 0, _netConsecFail = 0;
     const int FAILS_FOR_OFFLINE = 4;
     const int SUCC_FOR_ONLINE   = 3;
     static DateTimeOffset _netLastFlip = DateTimeOffset.MinValue;
     static readonly TimeSpan _netMinDwell = TimeSpan.FromSeconds(15);
-
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
-    static void LogNicsSnapshot()
+    
+    public static bool IsDownloaded(Guid episodeId)
+        => App?.IsDownloaded(episodeId) ?? false;
+
+    public static bool TryGetLocalPath(Guid episodeId, out string? path)
     {
-        try
-        {
-            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                var ip = nic.GetIPProperties();
-                var ipv4 = string.Join(",", ip.UnicastAddresses
-                                         .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                                         .Select(a => a.Address.ToString()));
-                var gw   = string.Join(",", ip.GatewayAddresses.Select(g => g.Address?.ToString() ?? ""));
-                var dns  = string.Join(",", ip.DnsAddresses.Select(d => d.ToString()));
-                Log.Information("net/nic name={Name} type={Type} op={Op} spd={Speed} ipv4=[{IPv4}] gw=[{Gw}] dns=[{Dns}]",
-                    nic.Name, nic.NetworkInterfaceType, nic.OperationalStatus, nic.Speed, ipv4, gw, dns);
-            }
-        } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
+        if (App != null && App.TryGetLocalPath(episodeId, out path)) return true;
+        path = null; return false;
     }
 
-    static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
-    {
-        try
-        {
-            using var cts = new CancellationTokenSource(timeoutMs);
-            using var sock = new System.Net.Sockets.Socket(
-                System.Net.Sockets.AddressFamily.InterNetwork,
-                System.Net.Sockets.SocketType.Stream,
-                System.Net.Sockets.ProtocolType.Tcp);
-            var start = DateTime.UtcNow;
-            var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
-            await task.ConfigureAwait(false);
-            var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
-            Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
-            return false;
-        }
-    }
-
-    static async Task<bool> HttpProbeAsync(string url)
-    {
-        try
-        {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            using var req = new HttpRequestMessage(HttpMethod.Head, url);
-            using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-            sw.Stop();
-            Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
-            return ((int)resp.StatusCode) is >= 200 and < 400;
-        }
-        catch (Exception exHead)
-        {
-            try
-            {
-                var sw2 = System.Diagnostics.Stopwatch.StartNew();
-                using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
-                sw2.Stop();
-                Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
-                    url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
-                return ((int)resp.StatusCode) is >= 200 and < 400;
-            }
-            catch (Exception ex)
-            {
-                Log.Debug(ex, "net/probe http fail {Url}", url);
-                return false;
-            }
-        }
-    }
-
-    static async Task<bool> QuickNetCheckAsync()
-    {
-        var swAll = System.Diagnostics.Stopwatch.StartNew();
-
-        bool anyUp = false;
-        try
-        {
-            anyUp = NetworkInterface.GetIsNetworkAvailable();
-            Log.Debug("net/probe nics-available={Avail}", anyUp);
-        } catch { }
-
-        var tcpOk =
-            await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
-            await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
-
-        var httpOk =
-            await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
-            await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
-
-        swAll.Stop();
-        Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
-            tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
-
-        var online = (tcpOk || httpOk) && anyUp;
-        return online;
-    }
-
-    static void OnNetworkChanged(bool online)
-    {
-        var prev = Data.NetworkOnline;
-        Data.NetworkOnline = online;
-
-        Application.MainLoop?.Invoke(() =>
-        {
-            if (UI == null) return;
-
-            CommandRouter.ApplyList(UI, Data);
-            UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
-
-            var nowId = UI.GetNowPlayingId();
-            if (nowId != null)
-            {
-                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
-                if (ep != null)
-                    UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
-            }
-
-            if (!online) UI.ShowOsd("net: offline", 800);
-        });
-
-        _ = SaveAsync();
-    }
-
-    static AppData Data = new();
-    static FeedService? Feeds;
-
-    static SwappablePlayer? Player;
-    static string? _initialEngineInfo;
-
-    static Shell? UI;
-    static PlaybackCoordinator? Playback;
-    static MemoryLogSink MemLog = new(2000);
-
-    static object? _uiTimer;
-    static int _exitOnce = 0;
-
-    static DownloadManager? Downloader;
-
+    
+    // ===== Entry =====
     static async Task Main(string[]? args)
     {
         var cli = ParseArgs(args);
 
-        if (cli.ShowVersion)
-        {
-            PrintVersion();
-            return;
-        }
-        if (cli.ShowHelp)
-        {
-            PrintHelp();
-            return;
-        }
+        if (cli.ShowVersion) { PrintVersion(); return; }
+        if (cli.ShowHelp)    { PrintHelp();    return; }
 
-        // --- Windows-Konsole für Unicode/ANSI fit machen ---
         EnableWindowsConsoleAnsi();
-
-        // ASCII-only Glyphs (falls gewünscht) – vor Application.Init
-        if (cli.Ascii)
-        {
-            try { GlyphSet.Use(GlyphSet.Profile.Ascii); } catch { /* best effort */ }
-        }
+        if (cli.Ascii) { try { GlyphSet.Use(GlyphSet.Profile.Ascii); } catch { } }
 
         ConfigureLogging(cli.LogLevel);
         InstallGlobalErrorHandlers();
 
-        Data  = await AppStorage.LoadAsync();
-        Feeds = new FeedService(Data);
+        // ---- Composition Root: Stores + Facade ----
+        var baseConfigDir =
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)                 // %APPDATA%
+                : (Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
+                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                       ".config"));                                                      // ~/.config
+        var appConfigDir = Path.Combine(baseConfigDir, "podliner");
 
-        // CLI: preferred engine vor Player-Erzeugung übernehmen
+        ConfigStore  = new ConfigStore(appConfigDir);
+        LibraryStore = new LibraryStore(appConfigDir);
+        
+        Console.WriteLine($"Config:  {ConfigStore.FilePath}");
+        Console.WriteLine($"Library: {LibraryStore.FilePath}");
+
+
+        // Download-Adapter (nur read) auf DownloadManager (write) – Manager bekommt später AppData
+        Downloader   = new DownloadManager(Data, appConfigDir); // appConfigDir hast du oben bereits berechnet
+        var downloadLookup = new DownloadLookupAdapter(Downloader!, Data);
+
+        App = new AppFacade(ConfigStore, LibraryStore, downloadLookup);
+
+        // ---- Laden & Bridge → AppData (UI bleibt unverändert) ----
+        var cfg = App.LoadConfig();     // Prefs laden
+        var lib = App.LoadLibrary();    // Inhalte laden
+
+        Bridge.SyncFromFacadeToAppData(App, Data);
+
+        // CLI: Engine-Präferenz vor Player-Erzeugung übernehmen
         if (!string.IsNullOrWhiteSpace(cli.Engine))
             Data.PreferredEngine = cli.Engine!.Trim().ToLowerInvariant();
 
+        // Erste Netzwerkprobe (async)
         _ = Task.Run(async () =>
         {
             bool online = await QuickNetCheckAsync();
@@ -349,7 +205,7 @@ class Program
             OnNetworkChanged(online);
         });
 
-        // 1) Core-Engine erzeugen …
+        // ---- Player-Engine erzeugen ----
         try
         {
             var core = PlayerFactory.Create(Data, out var engineInfo);
@@ -362,17 +218,20 @@ class Program
             throw;
         }
 
-        // 3) Coordinator
-        Playback = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
-        Downloader = new DownloadManager(Data);
+        // ---- Coordinator ----
+        Playback  = new PlaybackCoordinator(Data, Player, SaveAsync, MemLog);
+        Feeds     = new FeedService(Data, App);
 
-        // Restore Player prefs
+        Log.Information("cfg at {Cfg}", ConfigStore.FilePath);
+        Log.Information("lib at {Lib}", LibraryStore.FilePath);
+
+        
+        // ---- Player Prefs anwenden (aus Config via Bridge) ----
         try
         {
             var v = Math.Clamp(Data.Volume0_100, 0, 100);
             if (v != 0 || Data.Volume0_100 == 0) Player.SetVolume(v);
-            var s = Data.Speed;
-            if (s <= 0) s = 1.0;
+            var s = Data.Speed; if (s <= 0) s = 1.0;
             Player.SetSpeed(Math.Clamp(s, 0.25, 3.0));
         } catch { }
 
@@ -380,8 +239,8 @@ class Program
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; QuitApp(); };
         AppDomain.CurrentDomain.ProcessExit += (_, __) => TerminalUtil.ResetHard();
 
+        // ---- UI ----
         Application.Init();
-
         UI = new Shell(MemLog);
 
         // Startfeed („All“) als initiale Selektion
@@ -390,41 +249,57 @@ class Program
         UI.Build();
         UpdateWindowTitleWithDownloads();
 
-        // Theme per CLI?
+        // Theme via CLI?
+        // Theme via CLI?
         if (!string.IsNullOrWhiteSpace(cli.Theme))
         {
             var t = cli.Theme!.Trim().ToLowerInvariant();
+            var cliAskedAuto = t == "auto";
+
             ThemeMode tm = t switch
             {
                 "base"   => ThemeMode.Base,
                 "accent" => ThemeMode.MenuAccent,
                 "native" => ThemeMode.Native,
-                "auto"   => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent),
-                _        => (OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent)
+                "auto"   => DefaultThemeForPlatform(),
+                _        => DefaultThemeForPlatform()
             };
-            try { UI.SetTheme(tm); Data.ThemePref = tm.ToString(); _ = SaveAsync(); } catch { }
+
+            try
+            {
+                UI.SetTheme(tm);
+                // WICHTIG: Wenn der Nutzer "auto" gesetzt hat, auch "auto" PERSISTIEREN.
+                Data.ThemePref = cliAskedAuto ? "auto" : tm.ToString();
+                _ = SaveAsync();
+            }
+            catch { }
         }
         else
         {
-            // ansonsten: gespeicherten/Default anwenden
-            ThemeMode desired;
-            if (!string.IsNullOrWhiteSpace(Data.ThemePref) &&
-                Enum.TryParse<ThemeMode>(Data.ThemePref, out var saved))
-                desired = saved;
-            else
-                desired = OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent;
+            // Keine CLI-Vorgabe → gespeicherten Wert lesen.
+            // Ist er "auto" oder leer, nimm den Plattform-Default,
+            // aber überschreibe ThemePref NICHT (bleibt "auto").
+            var pref = (Data.ThemePref ?? "auto").Trim();
+
+            ThemeMode desired =
+                pref.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                    ? DefaultThemeForPlatform()
+                    : (Enum.TryParse<ThemeMode>(pref, out var saved)
+                        ? saved
+                        : DefaultThemeForPlatform());
 
             UI.SetTheme(desired);
+            // HIER NICHT Data.ThemePref ändern – "auto" bleibt "auto",
+            // bis der User aktiv ein Theme setzt.
         }
 
-        // Scroll die Feeds-Liste nach oben & selektiere sichtbaren Start
+
+        // Feeds/Episoden initial zeigen
         Application.MainLoop?.AddIdle(() =>
         {
             try { UI.EnsureSelectedFeedVisibleAndTop(); } catch { }
             return false;
         });
-
-        // Episoden initial auf "All" + ganz nach oben
         Application.MainLoop?.AddIdle(() =>
         {
             try
@@ -439,7 +314,6 @@ class Program
             return false;
         });
 
-        // Theme persistieren, wenn im UI geändert
         UI.ThemeChanged += mode =>
         {
             Data.ThemePref = mode.ToString();
@@ -462,39 +336,32 @@ class Program
             return true;
         });
 
-        // Lookups
+        // Lookups für UI (Queue/Downloaded/Offline)
         UI.SetQueueLookup(id => Data.Queue.Contains(id));
-        UI.SetDownloadStateLookup(id => Data.DownloadMap.TryGetValue(id, out var s) ? s.State : DownloadState.None);
+        UI.SetDownloadStateLookup(id => App!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);
         UI.SetOfflineLookup(() => !Data.NetworkOnline);
 
-        // Downloader → UI
-        Downloader.StatusChanged += (id, st) =>
+        // DownloadManager → UI
+        Downloader!.StatusChanged += (id, st) =>
         {
-            var prev = _dlLast.TryGetValue(id, out var p) ? p : DownloadState.None;
-            _dlLast[id] = st.State;
-
-            if (prev != st.State)
+            // UI-Badge updates
+            Application.MainLoop?.Invoke(() =>
             {
-                Application.MainLoop?.Invoke(() =>
+                UI?.RefreshEpisodesForSelectedFeed(Data.Episodes);
+                UpdateWindowTitleWithDownloads();
+                if (UI != null)
                 {
-                    UI?.RefreshEpisodesForSelectedFeed(Data.Episodes);
-                    UpdateWindowTitleWithDownloads();
-                    if (UI != null)
+                    switch (st.State)
                     {
-                        switch (st.State)
-                        {
-                            case DownloadState.Queued:     UI.ShowOsd("⌵", 300); break;
-                            case DownloadState.Running:    UI.ShowOsd("⇣", 300); break;
-                            case DownloadState.Verifying:  UI.ShowOsd("≈", 300); break;
-                            case DownloadState.Done:       UI.ShowOsd("⬇", 500); break;
-                            case DownloadState.Failed:     UI.ShowOsd("!", 900);  break;
-                            case DownloadState.Canceled:   UI.ShowOsd("×", 400);  break;
-                        }
+                        case DownloadState.Queued:     UI.ShowOsd("⌵", 300); break;
+                        case DownloadState.Running:    UI.ShowOsd("⇣", 300); break;
+                        case DownloadState.Verifying:  UI.ShowOsd("≈", 300); break;
+                        case DownloadState.Done:       UI.ShowOsd("⬇", 500); break;
+                        case DownloadState.Failed:     UI.ShowOsd("!", 900);  break;
+                        case DownloadState.Canceled:   UI.ShowOsd("×", 400);  break;
                     }
-                });
-                _ = SaveAsync();
-                return;
-            }
+                }
+            });
 
             if (st.State == DownloadState.Running && (DateTime.UtcNow - _dlLastUiPulse) > TimeSpan.FromMilliseconds(500))
             {
@@ -502,69 +369,52 @@ class Program
                 Application.MainLoop?.Invoke(() => UI?.RefreshEpisodesForSelectedFeed(Data.Episodes));
             }
         };
-
         Downloader.EnsureRunning();
 
+        // Sortierung/Filter/Placement nach Config
         UI.EpisodeSorter = eps => ApplySort(eps, Data);
-        UI.SetHistoryLimit(Data.HistorySize);
-
+        UI.SetUnplayedHint(Data.UnplayedOnly);
         UI.SetPlayerPlacement(Data.PlayerAtTop);
-        UI.SetUnplayedFilterVisual(Data.UnplayedOnly);
 
-        // --- wire shell events ---
+        // Quit
         UI.QuitRequested += () => QuitApp();
 
-        // --- wire shell events ---
-        UI.QuitRequested += () => QuitApp();
-
+        // Add Feed
         UI.AddFeedRequested += async url =>
         {
             if (UI == null || Feeds == null) return;
+            if (string.IsNullOrWhiteSpace(url)) { UI.ShowOsd("Add feed: URL fehlt", 1500); return; }
 
-            if (string.IsNullOrWhiteSpace(url))
-            {
-                UI.ShowOsd("Add feed: URL fehlt", 1500);
-                return;
-            }
-
-            // Sofortiges Feedback
             UI.ShowOsd("Adding feed…", 800);
 
-            // Doppelte Feeds vermeiden
             try
             {
-                if (HasFeedWithUrl(url))
-                {
-                    UI.ShowOsd("Already added", 1200);
-                    return;
-                }
+                if (HasFeedWithUrl(url)) { UI.ShowOsd("Already added", 1200); return; }
             }
-            catch { /* not fatal */ }
+            catch { }
 
             try
             {
                 var f = await Feeds.AddFeedAsync(url);
+                App?.SaveNow();  // sofort in library.json schreiben
 
-                // State & UI aktualisieren
                 Data.LastSelectedFeedId = f.Id;
-                Data.LastSelectedEpisodeIndexByFeed[f.Id] = 0;
+                // Index-Map ggf. leer; UI zeigt Liste neu
                 _ = SaveAsync();
 
                 UI.SetFeeds(Data.Feeds, f.Id);
                 UI.SetEpisodesForFeed(f.Id, Data.Episodes);
                 UI.SelectEpisodeIndex(0);
 
-                // Erfolg
                 UI.ShowOsd("Feed added ✓", 1200);
             }
             catch (Exception ex)
             {
-                // Misserfolg mit Grund
                 UI.ShowOsd($"Add failed: {ex.Message}", 2200);
             }
         };
 
-
+        // Refresh
         UI.RefreshRequested += async () =>
         {
             await Feeds!.RefreshAllAsync();
@@ -575,13 +425,12 @@ class Program
             if (selected != null)
             {
                 UI.SetEpisodesForFeed(selected.Value, Data.Episodes);
-
-                if (Data.LastSelectedEpisodeIndexByFeed.TryGetValue(selected.Value, out var idx))
-                    UI.SelectEpisodeIndex(idx);
+                // Index-Remembering (optional)
             }
             CommandRouter.ApplyList(UI, Data);
         };
 
+        // Selection changed
         UI.SelectedFeedChanged += () =>
         {
             var fid = UI.GetSelectedFeedId();
@@ -589,37 +438,28 @@ class Program
 
             if (fid != null)
             {
-                int idx = 0;
-                if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(fid.Value, out idx))
-                {
-                    if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy;
-                }
-
                 UI.SetEpisodesForFeed(fid.Value, Data.Episodes);
-                UI.SelectEpisodeIndex(idx);
+                UI.SelectEpisodeIndex(0);
             }
 
             _ = SaveAsync();
         };
 
+        // EpisodeSelectionChanged (Index merken optional)
         UI.EpisodeSelectionChanged += () =>
         {
-            var fid = UI.GetSelectedFeedId();
-            if (fid != null)
-            {
-                Data.LastSelectedEpisodeIndexByFeed[fid.Value] = UI.GetSelectedEpisodeIndex();
-                _ = SaveAsync();
-            }
+            _ = SaveAsync();
         };
 
+        // Play selected
         UI.PlaySelected += () =>
         {
-            var ep = UI.GetSelectedEpisode();
+            var ep = UI?.GetSelectedEpisode();
             if (ep == null || Player == null || Playback == null || UI == null) return;
 
             var curFeed = UI.GetSelectedFeedId();
 
-            ep.LastPlayedAt = DateTimeOffset.Now;
+            ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
             _ = SaveAsync();
 
             if (curFeed is Guid fid && fid == UI.QueueFeedId)
@@ -635,13 +475,7 @@ class Program
             }
 
             string? localPath = null;
-            if (Data.DownloadMap.TryGetValue(ep.Id, out var st)
-                && st.State == DownloadState.Done
-                && !string.IsNullOrWhiteSpace(st.LocalPath)
-                && File.Exists(st.LocalPath))
-            {
-                localPath = st.LocalPath;
-            }
+            if (App!.TryGetLocalPath(ep.Id, out var lp)) localPath = lp;
 
             bool isRemote =
                 string.IsNullOrWhiteSpace(localPath) &&
@@ -665,9 +499,7 @@ class Program
             if (string.IsNullOrWhiteSpace(source))
             {
                 UI.SetPlayerLoading(false);
-                var msg = (localPath == null)
-                    ? "∅ Offline: not downloaded"
-                    : "No playable source";
+                var msg = (localPath == null) ? "∅ Offline: not downloaded" : "No playable source";
                 UI.ShowOsd(msg, 1500);
                 return;
             }
@@ -701,7 +533,6 @@ class Program
                         if (!s.IsPlaying && s.Position == TimeSpan.Zero)
                         {
                             try { Player.Stop(); } catch { }
-
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
                             var old = ep.AudioUrl;
@@ -722,21 +553,22 @@ class Program
 
         UI.ToggleThemeRequested += () => UI.ToggleTheme();
 
+        // Manuell „gespielt“ toggeln (neue Felder)
         UI.TogglePlayedRequested += () =>
         {
             var ep = UI?.GetSelectedEpisode();
             if (ep == null) return;
 
-            ep.Played = !ep.Played;
+            ep.ManuallyMarkedPlayed = !ep.ManuallyMarkedPlayed;
 
-            if (ep.Played)
+            if (ep.ManuallyMarkedPlayed)
             {
-                if (ep.LengthMs is long len) ep.LastPosMs = len;
-                ep.LastPlayedAt = DateTimeOffset.Now;
+                if (ep.DurationMs > 0) ep.Progress.LastPosMs = ep.DurationMs;
+                ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
             }
             else
             {
-                ep.LastPosMs = 0;
+                ep.Progress.LastPosMs = 0;
             }
 
             _ = SaveAsync();
@@ -746,6 +578,7 @@ class Program
             UI.ShowDetails(ep);
         };
 
+        // Commands
         UI.Command += cmd =>
         {
             if (UI == null || Player == null || Playback == null || Downloader == null) return;
@@ -763,10 +596,11 @@ class Program
             CommandRouter.Handle(cmd, Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
         };
 
+        // Suche
         UI.SearchApplied += query =>
         {
             var fid = UI?.GetSelectedFeedId();
-            var list = Data.Episodes.AsEnumerable();
+            IEnumerable<Episode> list = Data.Episodes;
             if (fid != null) list = list.Where(e => e.FeedId == fid.Value);
 
             if (!string.IsNullOrWhiteSpace(query))
@@ -785,19 +619,14 @@ class Program
         var initialFeed = UI.GetSelectedFeedId();
         if (initialFeed != null)
         {
-            int idx = 0;
-            if (!Data.LastSelectedEpisodeIndexByFeed.TryGetValue(initialFeed.Value, out idx))
-            {
-                if (Data.LastSelectedEpisodeIndex is int legacy) idx = legacy;
-            }
-
             UI.SetEpisodesForFeed(initialFeed.Value, Data.Episodes);
-            UI.SelectEpisodeIndex(idx);
+            UI.SelectEpisodeIndex(0);
         }
 
+        // „Zuletzt gehört“ heuristisch bestimmen (neue Felder)
         var last = Data.Episodes
-            .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
-            .ThenByDescending(e => e.LastPosMs ?? 0)
+            .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
+            .ThenByDescending(e => e.Progress.LastPosMs)
             .FirstOrDefault()
             ?? UI.GetSelectedEpisode();
 
@@ -817,7 +646,7 @@ class Program
             UI.ShowStartupEpisode(last, Data.Volume0_100, Data.Speed);
         }
 
-        // === Snapshot → Player-UI ===
+        // Snapshot → Player-UI
         Playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -912,7 +741,7 @@ class Program
                     CommandRouter.Handle(":net offline", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
                 }
 
-                // --engine (falls zur Laufzeit erneut gesetzt werden soll)
+                // --engine (zur Laufzeit erneut setzen)
                 if (!string.IsNullOrWhiteSpace(cli.Engine))
                 {
                     CommandRouter.Handle($":engine {cli.Engine}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
@@ -948,18 +777,16 @@ class Program
                     {
                         if (mode == "replace")
                         {
-                            // Bestehende Feeds + Episoden leeren
+                            // Bestehende Feeds + Episoden leeren (UI-Logik bleibt)
                             Data.Feeds.Clear();
                             Data.Episodes.Clear();
                             Data.LastSelectedFeedId = UI.AllFeedId;
                             _ = SaveAsync();
 
-                            // UI entsprechend leeren
                             UI.SetFeeds(Data.Feeds, Data.LastSelectedFeedId);
                             CommandRouter.ApplyList(UI, Data);
                         }
 
-                        // Merge/Replace arbeiten über vorhandenen :opml import Mechanismus
                         var path = cli.OpmlImport!.Contains(' ') ? $"\"{cli.OpmlImport}\"" : cli.OpmlImport!;
                         CommandRouter.Handle($":opml import {path}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
                     }
@@ -969,7 +796,6 @@ class Program
                 if (!string.IsNullOrWhiteSpace(cli.Feed))
                 {
                     var f = cli.Feed!.Trim();
-                    // akzeptiere Schlüsselwörter und GUIDs 1:1
                     CommandRouter.Handle($":feed {f}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
                 }
 
@@ -979,7 +805,7 @@ class Program
                     CommandRouter.Handle($":search {cli.Search}", Player, Playback, UI, MemLog, Data, SaveAsync, Downloader, SwitchEngineAsync);
                 }
             }
-            catch { /* robust */ }
+            catch { }
         });
 
         try { Application.Run(); }
@@ -993,15 +819,45 @@ class Program
 
             try { Downloader?.Dispose(); } catch { }
 
-            if (!SkipSaveOnExit)
-            {
-                await SaveAsync();
-            }
+            if (!SkipSaveOnExit) { await SaveAsync(); }
+
             try { Application.Shutdown(); } catch { }
             TerminalUtil.ResetHard();
             try { Log.CloseAndFlush(); } catch { }
             try { _probeHttp.Dispose(); } catch { }
         }
+    }
+
+    // ===== Helpers =====
+    static ThemeMode DefaultThemeForPlatform()
+        => OperatingSystem.IsWindows() ? ThemeMode.Base
+            : OperatingSystem.IsMacOS()   ? ThemeMode.Native
+            : ThemeMode.MenuAccent;
+
+
+    static void UpdateWindowTitleWithDownloads()
+    {
+        if (UI == null) return;
+
+        var offlinePrefix = (!Data.NetworkOnline) ? "[OFFLINE] " : "";
+        string baseTitle = "Podliner";
+        try
+        {
+            var nowId = UI.GetNowPlayingId();
+            if (nowId != null)
+            {
+                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                if (ep != null && !string.IsNullOrWhiteSpace(ep.Title))
+                    baseTitle = ep.Title!;
+            }
+        }
+        catch { }
+
+        // HUD (Wir zeigen nur "⇣" wenn irgendwas läuft – Detailzähler sind Aufgabe des DownloadManagers)
+        string hud = "";
+        // Optional: wenn du Zählwerte brauchst, ergänze DownloadManager-API dafür.
+
+        UI.SetWindowTitle($"{offlinePrefix}{baseTitle}{hud}");
     }
 
     static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
@@ -1013,11 +869,22 @@ class Program
 
         static double Progress(Episode e)
         {
-            var pos = (double)(e.LastPosMs ?? 0);
-            var len = (double)(e.LengthMs  ?? 0);
+            var pos = (double)(e.Progress?.LastPosMs ?? 0);
+            var len = (double)(e.DurationMs);
             if (len <= 0) return 0.0;
-            var r = pos / Math.Max(len, pos);
+            var r = pos / Math.Max(len, 1);
             return Math.Clamp(r, 0.0, 1.0);
+        }
+
+        static bool IsPlayed(Episode e)
+        {
+            if (e.ManuallyMarkedPlayed) return true;
+            var len = e.DurationMs;
+            if (len <= 0) return false;
+            var pos = e.Progress?.LastPosMs ?? 0;
+            // Heuristik (fix): fertig bei >=99.5% oder Rest <= 2s
+            if (len <= 60_000) return (pos >= (long)(len * 0.98)) || (len - pos <= 500);
+            return (pos >= (long)(len * 0.995)) || (len - pos <= 2000);
         }
 
         string FeedTitle(Episode e)
@@ -1027,7 +894,6 @@ class Program
         }
 
         IOrderedEnumerable<Episode> ordered;
-
         switch (by)
         {
             case "title":
@@ -1037,8 +903,8 @@ class Program
                 break;
 
             case "played":
-                ordered = desc ? eps.OrderByDescending(e => e.Played)
-                               : eps.OrderBy(e => e.Played);
+                ordered = desc ? eps.OrderByDescending(IsPlayed)
+                               : eps.OrderBy(IsPlayed);
                 ordered = ordered.ThenByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
                 break;
 
@@ -1061,7 +927,6 @@ class Program
                     : eps.OrderBy(e => e.PubDate ?? DateTimeOffset.MinValue);
                 break;
         }
-
         return ordered;
     }
 
@@ -1122,6 +987,7 @@ class Program
         } catch { }
     }
 
+    // Persistenz – Bridge zu AppFacade (kein AppStorage mehr)
     static async Task SaveAsync()
     {
         const int MIN_INTERVAL_MS = 1000;
@@ -1141,7 +1007,14 @@ class Program
                     _saveRunning = true;
                 }
 
-                try { AppStorage.SaveAsync(Data).GetAwaiter().GetResult(); }
+                try
+                {
+                    if (App != null)
+                    {
+                        Bridge.SyncFromAppDataToFacade(Data, App);
+                        App.SaveNow(); // explizit; wir schreiben bewusst deterministisch
+                    }
+                }
                 catch (Exception ex) { Log.Debug(ex, "save (delayed) failed"); }
                 finally
                 {
@@ -1170,7 +1043,14 @@ class Program
             }
         }
 
-        try { await AppStorage.SaveAsync(Data); }
+        try
+        {
+            if (App != null)
+            {
+                Bridge.SyncFromAppDataToFacade(Data, App);
+                App.SaveNow();
+            }
+        }
         catch (Exception ex) { Log.Debug(ex, "save failed"); }
         finally
         {
@@ -1220,9 +1100,144 @@ class Program
         });
     }
 
+    static void OnNetworkChanged(bool online)
+    {
+        Data.NetworkOnline = online;
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            if (UI == null) return;
+
+            CommandRouter.ApplyList(UI, Data);
+            UI.RefreshEpisodesForSelectedFeed(Data.Episodes);
+
+            var nowId = UI.GetNowPlayingId();
+            if (nowId != null)
+            {
+                var ep = Data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                if (ep != null)
+                    UI.SetWindowTitle((!Data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+            }
+
+            if (!online) UI.ShowOsd("net: offline", 800);
+        });
+
+        _ = SaveAsync();
+    }
+
+    // ===== Net probes =====
+    static void LogNicsSnapshot()
+    {
+        try
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                var ip = nic.GetIPProperties();
+                var ipv4 = string.Join(",", ip.UnicastAddresses
+                                         .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                                         .Select(a => a.Address.ToString()));
+                var gw   = string.Join(",", ip.GatewayAddresses.Select(g => g.Address?.ToString() ?? ""));
+                var dns  = string.Join(",", ip.DnsAddresses.Select(d => d.ToString()));
+                Log.Information("net/nic name={Name} type={Type} op={Op} spd={Speed} ipv4=[{IPv4}] gw=[{Gw}] dns=[{Dns}]",
+                    nic.Name, nic.NetworkInterfaceType, nic.OperationalStatus, nic.Speed, ipv4, gw, dns);
+            }
+        } catch (Exception ex) { Log.Debug(ex, "net/nic snapshot failed"); }
+    }
+
+    static async Task<bool> TcpCheckAsync(string hostOrIp, int port, int timeoutMs)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeoutMs);
+            using var sock = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Stream,
+                System.Net.Sockets.ProtocolType.Tcp);
+            var start = DateTime.UtcNow;
+            var task = sock.ConnectAsync(hostOrIp, port, cts.Token).AsTask();
+            await task.ConfigureAwait(false);
+            var ms = (int)(DateTime.UtcNow - start).TotalMilliseconds;
+            Log.Debug("net/probe tcp ok {Host}:{Port} in {Ms}ms", hostOrIp, port, ms);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "net/probe tcp fail {Host}:{Port}", hostOrIp, port);
+            return false;
+        }
+    }
+
+    static async Task<bool> HttpProbeAsync(string url)
+    {
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var req = new HttpRequestMessage(HttpMethod.Head, url);
+            using var resp = await _probeHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            sw.Stop();
+            Log.Debug("net/probe http {Url} {Code} in {Ms}ms", url, (int)resp.StatusCode, sw.ElapsedMilliseconds);
+            return ((int)resp.StatusCode) is >= 200 and < 400;
+        }
+        catch (Exception exHead)
+        {
+            try
+            {
+                var sw2 = System.Diagnostics.Stopwatch.StartNew();
+                using var resp = await _probeHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                sw2.Stop();
+                Log.Debug("net/probe http[GET] {Url} {Code} in {Ms}ms (HEAD failed: {Err})",
+                    url, (int)resp.StatusCode, sw2.ElapsedMilliseconds, exHead.GetType().Name);
+                return ((int)resp.StatusCode) is >= 200 and < 400;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "net/probe http fail {Url}", url);
+                return false;
+            }
+        }
+    }
+
+    static async Task<bool> QuickNetCheckAsync()
+    {
+        var swAll = System.Diagnostics.Stopwatch.StartNew();
+
+        bool anyUp = false;
+        try { anyUp = NetworkInterface.GetIsNetworkAvailable(); Log.Debug("net/probe nics-available={Avail}", anyUp); } catch { }
+
+        var tcpOk =
+            await TcpCheckAsync("1.1.1.1", 443, 900).ConfigureAwait(false) ||
+            await TcpCheckAsync("8.8.8.8", 53, 900).ConfigureAwait(false);
+
+        var httpOk =
+            await HttpProbeAsync("http://connectivitycheck.gstatic.com/generate_204").ConfigureAwait(false) ||
+            await HttpProbeAsync("http://www.msftconnecttest.com/connecttest.txt").ConfigureAwait(false);
+
+        swAll.Stop();
+        Log.Debug("net/probe result tcp={TcpOk} http={HttpOk} anyNicUp={NicUp} total={Ms}ms",
+            tcpOk, httpOk, anyUp, swAll.ElapsedMilliseconds);
+
+        var online = (tcpOk || httpOk) && anyUp;
+        return online;
+    }
+
+    static bool HasFeedWithUrl(string url)
+    {
+        return Data.Feeds.Any(f =>
+        {
+            var t = f.GetType();
+            var prop = t.GetProperty("Url")
+                       ?? t.GetProperty("FeedUrl")
+                       ?? t.GetProperty("XmlUrl")
+                       ?? t.GetProperty("SourceUrl")
+                       ?? t.GetProperty("RssUrl");
+            var val = prop?.GetValue(f) as string;
+            return val != null && string.Equals(val, url, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     static void QuitApp()
     {
-        if (System.Threading.Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
+        if (Interlocked.Exchange(ref _exitOnce, 1) == 1) return;
 
         try { if (_netTimerToken is not null) Application.MainLoop?.RemoveTimeout(_netTimerToken); } catch { }
         try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
@@ -1239,9 +1254,9 @@ class Program
         }
         catch { }
 
-        _ = System.Threading.Tasks.Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
-            await System.Threading.Tasks.Task.Delay(1500).ConfigureAwait(false);
+            await Task.Delay(1500).ConfigureAwait(false);
             try { Environment.Exit(0); } catch { }
         });
     }
@@ -1251,16 +1266,15 @@ class Program
         var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(logDir);
 
-        // Map CLI level
         var min = Serilog.Events.LogEventLevel.Debug;
         switch ((level ?? "").Trim().ToLowerInvariant())
         {
-            case "info":  min = Serilog.Events.LogEventLevel.Information; break;
+            case "info":    min = Serilog.Events.LogEventLevel.Information; break;
             case "warn":
             case "warning": min = Serilog.Events.LogEventLevel.Warning; break;
-            case "error": min = Serilog.Events.LogEventLevel.Error; break;
+            case "error":   min = Serilog.Events.LogEventLevel.Error; break;
             case "debug":
-            default:      min = Serilog.Events.LogEventLevel.Debug; break;
+            default:        min = Serilog.Events.LogEventLevel.Debug; break;
         }
 
         Log.Logger = new LoggerConfiguration()
@@ -1290,23 +1304,6 @@ class Program
             e.SetObserved();
         };
     }
-
-    static bool HasFeedWithUrl(string url)
-    {
-        return Data.Feeds.Any(f =>
-        {
-            var t = f.GetType();
-            var prop = t.GetProperty("Url")
-                       ?? t.GetProperty("FeedUrl")
-                       ?? t.GetProperty("XmlUrl")
-                       ?? t.GetProperty("SourceUrl")
-                       ?? t.GetProperty("RssUrl");
-            var val = prop?.GetValue(f) as string;
-            return val != null && string.Equals(val, url, StringComparison.OrdinalIgnoreCase);
-        });
-    }
-
-    static void ResetAutoAdvance() { }
 
     // ---------- Windows VT/UTF-8 Enable ----------
     static void EnableWindowsConsoleAnsi()
@@ -1341,20 +1338,20 @@ class Program
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
-    
+
     static void PrintVersion()
     {
         var asm = typeof(Program).Assembly;
-        var info = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         var ver  = string.IsNullOrWhiteSpace(info) ? asm.GetName().Version?.ToString() ?? "0.0.0" : info;
 
         string rid;
-        try { rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier; }
-        catch { rid = $"{Environment.OSVersion.Platform}-{System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}".ToLowerInvariant(); }
+        try { rid = RuntimeInformation.RuntimeIdentifier; }
+        catch { rid = $"{Environment.OSVersion.Platform}-{RuntimeInformation.OSArchitecture}".ToLowerInvariant(); }
 
         Console.WriteLine($"podliner {ver} ({rid})");
     }
-    
+
     static void PrintHelp()
     {
         PrintVersion();
@@ -1363,7 +1360,7 @@ class Program
         Console.WriteLine("Options:");
         Console.WriteLine("  --version, -v            Show version and exit");
         Console.WriteLine("  --help, -h               Show this help and exit");
-        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay>");
+        Console.WriteLine("  --engine <auto|libvlc|mpv|ffplay>");
         Console.WriteLine("  --theme <base|accent|native|auto>");
         Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
         Console.WriteLine("  --search \"<term>\"");
@@ -1373,4 +1370,82 @@ class Program
         Console.WriteLine("  --ascii");
         Console.WriteLine("  --log-level <debug|info|warn|error>");
     }
+
+    // ===== Bridge: AppFacade <-> AppData =====
+    static class Bridge
+    {
+        public static void SyncFromFacadeToAppData(AppFacade app, AppData data)
+        {
+            // Config → AppData
+            data.PreferredEngine = app.EnginePreference;
+            data.Volume0_100     = app.Volume0_100;
+            data.Speed           = app.Speed;
+            data.ThemePref       = app.Theme;
+            data.PlayerAtTop     = app.PlayerAtTop;
+            data.UnplayedOnly    = app.UnplayedOnly;
+            data.SortBy          = app.SortBy;
+            data.SortDir         = app.SortDir;
+            data.PlaySource      = data.PlaySource ?? "auto";
+
+            // Inhalte
+            data.Feeds.Clear();    data.Feeds.AddRange(app.Feeds);
+            data.Episodes.Clear(); data.Episodes.AddRange(app.Episodes);
+            data.Queue.Clear();    data.Queue.AddRange(app.Queue);
+
+            // Network-Flag bleibt Laufzeitflag in AppData
+        }
+
+        public static void SyncFromAppDataToFacade(AppData data, AppFacade app)
+        {
+            // Config
+            app.EnginePreference = data.PreferredEngine;
+            app.Volume0_100      = data.Volume0_100;
+            app.Speed            = data.Speed;
+            app.Theme            = data.ThemePref ?? app.Theme;
+            app.PlayerAtTop      = data.PlayerAtTop;
+            app.UnplayedOnly     = data.UnplayedOnly;
+            app.SortBy           = data.SortBy  ?? app.SortBy;
+            app.SortDir          = data.SortDir ?? app.SortDir;
+
+            // Inhalte (nur solche, die im laufenden Betrieb verändert werden)
+            // Queue (UI arbeitet über Data.Queue)
+            // – hier schreiben wir einmaliger Snapshot zurück:
+            foreach (var q in app.Queue.ToList()) app.QueueRemove(q);
+            foreach (var id in data.Queue) app.QueuePush(id);
+
+            // Saved / Progress / History werden durch Coordinator/Router via LibraryStore aktualisiert.
+        }
+    }
+
+    // Adapter, um den DownloadManager als reines ReadModel in die Façade einzuhängen
+    // Adapter, um den DownloadManager als reines ReadModel in die Façade einzuhängen
+    sealed class DownloadLookupAdapter : AppFacade.ILocalDownloadLookup
+    {
+        private readonly DownloadManager _mgr;
+        private readonly AppData _data;
+
+        public DownloadLookupAdapter(DownloadManager mgr, AppData data)
+        {
+            _mgr = mgr;
+            _data = data;
+        }
+
+        public bool IsDownloaded(Guid episodeId)
+            => TryGetLocalPath(episodeId, out _);
+
+        public bool TryGetLocalPath(Guid episodeId, out string? path)
+        {
+            path = null;
+            if (_data.DownloadMap.TryGetValue(episodeId, out var st) &&
+                st.State == DownloadState.Done &&
+                !string.IsNullOrWhiteSpace(st.LocalPath) &&
+                File.Exists(st.LocalPath))
+            {
+                path = st.LocalPath;
+                return true;
+            }
+            return false;
+        }
+    }
+
 }

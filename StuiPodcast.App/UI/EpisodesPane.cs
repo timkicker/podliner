@@ -115,8 +115,8 @@ internal sealed class EpisodesPane
         if (feedId == FEED_HISTORY)
         {
             // HISTORY: strikt nach LastPlayedAt desc, Sort & Search bewusst ignorieren
-            src = src.Where(e => e.LastPlayedAt != null)
-                     .OrderByDescending(e => e.LastPlayedAt ?? DateTimeOffset.MinValue)
+            src = src.Where(e => e.Progress.LastPlayedAt != null)
+                     .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
                      .Take(_historyLimit);
         }
         else if (feedId == FEED_QUEUE)
@@ -130,7 +130,7 @@ internal sealed class EpisodesPane
         {
             // 1) Feed-Filter
             if (feedId == FEED_SAVED)             src = src.Where(e => e.Saved);
-            else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => e.Downloaded);
+            else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => Program.IsDownloaded(e.Id));
             else if (feedId != FEED_ALL)          src = src.Where(e => e.FeedId == feedId);
 
             // 2) Suche
@@ -207,8 +207,8 @@ internal sealed class EpisodesPane
         sb.AppendLine($"Date: {date}");
         if (!string.IsNullOrWhiteSpace(e.AudioUrl))
             sb.AppendLine($"Audio: {e.AudioUrl}");
-        if (e.LastPlayedAt != null)
-            sb.AppendLine($"Last played: {e.LastPlayedAt:yyyy-MM-dd HH:mm}");
+        if (e.Progress.LastPlayedAt != null)
+            sb.AppendLine($"Last played: {e.Progress.LastPlayedAt:yyyy-MM-dd HH:mm}");
         sb.AppendLine();
         var notes = e.DescriptionText?.Trim();
         sb.AppendLine(string.IsNullOrWhiteSpace(notes) ? "(no shownotes)" : notes);
@@ -271,8 +271,8 @@ internal sealed class EpisodesPane
         var nowPrefix = GlyphSet.NowPrefix(isNow);
 
         // Länge/Position – Default aus Persistenz
-        long lenMs = e.LengthMs ?? 0;
-        long posMs = e.LastPosMs ?? 0;
+        long lenMs = e.DurationMs;
+        long posMs = e.Progress.LastPosMs;
 
         // Snapshot-Override NUR für aktive Episode anwenden (synchron mit Player)
         if (isNow && snapForActive is PlaybackSnapshot snap)
@@ -287,7 +287,7 @@ internal sealed class EpisodesPane
         long effLenMs = Math.Max(lenMs, posMs);
         double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
 
-        char mark = GlyphSet.ProgressGlyph(r, e.Played);
+        char mark = GlyphSet.ProgressGlyph(r, e.ManuallyMarkedPlayed);
 
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
         string dur = GlyphSet.FormatDuration(lenMs);
@@ -296,7 +296,7 @@ internal sealed class EpisodesPane
         var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
 
         bool offline = _isOffline?.Invoke() == true;
-        bool hasLocal = (ds == DownloadState.Done) || e.Downloaded;
+        bool hasLocal = (ds == DownloadState.Done) || Program.IsDownloaded(e.Id);
 
         string badges = GlyphSet.ComposeBadges(
             isSaved: e.Saved,

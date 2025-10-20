@@ -18,7 +18,13 @@ namespace StuiPodcast.Infra;
 public class FeedService
 {
     private readonly AppData _data;
-    public FeedService(AppData data) => _data = data;
+    private readonly AppFacade _app;
+
+    public FeedService(AppData data, AppFacade app)
+    {
+        _data = data;
+        _app  = app;
+    }
 
     // ---------------------------------------------------------------------
     // Public API
@@ -26,34 +32,42 @@ public class FeedService
 
     public async Task<CoreFeed> AddFeedAsync(string url)
     {
-        // Quick probe (best effort) um harte Fehler früh zu fangen
-        var feed = new CoreFeed { Url = url, Title = url, LastChecked = DateTimeOffset.Now };
-
+        // 1) Probe (best effort)
+        var probeFeed = new CoreFeed { Url = url, Title = url, LastChecked = DateTimeOffset.Now };
         try
         {
             var f = await FeedReader.ReadAsync(url).ConfigureAwait(false);
-
-            feed.Title = string.IsNullOrWhiteSpace(f.Title) ? url : f.Title!;
-            feed.LastChecked = DateTimeOffset.Now;
+            probeFeed.Title = string.IsNullOrWhiteSpace(f.Title) ? url : f.Title!;
+            probeFeed.LastChecked = DateTimeOffset.Now;
         }
         catch
         {
-            // Wenn der erste Read scheitert, lassen wir den Feed trotzdem anlegen,
-            // der Nutzer kann später refreshen; Title bleibt auf URL-Fallback.
-            feed.LastChecked = DateTimeOffset.Now;
+            probeFeed.LastChecked = DateTimeOffset.Now;
         }
 
-        _data.Feeds.Add(feed);
+        // 2) Persistenter Upsert (vergibt stabile Id)
+        var saved = _app.AddOrUpdateFeed(probeFeed);
 
-        // Erster Bestückungs-Refresh (best effort)
-        try { await RefreshFeedAsync(feed).ConfigureAwait(false); } catch { /* sichtbar in UI erst beim nächsten Refresh */ }
+        // 3) UI sofort updaten (Upsert in _data.Feeds)
+        var existingInData = _data.Feeds.FirstOrDefault(x => x.Id == saved.Id);
+        if (existingInData == null)
+            _data.Feeds.Add(saved);
+        else
+        {
+            existingInData.Title       = saved.Title;
+            existingInData.Url         = saved.Url;
+            existingInData.LastChecked = saved.LastChecked;
+        }
 
-        return feed;
+        // 4) Erste Befüllung (best effort)
+        try { await RefreshFeedAsync(saved).ConfigureAwait(false); } catch { }
+
+        return saved;
     }
 
     public async Task RefreshAllAsync()
     {
-        // bewusst sequentiell (einfacher, weniger Serverdruck)
+        // bewusst sequentiell
         foreach (var feed in _data.Feeds.ToList())
         {
             try { await RefreshFeedAsync(feed).ConfigureAwait(false); }
@@ -71,13 +85,19 @@ public class FeedService
         catch
         {
             feed.LastChecked = DateTimeOffset.Now;
-            return; // still scheitern – UI bleibt nutzbar
+            // Persistiere trotzdem "LastChecked"
+            var persistedFail = _app.AddOrUpdateFeed(feed);
+            UpsertFeedIntoData(persistedFail);
+            return;
         }
 
-        // Feed-Metadaten sanft aktualisieren
+        // Feed-Metadaten sanft aktualisieren + persistieren
         if (string.IsNullOrWhiteSpace(feed.Title))
             feed.Title = f.Title ?? feed.Url;
         feed.LastChecked = DateTimeOffset.Now;
+
+        var persistedFeed = _app.AddOrUpdateFeed(feed);
+        UpsertFeedIntoData(persistedFeed);
 
         // Items verarbeiten
         foreach (var item in f.Items ?? Array.Empty<FeedItem>())
@@ -85,29 +105,37 @@ public class FeedService
             var audioUrl = TryGetAudioUrl(item);
             if (string.IsNullOrWhiteSpace(audioUrl)) continue;
 
-            var pub = ParseDate(item);
-            var lenMs = TryGetDurationMs(item);
-            var desc = HtmlToText(item.Content ?? item.Description ?? "");
+            var pub   = ParseDate(item);
+            var lenMs = (long)(TryGetDurationMs(item) ?? 0);
+            var desc  = HtmlToText(item.Content ?? item.Description ?? "");
             var title = item.Title ?? "(untitled)";
 
-            // episodes sind durch (FeedId + AudioUrl) identifizierbar
-            var existing = _data.Episodes.FirstOrDefault(e => e.FeedId == feed.Id && string.Equals(e.AudioUrl, audioUrl, StringComparison.OrdinalIgnoreCase));
+            // Ident: (FeedId + AudioUrl)
+            var existing = _data.Episodes.FirstOrDefault(e =>
+                e.FeedId == persistedFeed.Id &&
+                string.Equals(e.AudioUrl, audioUrl, StringComparison.OrdinalIgnoreCase));
 
             if (existing == null)
             {
-                _data.Episodes.Add(new Episode
+                var ep = new Episode
                 {
-                    FeedId = feed.Id,
-                    Title = title,
-                    PubDate = pub,
-                    AudioUrl = audioUrl!,
+                    FeedId          = persistedFeed.Id,
+                    Title           = title,
+                    PubDate         = pub,
+                    AudioUrl        = audioUrl!,
                     DescriptionText = desc,
-                    LengthMs = lenMs
-                });
+                    DurationMs      = lenMs
+                };
+
+                // Persistenter Upsert → stabile Id vom Store
+                var persistedEp = _app.AddOrUpdateEpisode(ep);
+
+                // UI updaten (neuer Eintrag)
+                _data.Episodes.Add(persistedEp);
             }
             else
             {
-                // Sanft updaten: nur fehlende Felder/nützlichere Werte eintragen
+                // Sanfte Updates am vorhandenen Objekt
                 if (string.IsNullOrWhiteSpace(existing.Title) && !string.IsNullOrWhiteSpace(title))
                     existing.Title = title;
 
@@ -117,8 +145,11 @@ public class FeedService
                 if (string.IsNullOrWhiteSpace(existing.DescriptionText) && !string.IsNullOrWhiteSpace(desc))
                     existing.DescriptionText = desc;
 
-                if ((!existing.LengthMs.HasValue || existing.LengthMs <= 0) && (lenMs.HasValue && lenMs > 0))
-                    existing.LengthMs = lenMs;
+                if (existing.DurationMs <= 0 && lenMs > 0)
+                    existing.DurationMs = lenMs;
+
+                // Persistenter Upsert, damit library.json aktualisiert wird
+                _app.AddOrUpdateEpisode(existing);
             }
         }
     }
@@ -126,6 +157,18 @@ public class FeedService
     // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
+
+    void UpsertFeedIntoData(CoreFeed saved)
+    {
+        var df = _data.Feeds.FirstOrDefault(x => x.Id == saved.Id);
+        if (df == null) _data.Feeds.Add(saved);
+        else
+        {
+            df.Title       = saved.Title;
+            df.Url         = saved.Url;
+            df.LastChecked = saved.LastChecked;
+        }
+    }
 
     static DateTimeOffset? ParseDate(FeedItem item)
     {
@@ -140,7 +183,7 @@ public class FeedService
 
     static string? TryGetAudioUrl(FeedItem item)
     {
-        // Arbeite auf dem Raw-XML, um alle Vendor-Erweiterungen mitzunehmen
+        // Raw-XML, um Vendor-Erweiterungen mitzunehmen
         var root = item.SpecificItem?.Element as XElement;
         if (root is null) return null;
 
@@ -208,7 +251,7 @@ public class FeedService
         return null;
     }
 
-    // Sammelt Dauer aus itunes:duration, media:content@duration, alternativen Attributen
+    // itunes:duration, media:content@duration, enclosure@duration
     static long? TryGetDurationMs(FeedItem item)
     {
         var root = item.SpecificItem?.Element as XElement;
@@ -235,7 +278,7 @@ public class FeedService
                 if (parsed is long ms2) return ms2;
             }
 
-            // (3) Weitere Varianten (seltener): <enclosure duration="...">
+            // (3) weitere Varianten (selten)
             if (ln == "enclosure")
             {
                 var durAttr = node.Attribute("duration")?.Value;
@@ -248,10 +291,10 @@ public class FeedService
     }
 
     static bool IsAudioUrl(string s) =>
-        s.EndsWith(".mp3", true, CultureInfo.InvariantCulture) ||
-        s.EndsWith(".m4a", true, CultureInfo.InvariantCulture) ||
-        s.EndsWith(".aac", true, CultureInfo.InvariantCulture) ||
-        s.EndsWith(".ogg", true, CultureInfo.InvariantCulture) ||
+        s.EndsWith(".mp3",  true, CultureInfo.InvariantCulture) ||
+        s.EndsWith(".m4a",  true, CultureInfo.InvariantCulture) ||
+        s.EndsWith(".aac",  true, CultureInfo.InvariantCulture) ||
+        s.EndsWith(".ogg",  true, CultureInfo.InvariantCulture) ||
         s.EndsWith(".opus", true, CultureInfo.InvariantCulture);
 
     static string HtmlToText(string html)
@@ -265,8 +308,13 @@ public class FeedService
         catch
         {
             // Fallback: naive Strip
-            return (html ?? "").Replace("<br>", " ").Replace("<br/>", " ").Replace("<br />", " ")
-                               .Replace("\r", " ").Replace("\n", " ").Trim();
+            return (html ?? "")
+                .Replace("<br>", " ")
+                .Replace("<br/>", " ")
+                .Replace("<br />", " ")
+                .Replace("\r", " ")
+                .Replace("\n", " ")
+                .Trim();
         }
     }
 }
