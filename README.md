@@ -73,15 +73,12 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 ## Screenshots
 <!-- Replace images; keep descriptive ALT text. -->
 <p align="center">
-  <img src="assets/screens/01-episodes.png" alt="Episodenliste mit Feeds und Playerleiste" width="48%"/>
-  <img src="assets/screens/02-details.png"  alt="Episoden-Details mit Beschreibung und Status" width="48%"/>
+  <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="48%"/>
+  <img src="assets/screens/02-details.png"  alt="Episode-details with shownotes" width="48%"/>
 </p>
-
-<!-- Optional:
 <p align="center">
   <img src="assets/screens/03-help.png" alt="Help / Shortcuts" width="70%"/>
 </p>
--->
 
 
 ## Install (stable releases)
