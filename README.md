@@ -52,8 +52,7 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 - [Audio engines](#audio-engines)
 - [FAQ / Troubleshooting](#faq--troubleshooting)
 - [Contributing](#contributing)
-- [Bug reports & logs](#bug-reports--logs)
-- [Roadmap](#roadmap)
+- [Bug reports, logs & roadmap](#bug-reports--logs)
 - [License & credits](#license--credits)
 
 ---
@@ -259,7 +258,7 @@ dotnet run --project StuiPodcast.App
 *(Optionally move details to `docs/contributing.md` later.)*
 
 
-## Bug reports & logs
+## Bug reports, logs and roadmap
 When filing an issue, please include:
 - `podliner --version` output (shows exact version + RID)
 - OS + architecture (e.g., `linux-x64`, `osx-arm64`, `win-x64`)
@@ -268,15 +267,7 @@ When filing an issue, please include:
   Example: `…/podliner/logs/podliner-20250101.log`
 
 Security-sensitive issues: contact tim@kicker.dev.
-
-
-## Roadmap
-- Stabilization & bugfixes
-- Better download/queue management
-- Docs: full commands reference
-- Packaging: {{OPTIONAL: Homebrew / winget / deb/rpm}}
-
-*(Track progress via Issues / Milestones.)*
+Please take a look at [ROADMAP.md](./ROADMAP.md)
 
 
 ## License & credits
