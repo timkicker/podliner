@@ -13,7 +13,7 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
     <img alt="podliner" src="assets/branding/podliner-logo.png" width="360">
   </picture>
   -->
-  <img alt="podliner" src="assets/branding/podliner-logo.png" width="360">
+  <img alt="podliner" src="assets/branding/podliner-logo-alt.png" width="360">
 </p>
 
 <p align="center">
