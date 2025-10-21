@@ -201,7 +201,7 @@ Inside the TUI (defaults; adjust after confirming):
 - **Logs**: next to the executable under `logs/` (file pattern `podliner-.log`)  
   Example: `…/podliner/logs/podliner-YYYYMMDD.log`
 - **Downloads**: {{IF APPLICABLE: path or “same as configured in app”}}
-- **OPML**: imports/exports under {{PATH OR UI FLOW}}.
+- **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
 > Back up `appdata.json` (or your config filename) to migrate settings to another machine.
 
@@ -270,7 +270,7 @@ When filing an issue, please include:
 - **Logs**: attach the most recent file from `logs/` next to the binary (pattern `podliner-*.log`)  
   Example: `…/podliner/logs/podliner-20250101.log`
 
-Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_CONTACT}}.
+Security-sensitive issues: contact tim@kicker.dev.
 
 
 ## Roadmap
@@ -285,4 +285,3 @@ Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_
 ## License & credits
 - License: [MIT](LICENSE)
 - Thanks: [Terminal.Gui](https://github.com/migueldeicaza/gui.cs), [Serilog](https://serilog.net/), [mpv](https://mpv.io/), [ffmpeg](https://ffmpeg.org/), [VLC](https://www.videolan.org/), and contributors.
-- © {{YEAR}} {{AUTHOR: Tim Kicker}}
