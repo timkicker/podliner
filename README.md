@@ -1,5 +1,3 @@
-
-
 <p align="center">
   <!-- Dark/Light logo variants optional -->
   <!--
@@ -36,11 +34,6 @@
 - [Why podliner?](#why-podliner)
 - [Screenshots](#screenshots)
 - [Install (stable releases)](#install-stable-releases)
-  - [Linux](#linux)
-  - [macOS](#macos)
-  - [Windows](#windows)
-  - [Update / Uninstall / Prune](#update--uninstall--prune)
-  - [Verify checksums](#verify-checksums)
 - [Quick start](#quick-start)
 - [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 - [Commands (essentials)](#commands-essentials)
@@ -48,7 +41,7 @@
 - [Audio engines](#audio-engines)
 - [FAQ / Troubleshooting](#faq--troubleshooting)
 - [Contributing](#contributing)
-- [Bug reports, logs & roadmap](#bug-reports--logs)
+- [Bug reports, logs & roadmap](#bug-reports-logs--roadmap)
 - [License & credits](#license--credits)
 
 ---
@@ -94,34 +87,8 @@ bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download
 irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
 ```
 
-> Need a system-wide install? Add `--system` (Linux/macOS) or run `Install-Podliner -System` (Windows). Details will live in the FAQ.
+> Looking for system-wide install, uninstall, pruning, or checksum verification? See the [FAQ](#faq--troubleshooting).
 
-### Update / Uninstall / Prune
-- **Update to latest stable:** re-run the install command for your OS.
-- **Uninstall (Linux):**
-  ```bash
-  bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh) --uninstall
-  ```
-- **Uninstall (macOS):**
-  ```bash
-  bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh) --uninstall
-  ```
-- **Uninstall (Windows, PowerShell):**
-  ```powershell
-  irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
-  Uninstall-Podliner
-  ```
-- **Prune old versions (keep active):** use `--prune` on Linux/macOS or `Prune-Podliner` on Windows.
-
-### Verify checksums
-```bash
-# Download checksums (stable)
-curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/SHA256SUMS
-
-# Example: verify Linux x64 tarball
-curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/podliner-linux-x64.tar.gz
-grep 'podliner-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
-```
 
 ## Quick start
 ```bash
@@ -195,6 +162,38 @@ Engine selection & fallback:
 
 
 ## FAQ / Troubleshooting
+
+**System-wide install?**  
+- Linux/macOS: add `--system` to the install command.  
+- Windows (PowerShell): run `Install-Podliner -System` after the bootstrap line.
+
+**Update / Uninstall / Prune**  
+- Update to latest stable: re-run the install command for your OS.  
+- Uninstall (Linux):
+  ```bash
+  bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh) --uninstall
+  ```
+- Uninstall (macOS):
+  ```bash
+  bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh) --uninstall
+  ```
+- Uninstall (Windows, PowerShell):
+  ```powershell
+  irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
+  Uninstall-Podliner
+  ```
+- Prune old versions (keep active): use `--prune` on Linux/macOS or `Prune-Podliner` on Windows.
+
+**Verify checksums**  
+```bash
+# Download checksums (stable)
+curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/SHA256SUMS
+
+# Example: verify Linux x64 tarball
+curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/podliner-linux-x64.tar.gz
+grep 'podliner-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
+```
+
 **`podliner: command not found`**  
 Add install path to `PATH`:
 - Linux: `export PATH="$HOME/.local/bin:$PATH"` (in `~/.bashrc` / `~/.zshrc`)
@@ -232,7 +231,7 @@ dotnet run --project StuiPodcast.App
 *(Optionally move details to `docs/contributing.md` later.)*
 
 
-## Bug reports, logs and roadmap
+## Bug reports, logs & roadmap
 When filing an issue, please include:
 - `podliner --version` output (shows exact version + RID)
 - OS + architecture (e.g., `linux-x64`, `osx-arm64`, `win-x64`)
@@ -240,7 +239,7 @@ When filing an issue, please include:
 - **Logs**: attach the most recent file from `logs/` next to the binary (pattern `podliner-*.log`)  
   Example: `…/podliner/logs/podliner-20250101.log`
 
-Security-sensitive issues: contact tim@kicker.dev.
+Security-sensitive issues: contact tim@kicker.dev.  
 Please take a look at [ROADMAP.md](./ROADMAP.md)
 
 
