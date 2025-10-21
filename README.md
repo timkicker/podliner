@@ -29,7 +29,7 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
     <img alt="Release" src="https://img.shields.io/github/v/release/timkicker/podliner?display_name=tag&sort=semver">
   </a>
   <a href="LICENSE">
-    <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg">
+    <img alt="License" src="https://img.shields.io/badge/license-GPLv3-blue.svg">
   </a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-666">
 </p>
@@ -283,5 +283,5 @@ Security-sensitive issues: contact tim@kicker.dev.
 
 
 ## License & credits
-- License: [MIT](LICENSE)
+- License: [GPLv3](LICENSE)
 - Thanks: [Terminal.Gui](https://github.com/migueldeicaza/gui.cs), [Serilog](https://serilog.net/), [mpv](https://mpv.io/), [ffmpeg](https://ffmpeg.org/), [VLC](https://www.videolan.org/), and contributors.
