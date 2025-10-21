@@ -70,8 +70,6 @@
 
 ## Install (stable releases)
 
-RC and beta builds are **not** exposed via `/releases/latest`. The commands below always fetch the latest **stable**.
-
 ### Linux
 ```bash
 bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh)
@@ -90,27 +88,21 @@ irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 |
 > Looking for system-wide install, uninstall, pruning, or checksum verification? See the [FAQ](#faq--troubleshooting).
 
 
-## Quick start
-```bash
-podliner                 # launch the TUI
-# In the UI:
-#  - Add a feed (paste URL), press Enter to fetch
-#  - Select episode → press Enter to play
-#  - q to quit
-```
-> If you see “No audio engine found”, install one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
-
-
 ## Migrate from other players (OPML)
+
 Most podcast players support **OPML** export/import.
 
-- **Export** your subscriptions from the old player as `subscriptions.opml` (name doesn’t matter).
-- In **podliner**, open the import dialog and select the OPML file.  
-  *(Alternatively place the OPML file under {{CONFIG_DIR}} and use the import command if you prefer CLI—adjust this line to your actual UI flow.)*
-- To **export** your current subscriptions from podliner, use the export action; it will write an OPML file to {{EXPORT_PATH}}.
-- After import, refresh feeds once to populate episodes.
+- **Export** your subscriptions from the old player as an `.opml` file (e.g. `subscriptions.opml`).
+- In **podliner**, open the **Import OPML** action and select that file.
+- To **export** your current subscriptions from podliner, use **Export OPML** — it writes to your **Documents** folder as:
+  - Linux/macOS: `~/Documents/podliner-feeds.opml`
+  - Windows: `%USERPROFILE%\Documents\podliner-feeds.opml`
+- If you prefer to drop files in place, podliner stores its config here:
+  - Linux/macOS: `${XDG_CONFIG_HOME}/podliner` or `~/.config/podliner`
+  - Windows: `%APPDATA%\podliner`
 
-> OPML contains feed URLs only (no playback positions). For progress sync, use your current backup method if any.
+> OPML contains feed URLs only (no playback positions). For progress sync, use your existing backup/sync method if available.
+
 
 
 ## Commands (essentials)
@@ -160,8 +152,11 @@ Engine selection & fallback:
 - Default is `auto` (prefer local download if available; else remote if online).
 - You can switch engines from within the UI (hot swap) {{CONFIRM KEY}}.
 
-
 ## FAQ / Troubleshooting
+
+**"No audio engine found”**
+
+- Iinstall one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
 
 **System-wide install?**  
 - Linux/macOS: add `--system` to the install command.  

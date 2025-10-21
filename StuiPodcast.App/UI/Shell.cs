@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
+using Attribute = Terminal.Gui.Attribute;
 
 namespace StuiPodcast.App.UI;
 
@@ -59,7 +60,7 @@ private Terminal.Gui.MenuBar? _menu;
 
     // ---- State ----
     private readonly MemoryLogSink _mem;
-    public enum ThemeMode { MenuAccent, Base, Native }
+    public enum ThemeMode { MenuAccent, Base, Native, User }
 
     private ThemeMode _theme;
     private bool _playerAtTop   = false;
@@ -111,6 +112,7 @@ private Terminal.Gui.MenuBar? _menu;
     {
         ThemeMode.Base       => ThemeMode.MenuAccent,
         ThemeMode.MenuAccent => ThemeMode.Native,
+        ThemeMode.Native     => ThemeMode.User,   // <— NEU
         _                    => ThemeMode.Base
     };
 
@@ -235,7 +237,7 @@ public void SetTheme(ThemeMode mode)
         Application.Top.Add(_player);
 
         // --- Menü ---
-        var menu = MenuBarFactory.Build(new MenuBarFactory.Callbacks(
+        _menu = MenuBarFactory.Build(new MenuBarFactory.Callbacks(
             Command: (cmd) => Command?.Invoke(cmd),
             RefreshRequested: RefreshRequested,
             AddFeed: () => ShowCommandBox(":add "),
@@ -265,7 +267,7 @@ public void SetTheme(ThemeMode mode)
             ToggleTheme: () => ToggleThemeRequested?.Invoke()
         ));
         // Menü hinzufügen (gibt's schon bei dir)
-        Application.Top.Add(menu);
+        Application.Top.Add(_menu);
 
 // --- NEU: kompakter Download-Indicator rechts neben der Menüzeile ---
         _dlBadge = new Terminal.Gui.Label("")
@@ -278,7 +280,7 @@ public void SetTheme(ThemeMode mode)
             Visible = false // nur zeigen, wenn Text gesetzt
         };
 // Farbschema an das Menü anlehnen, wenn vorhanden
-        try { _dlBadge.ColorScheme = menu?.ColorScheme ?? _dlBadge.ColorScheme; } catch { /* best effort */ }
+        try { _dlBadge.ColorScheme = _menu?.ColorScheme ?? _dlBadge.ColorScheme; } catch { /* best effort */ }
 
         Application.Top.Add(_dlBadge);
 
@@ -298,7 +300,7 @@ public void SetTheme(ThemeMode mode)
         // --- Keys überall binden ---
         BindKeys(
             Application.Top,
-            menu,
+            _menu,
             _mainWin,
             _rightRoot,
             _player,
@@ -313,13 +315,33 @@ public void SetTheme(ThemeMode mode)
         SetPlayerPlacement(false);
 
         // Nach erstem Layout auf Episodes fokussieren
-        Application.MainLoop.AddIdle(() =>
+        Application.MainLoop?.AddIdle(() =>
         {
             FocusPane(Pane.Episodes);
             return false;
         });
     }
 
+    
+    private ColorScheme BuildDetailsScheme()
+    {
+        // Nutze deine Palette, aber Fokus == Normal → kein Orange beim Fokus
+        var P = UserPal;
+
+        var normal = Attr(C(P.Fg), C(P.Bg2));   // dunkles Grau als Hintergrund, helle Schrift
+        var hot    = Attr(C(P.Orange), C(P.Bg2));
+
+        return new ColorScheme
+        {
+            Normal    = normal,
+            Focus     = normal,     // <— wichtig: Fokus nicht hervorheben
+            HotNormal = hot,
+            HotFocus  = hot,        // <— ebenfalls neutral halten
+            Disabled  = Attr(C(P.Comment), C(P.Bg2))
+        };
+    }
+
+    
     // ---- Feeds/Episodes (API) ----
     public void SetFeeds(List<Feed> feeds, Guid? selectId = null)
     {
@@ -521,6 +543,148 @@ public void SetTheme(ThemeMode mode)
     }
 
     // ---- Theme/Layout ----
+    // ---------- USER THEME: Palette + Helpers ----------
+
+    private record Palette(string Bg, string Bg2, string Dim, string Fg, string Comment,
+        string Orange, string Green, string Pink, string Red, string Cyan,
+        string Purple, string Blue, string Yellow);
+
+    private static readonly Palette UserPal = new(
+        Bg:     "#2a2a2a",
+        Bg2:    "#333333",
+        Dim:    "#222222",
+        Fg:     "#bec1bf",
+        Comment:"#8a8a8a",
+        Orange: "#df970d",
+        Green:  "#6aaa64",
+        Pink:   "#b16286",
+        Red:    "#a14040",
+        Cyan:   "#64aaaa",
+        Purple: "#9762b1",
+        Blue:   "#6289b1",
+        Yellow: "#d5a442"
+    );
+// hex → Color (Truecolor wenn verfügbar, sonst Approx)
+    private static Color C(string hex) => ApproxAnsi(hex);
+    
+    
+    private static Color ApproxAnsi(string hex)
+    {
+        hex = (hex ?? "#000000").Trim().TrimStart('#');
+        if (hex.Length < 6) hex = hex.PadRight(6, '0');
+        int r = Convert.ToInt32(hex.Substring(0, 2), 16);
+        int g = Convert.ToInt32(hex.Substring(2, 2), 16);
+        int b = Convert.ToInt32(hex.Substring(4, 2), 16);
+
+        // Kandidaten nur mit sicher vorhandenen Farben
+        var candidates = new (Color color, int r, int g, int b)[]
+        {
+            (Color.Black,     0,   0,   0),
+            (Color.DarkGray,  85,  85,  85),
+            (Color.Gray,      136, 136, 136),
+            (Color.White,     255, 255, 255),
+
+            (Color.Red,       205, 0,   0),
+            (Color.Green,     0,   205, 0),
+            (Color.Blue,      0,   0,   205),
+
+            (Color.Cyan,      0,   205, 205),
+            (Color.Magenta,   205, 0,   205),
+
+            // Terminal.Gui nutzt "Brown" für (dunkles) Gelb
+            (Color.Brown,     205, 205, 0),
+        };
+
+        int Best((int r, int g, int b) a, (int r, int g, int b) b)
+        {
+            var dr = a.r - b.r; var dg = a.g - b.g; var db = a.b - b.b;
+            return dr * dr + dg * dg + db * db;
+        }
+
+        var want = (r, g, b);
+        var best = candidates[0];
+        var bestD = int.MaxValue;
+        foreach (var c in candidates)
+        {
+            var d = Best(want, (c.r, c.g, c.b));
+            if (d < bestD) { best = c; bestD = d; }
+        }
+        return best.color;
+    }
+
+
+    
+    private static Attribute Attr(Color fg, Color bg) => new(fg, bg);
+    
+
+    
+    private sealed class UserSchemes
+    {
+        public ColorScheme Main  = new();
+        public ColorScheme Menu  = new();
+        public ColorScheme List  = new();
+        public ColorScheme Input = new();
+        public ColorScheme Dialog= new();
+        public ColorScheme Status= new();
+    }
+    
+
+    
+    private static UserSchemes BuildUserSchemes()
+    {
+        var P = UserPal;
+
+        var main = new ColorScheme {
+            Normal    = Attr(C(P.Fg),     C(P.Bg)),
+            Focus     = Attr(Color.Black,  C(P.Orange)),
+            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
+            HotFocus  = Attr(Color.Black,  C(P.Orange)),
+            Disabled  = Attr(C(P.Comment), C(P.Bg))
+        };
+
+        var menu = new ColorScheme {
+            Normal    = Attr(C(P.Fg),     C(P.Bg)),
+            Focus     = Attr(Color.Black,  C(P.Orange)),
+            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
+            HotFocus  = Attr(Color.Black,  C(P.Orange)),
+            Disabled  = Attr(C(P.Comment), C(P.Bg))
+        };
+
+        var list = new ColorScheme {
+            Normal    = Attr(C(P.Fg),     C(P.Bg)),
+            Focus     = Attr(Color.Black,  C(P.Pink)),
+            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
+            HotFocus  = Attr(Color.Black,  C(P.Pink)),
+            Disabled  = Attr(C(P.Comment), C(P.Bg))
+        };
+
+        var input = new ColorScheme {
+            Normal    = Attr(C(P.Fg),     C(P.Dim)),
+            Focus     = Attr(Color.Black,  C(P.Green)),
+            HotNormal = Attr(C(P.Orange),  C(P.Dim)),
+            HotFocus  = Attr(Color.Black,  C(P.Green)),
+            Disabled  = Attr(C(P.Comment), C(P.Dim))
+        };
+
+        var dialog = new ColorScheme {
+            Normal    = Attr(C(P.Fg),     C(P.Bg2)),
+            Focus     = Attr(Color.Black,  C(P.Green)),
+            HotNormal = Attr(C(P.Orange),  C(P.Bg2)),
+            HotFocus  = Attr(Color.Black,  C(P.Green)),
+            Disabled  = Attr(C(P.Comment), C(P.Bg2))
+        };
+
+        var status = new ColorScheme {
+            Normal    = Attr(C(P.Fg),      C(P.Bg2)),
+            Focus     = Attr(Color.Black,   C(P.Orange)),
+            HotNormal = Attr(C(P.Yellow),   C(P.Bg2)),
+            HotFocus  = Attr(Color.Black,   C(P.Orange)),
+            Disabled  = Attr(C(P.Comment),  C(P.Bg2))
+        };
+
+        return new UserSchemes { Main = main, Menu = menu, List = list, Input = input, Dialog = dialog, Status = status };
+    }
+
     public void SetPlayerPlacement(bool atTop)
     {
         UI(() =>
@@ -577,43 +741,90 @@ public void SetTheme(ThemeMode mode)
     public void ShowDetails(Episode e) => UI(() => _episodesPane?.ShowDetails(e));
 
     private void ApplyTheme()
+{
+    UI(() =>
     {
-        UI(() =>
+        if (_theme == ThemeMode.User)
         {
-            // 1) Scheme bestimmen
-            ColorScheme scheme = _theme switch
-            {
-                ThemeMode.MenuAccent => Colors.Menu,
-                ThemeMode.Base       => Colors.Base,
-                ThemeMode.Native     => BuildNativeScheme(),
-                _ => Colors.Base
-            };
+            var u = BuildUserSchemes();
 
-            // 2) global anwenden
-            if (Application.Top != null) Application.Top.ColorScheme = scheme;
+            // Top-Level / Fenster
+            if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
+            if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
+            if (_rightRoot != null)               _rightRoot.ColorScheme = u.Main;
 
-            if (_mainWin != null)                 _mainWin.ColorScheme = scheme;
-            if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = scheme;
-            if (_rightRoot != null)               _rightRoot.ColorScheme = scheme;
-            if (_player != null)                  _player.ColorScheme = scheme;
-            if (_feedsPane?.List != null)         _feedsPane.List.ColorScheme = scheme;
-            if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = scheme;
+            // Menü + Badge
+            if (_menu != null)                    _menu.ColorScheme = u.Menu;
+            if (_dlBadge != null)                 _dlBadge.ColorScheme = u.Menu;
 
-            // Progress/Vol: eigenes Scheme, aber auf Native basierend, falls aktiv
+            // Listen/Tabs/Frames
+            if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = u.Main;
+            if (_feedsPane?.List  != null)        _feedsPane.List.ColorScheme  = u.List;
+
+            if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = u.Main;
+            if (_episodesPane?.List != null)      _episodesPane.List.ColorScheme = u.List;
+
+            // Player
             if (_player != null)
             {
-                _player.Progress.ColorScheme = MakeProgressScheme();
-                _player.VolBar.ColorScheme   = MakeProgressScheme();
+                _player.ColorScheme          = u.Main;
+                _player.Progress.ColorScheme = new ColorScheme {
+                    Normal    = u.Status.Normal,
+                    Focus     = u.Status.Focus,
+                    HotNormal = u.Menu.HotNormal,
+                    HotFocus  = u.Menu.HotFocus,
+                    Disabled  = u.Status.Disabled
+                };
+                _player.VolBar.ColorScheme   = _player.Progress.ColorScheme;
+            }
+
+            // Inputleisten
+            if (_commandBox != null) _commandBox.ColorScheme = u.Input;
+            if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
+
+            
+            if (_episodesPane?.Details != null)
+            {
+                _episodesPane.Details.ColorScheme = BuildDetailsScheme();
             }
 
             _osd.ApplyTheme();
-
-            if (_commandBox != null) _commandBox.ColorScheme = scheme;
-            if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
-
             RequestRepaint();
-        });
-    }
+            return; // <— WICHTIG: „Base/MenuAccent/Native“-Zweig überspringen
+        }
+
+        // ==== vorhandene Modi wie gehabt ====
+        ColorScheme scheme = _theme switch
+        {
+            ThemeMode.MenuAccent => Colors.Menu,
+            ThemeMode.Base       => Colors.Base,
+            ThemeMode.Native     => BuildNativeScheme(),
+            _ => Colors.Base
+        };
+
+        if (Application.Top != null) Application.Top.ColorScheme = scheme;
+
+        if (_mainWin != null)                 _mainWin.ColorScheme = scheme;
+        if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = scheme;
+        if (_rightRoot != null)               _rightRoot.ColorScheme = scheme;
+        if (_player != null)                  _player.ColorScheme = scheme;
+        if (_feedsPane?.List != null)         _feedsPane.List.ColorScheme = scheme;
+        if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = scheme;
+
+        if (_player != null)
+        {
+            _player.Progress.ColorScheme = MakeProgressScheme();
+            _player.VolBar.ColorScheme   = MakeProgressScheme();
+        }
+
+        _osd.ApplyTheme();
+        if (_commandBox != null) _commandBox.ColorScheme = scheme;
+        if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
+
+        RequestRepaint();
+    });
+}
+
 
     private static ColorScheme BuildNativeScheme()
     {

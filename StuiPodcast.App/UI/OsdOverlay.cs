@@ -142,15 +142,18 @@ internal sealed class OsdOverlay
         _win.Add(_label);
         _win.Visible = false;
 
-        Application.Top.Add(_win);
-
-        // Re-layout on terminal resize
-        Application.Top.Resized += _ =>
+        if (Application.Top != null)
         {
-            if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
+            Application.Top.Add(_win);
+
+            // Re-layout on terminal resize
+            Application.Top.Resized += _ =>
             {
-                ShowOnUi(_lastText, TimeSpan.FromMilliseconds(10));
-            }
-        };
+                if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
+                {
+                    ShowOnUi(_lastText, TimeSpan.FromMilliseconds(10));
+                }
+            };
+        }
     }
 }

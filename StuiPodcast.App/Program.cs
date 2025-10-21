@@ -270,6 +270,7 @@ class Program
                 "base"   => ThemeMode.Base,
                 "accent" => ThemeMode.MenuAccent,
                 "native" => ThemeMode.Native,
+                "user"  => ThemeMode.User,
                 "auto"   => DefaultThemeForPlatform(),
                 _        => DefaultThemeForPlatform()
             };
