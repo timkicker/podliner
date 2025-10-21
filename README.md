@@ -1,8 +1,4 @@
-<!--
-README for podliner — skeleton.
-Replace all {{PLACEHOLDER}} markers before publishing.
-Keep screenshots small (<1–2 MB each); store under assets/screens/.
--->
+
 
 <p align="center">
   <!-- Dark/Light logo variants optional -->
@@ -70,7 +66,6 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 
 
 ## Screenshots
-<!-- Replace images; keep descriptive ALT text. -->
 <p align="center">
   <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="48%"/>
   <img src="assets/screens/02-details.png"  alt="Episode-details with shownotes" width="48%"/>
@@ -81,73 +76,52 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 
 
 ## Install (stable releases)
-> RCs/Betas are **not** exposed via `/releases/latest`. The commands below always fetch the latest **stable**.
+
+RC and beta builds are **not** exposed via `/releases/latest`. The commands below always fetch the latest **stable**.
 
 ### Linux
 ```bash
 bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh)
 ```
-- User install: `~/.local/bin/podliner` (ensure `~/.local/bin` is on your `PATH`).
-- System install:
-  ```bash
-  curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh | sudo bash -s -- --system
-  ```
-  Places binary link under `/usr/local/bin/podliner`.
 
 ### macOS
 ```bash
 bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh)
 ```
-- User install: `~/bin/podliner` (add `export PATH="$HOME/bin:$PATH"` to `~/.zprofile` or `~/.zshrc`).
-- System install:
-  ```bash
-  bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh) --system
-  ```
-  Symlink under `/usr/local/bin/podliner`.  
-- Note: installer removes Gatekeeper quarantine flag (`xattr -dr com.apple.quarantine`) best-effort.
 
-### Windows
-Open **PowerShell** (as user) and run:
+### Windows (PowerShell)
 ```powershell
 irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
 ```
-- User install: links into `%LOCALAPPDATA%\Microsoft\WindowsApps\podliner.exe`
-  (usually on `PATH`; if not, add it via **System → Advanced → Environment Variables**).
-- System install (admin PowerShell):
-```powershell
-irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
-Install-Podliner -System
-```
+
+> Need a system-wide install? Add `--system` (Linux/macOS) or run `Install-Podliner -System` (Windows). Details will live in the FAQ.
 
 ### Update / Uninstall / Prune
-- Update to latest stable: re-run the install command.
-- Uninstall (Linux/macOS):
+- **Update to latest stable:** re-run the install command for your OS.
+- **Uninstall (Linux):**
   ```bash
   bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh) --uninstall
   ```
+- **Uninstall (macOS):**
   ```bash
   bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh) --uninstall
   ```
-- Uninstall (Windows, PowerShell):
+- **Uninstall (Windows, PowerShell):**
   ```powershell
   irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
   Uninstall-Podliner
   ```
-- Prune old versions (keep active): same scripts with `--prune` / `Prune-Podliner`.
+- **Prune old versions (keep active):** use `--prune` on Linux/macOS or `Prune-Podliner` on Windows.
 
 ### Verify checksums
 ```bash
-cd /tmp
+# Download checksums (stable)
 curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/SHA256SUMS
-# Example for Linux x64:
+
+# Example: verify Linux x64 tarball
 curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/podliner-linux-x64.tar.gz
 grep 'podliner-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
 ```
-macOS:
-```bash
-shasum -a 256 podliner-osx-{{arm64|x64}}.tar.gz | grep -F "$(grep 'podliner-osx-{{rid}}.tar.gz$' SHA256SUMS)"
-```
-
 
 ## Quick start
 ```bash
