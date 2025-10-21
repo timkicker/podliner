@@ -29,7 +29,7 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
     <img alt="Release" src="https://img.shields.io/github/v/release/timkicker/podliner?display_name=tag&sort=semver">
   </a>
   <a href="LICENSE">
-    <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg">
+    <img alt="License" src="https://img.shields.io/badge/license-GPLv3-blue.svg">
   </a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-666">
 </p>
@@ -73,15 +73,12 @@ Keep screenshots small (<1–2 MB each); store under assets/screens/.
 ## Screenshots
 <!-- Replace images; keep descriptive ALT text. -->
 <p align="center">
-  <img src="assets/screens/01-episodes.png" alt="Episodenliste mit Feeds und Playerleiste" width="48%"/>
-  <img src="assets/screens/02-details.png"  alt="Episoden-Details mit Beschreibung und Status" width="48%"/>
+  <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="48%"/>
+  <img src="assets/screens/02-details.png"  alt="Episode-details with shownotes" width="48%"/>
 </p>
-
-<!-- Optional:
 <p align="center">
   <img src="assets/screens/03-help.png" alt="Help / Shortcuts" width="70%"/>
 </p>
--->
 
 
 ## Install (stable releases)
@@ -201,7 +198,7 @@ Inside the TUI (defaults; adjust after confirming):
 - **Logs**: next to the executable under `logs/` (file pattern `podliner-.log`)  
   Example: `…/podliner/logs/podliner-YYYYMMDD.log`
 - **Downloads**: {{IF APPLICABLE: path or “same as configured in app”}}
-- **OPML**: imports/exports under {{PATH OR UI FLOW}}.
+- **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
 > Back up `appdata.json` (or your config filename) to migrate settings to another machine.
 
@@ -270,7 +267,7 @@ When filing an issue, please include:
 - **Logs**: attach the most recent file from `logs/` next to the binary (pattern `podliner-*.log`)  
   Example: `…/podliner/logs/podliner-20250101.log`
 
-Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_CONTACT}}.
+Security-sensitive issues: contact tim@kicker.dev.
 
 
 ## Roadmap
@@ -283,6 +280,5 @@ Security-sensitive issues: use GitHub Security Advisories or contact {{SECURITY_
 
 
 ## License & credits
-- License: [MIT](LICENSE)
+- License: [GPLv3](LICENSE)
 - Thanks: [Terminal.Gui](https://github.com/migueldeicaza/gui.cs), [Serilog](https://serilog.net/), [mpv](https://mpv.io/), [ffmpeg](https://ffmpeg.org/), [VLC](https://www.videolan.org/), and contributors.
-- © {{YEAR}} {{AUTHOR: Tim Kicker}}
