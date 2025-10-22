@@ -94,21 +94,19 @@ Most podcast players support **OPML** export/import.
 
 - **Export** your subscriptions from the old player as an `.opml` file (e.g. `subscriptions.opml`).
 - In **podliner**, open the **Import OPML** action and select that file.
-- To **export** your current subscriptions from podliner, use **Export OPML** — it writes to your **Documents** folder as:
+- To **export** your current subscriptions from podliner, use **Export OPML**. It writes to your **Documents** folder as:
   - Linux/macOS: `~/Documents/podliner-feeds.opml`
   - Windows: `%USERPROFILE%\Documents\podliner-feeds.opml`
 - If you prefer to drop files in place, podliner stores its config here:
   - Linux/macOS: `${XDG_CONFIG_HOME}/podliner` or `~/.config/podliner`
   - Windows: `%APPDATA%\podliner`
 
-> OPML contains feed URLs only (no playback positions). For progress sync, use your existing backup/sync method if available.
-
 
 
 ## Commands (essentials)
-> Full help: `podliner --help`
+> Full help-browser: `:h`
 
-Inside the TUI (defaults; adjust after confirming):
+Used most:
 - **Enter** – play selected episode
 - **Space** – pause/resume
 - **d** – download / show download status
@@ -117,7 +115,7 @@ Inside the TUI (defaults; adjust after confirming):
 - **t** – toggle theme
 - **q** – quit
 
-*(Keep this list short; expand later under `docs/commands.md` if needed.)*
+For all commands and keybindings, please see [COMMANDS](./COMMANDS.md)
 
 
 ## Configuration & data
