@@ -259,7 +259,6 @@ class Program
         UpdateWindowTitleWithDownloads();
 
         // Theme via CLI?
-        // Theme via CLI?
         if (!string.IsNullOrWhiteSpace(cli.Theme))
         {
             var t = cli.Theme!.Trim().ToLowerInvariant();
@@ -270,9 +269,9 @@ class Program
                 "base"   => ThemeMode.Base,
                 "accent" => ThemeMode.MenuAccent,
                 "native" => ThemeMode.Native,
-                "user"  => ThemeMode.User,
-                "auto"   => DefaultThemeForPlatform(),
-                _        => DefaultThemeForPlatform()
+                "user"   => ThemeMode.User,
+                "auto"   => ThemeMode.User,              // << default now "user"
+                _        => ThemeMode.User               // << fallback to "user"
             };
 
             try
@@ -287,21 +286,20 @@ class Program
         else
         {
             // Keine CLI-Vorgabe → gespeicherten Wert lesen.
-            // Ist er "auto" oder leer, nimm den Plattform-Default,
+            // Ist er "auto" oder leer, nimm das User-Theme als Default,
             // aber überschreibe ThemePref NICHT (bleibt "auto").
             var pref = (Data.ThemePref ?? "auto").Trim();
 
             ThemeMode desired =
                 pref.Equals("auto", StringComparison.OrdinalIgnoreCase)
-                    ? DefaultThemeForPlatform()
+                    ? ThemeMode.User
                     : (Enum.TryParse<ThemeMode>(pref, out var saved)
                         ? saved
-                        : DefaultThemeForPlatform());
+                        : ThemeMode.User);
 
             UI.SetTheme(desired);
-            Log.Information("theme resolved saved={Saved} osDefault={OsDefault} chosen={Chosen}",
-                Data.ThemePref, OperatingSystem.IsWindows() ? "Base" : OperatingSystem.IsMacOS() ? "Native" : "MenuAccent",
-                desired);
+            Log.Information("theme resolved saved={Saved} default={Default} chosen={Chosen}",
+                Data.ThemePref, "User", desired);
 
             // HIER NICHT Data.ThemePref ändern – "auto" bleibt "auto",
             // bis der User aktiv ein Theme setzt.

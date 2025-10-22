@@ -154,15 +154,15 @@ Engine selection & fallback:
 
 ## FAQ / Troubleshooting
 
-**"No audio engine found”**
+### "No audio engine found”
 
 - Iinstall one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
 
-**System-wide install?**  
+### System-wide install?  
 - Linux/macOS: add `--system` to the install command.  
 - Windows (PowerShell): run `Install-Podliner -System` after the bootstrap line.
 
-**Update / Uninstall / Prune**  
+### Update / Uninstall / Prune
 - Update to latest stable: re-run the install command for your OS.  
 - Uninstall (Linux):
   ```bash
@@ -179,7 +179,8 @@ Engine selection & fallback:
   ```
 - Prune old versions (keep active): use `--prune` on Linux/macOS or `Prune-Podliner` on Windows.
 
-**Verify checksums**  
+### Verify checksums
+
 ```bash
 # Download checksums (stable)
 curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/SHA256SUMS
@@ -189,24 +190,19 @@ curl -fsSLO https://github.com/timkicker/podliner/releases/latest/download/podli
 grep 'podliner-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
 ```
 
-**`podliner: command not found`**  
+### podliner: command not found
 Add install path to `PATH`:
+
 - Linux: `export PATH="$HOME/.local/bin:$PATH"` (in `~/.bashrc` / `~/.zshrc`)
 - macOS: `export PATH="$HOME/bin:$PATH"` (in `~/.zprofile` / `~/.zshrc`)
 - Windows: ensure `%LOCALAPPDATA%\Microsoft\WindowsApps` is on PATH
 
-**“No audio engine found”**  
-Install `mpv` or `ffplay` (see above), then restart.
-
-**UI doesn’t refresh**  
-Update to the latest stable release; if still reproducible, include logs and OS/RID in your bug report (see below).
-
-**Reset config**  
+### Reset config
 Quit, then move the config directory away (see [Configuration & data](#configuration--data)), restart to re-initialize.
 
 
 ## Contributing
-We welcome small, focused PRs.
+I welcome all focused PRs.
 
 **Local dev:**
 ```bash
