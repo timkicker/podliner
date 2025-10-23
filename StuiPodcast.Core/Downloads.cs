@@ -1,20 +1,19 @@
-using System;
-
 namespace StuiPodcast.Core
 {
-    // Rein logisch / persistierbar – keine Transport-Details
+    // logical / persistable only
+    // no transport details
     public enum DownloadState
     {
-        None = 0,       // nicht markiert
-        Queued = 1,     // markiert/steht an
-        Running = 2,    // lädt gerade
-        Verifying = 3,  // Hash/Datei prüfen (später nutzbar)
-        Done = 4,       // erfolgreich lokal vorhanden
-        Failed = 5,     // fehlgeschlagen (letzter Versuch)
-        Canceled = 6    // abgebrochen
+        None = 0,       // unmarked
+        Queued = 1,     // queued
+        Running = 2,    // downloading
+        Verifying = 3,  // verifying (hash/file)
+        Done = 4,       // completed (local file present)
+        Failed = 5,     // failed (last attempt)
+        Canceled = 6    // canceled
     }
 
-    // Optional: spätere Telemetrie/Anzeigen (nicht zwingend nötig)
+    // optional telemetry / ui hints (not required)
     public sealed class DownloadStatus
     {
         public DownloadState State { get; set; } = DownloadState.None;

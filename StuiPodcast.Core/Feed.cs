@@ -1,16 +1,12 @@
-﻿using System;
-
-namespace StuiPodcast.Core
+﻿namespace StuiPodcast.Core
 {
-    /// <summary>
-    /// Podcast-Feed-Metadaten (kanonische URL).
-    /// </summary>
+    // podcast feed metadata (canonical url)
     public class Feed
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public string Title { get; set; } = string.Empty;
 
-        /// <summary>Kanonische Feed-URL (http/https, absolut).</summary>
+        // canonical feed url (absolute http/https)
         public string Url { get; set; } = string.Empty;
 
         public DateTimeOffset? LastChecked { get; set; }

@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace StuiPodcast.Core
+﻿namespace StuiPodcast.Core
 {
     public class AppData
     {
@@ -12,8 +6,7 @@ namespace StuiPodcast.Core
         public bool NetworkOnline { get; set; } = true;
 
         public List<Guid> Queue { get; set; } = new();
-        public string? ThemePref { get; set; } // "Base", "MenuAccent", "Native" (Enum-Name)
-
+        public string? ThemePref { get; set; } // "base", "menuaccent", "native" (enum name)
 
         public string? DownloadDir { get; set; }
         public List<Guid> DownloadQueue { get; set; } = new();
@@ -41,10 +34,10 @@ namespace StuiPodcast.Core
         public List<Feed> Feeds { get; set; } = new();
         public List<Episode> Episodes { get; set; } = new();
 
-        public string PreferredEngine { get; set; } = "auto"; // auto|vlc|mpv|ffplay
-        public string? LastEngineUsed { get; set; }           // Diagnose/OSD
+        public string PreferredEngine { get; set; } = "auto"; // auto, vlc, mpv, ffplay
+        public string? LastEngineUsed { get; set; }           // diagnostic, osd
 
-        // NEU: Netzprofil (wirkt sich auf Engine-Startparameter aus, sobald Engines es auswerten)
+        // network profile; affects engine startup params when engines use it
         public NetworkProfile NetProfile { get; set; } = NetworkProfile.Standard;
     }
 }

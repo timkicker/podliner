@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace StuiPodcast.Core
+﻿namespace StuiPodcast.Core
 {
     public class PlayerState
     {
@@ -15,7 +9,7 @@ namespace StuiPodcast.Core
         public TimeSpan Position { get; set; }
         public TimeSpan? Length { get; set; }
 
-        // Fähigkeiten der aktiven Engine
+        // capabilities supported by the active engine
         public PlayerCapabilities Capabilities { get; set; } =
             PlayerCapabilities.Play | PlayerCapabilities.Pause | PlayerCapabilities.Stop |
             PlayerCapabilities.Seek | PlayerCapabilities.Volume | PlayerCapabilities.Speed |

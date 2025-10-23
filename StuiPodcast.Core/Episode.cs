@@ -1,48 +1,41 @@
-﻿using System;
-
-namespace StuiPodcast.Core
+﻿namespace StuiPodcast.Core
 {
-    /// <summary>
-    /// Episode-Metadaten + Nutzungsstatus.
-    /// KEIN Download-Status und KEIN LocalPath.
-    /// </summary>
+    // episode metadata + usage state
+    // no download status and no local path here
     public class Episode
     {
-        // Identität & Zuordnung
+        // identity & association
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid FeedId { get; set; }
 
-        /// <summary>Primär-Identität der Audio-Ressource (HTTP/HTTPS, kanonisiert).</summary>
+        // primary identity of the audio resource (http/https, canonicalized)
         public string AudioUrl { get; set; } = string.Empty;
 
-        /// <summary>
-        /// Optionaler RSS-GUID-Wert des Items (falls vorhanden im Feed).
-        /// Dient nur zum Matching bei URL-Wechseln.
-        /// </summary>
+        // optional rss guid from the item; used to match across url changes
         public string? RssGuid { get; set; }
 
-        // Metadaten
+        // metadata
         public string Title { get; set; } = string.Empty;
         public DateTimeOffset? PubDate { get; set; }
-        public long DurationMs { get; set; } = 0;         // 0, wenn unbekannt
+        public long DurationMs { get; set; } = 0;         // 0 if unknown
         public string DescriptionText { get; set; } = string.Empty;
 
-        // Nutzungsstatus
-        public bool Saved { get; set; } = false;          // ★ Favorit
+        // usage flags
+        public bool Saved { get; set; } = false;          // ★ favorite
 
-        /// <summary>Fortschritt & Zeitstempel der letzten Wiedergabe.</summary>
+        // progress and last playback timestamp
         public EpisodeProgress Progress { get; set; } = new();
 
-        /// <summary>Optional: Manuell als „gespielt“ markiert (UI-Funktion). Wird NICHT automatisch gesetzt.</summary>
+        // ui-only: manually marked as played (not set automatically)
         public bool ManuallyMarkedPlayed { get; set; } = false;
     }
 
     public sealed class EpisodeProgress
     {
-        /// <summary>Letzte bekannte Position in Millisekunden. Invariante: 0 ≤ LastPosMs ≤ DurationMs.</summary>
+        // last known position in ms; invariant: 0 ≤ lastposms ≤ durationms
         public long LastPosMs { get; set; } = 0;
 
-        /// <summary>Zeitpunkt der letzten Wiedergabe (UTC empfohlen), oder null.</summary>
+        // last playback instant (utc recommended), or null
         public DateTimeOffset? LastPlayedAt { get; set; }
     }
 }

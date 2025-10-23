@@ -44,15 +44,6 @@ namespace StuiPodcast.Infra
         // SAVE-APIs (UI ruft üblicherweise SaveAsync; :w/Exit → SaveNow)
         // =====================================================================
 
-        /// <summary>Debounced Save – reicht im laufenden Betrieb.</summary>
-        public void SaveAsync()
-        {
-            // Debounced Saves in beiden Stores; die Stores entscheiden selbst,
-            // ob sie wirklich schreiben (pending/dirty).
-            ConfigStore.SaveAsync();
-            LibraryStore.SaveAsync();
-        }
-
         /// <summary>Sofortiges Speichern – für :w / Exit.</summary>
         public void SaveNow()
         {
@@ -88,23 +79,6 @@ namespace StuiPodcast.Infra
             set { ConfigStore.Current.Theme = value ?? "Base"; ConfigStore.SaveAsync(); }
         }
 
-        public string GlyphSet
-        {
-            get => ConfigStore.Current.GlyphSet;
-            set { ConfigStore.Current.GlyphSet = value ?? "auto"; ConfigStore.SaveAsync(); }
-        }
-
-        public NetworkProfile NetworkProfile
-        {
-            get => ConfigStore.Current.NetworkProfile;
-            set { ConfigStore.Current.NetworkProfile = value; ConfigStore.SaveAsync(); }
-        }
-
-        public bool StartOffline
-        {
-            get => ConfigStore.Current.StartOffline;
-            set { ConfigStore.Current.StartOffline = value; ConfigStore.SaveAsync(); }
-        }
 
         public bool PlayerAtTop
         {
@@ -129,28 +103,7 @@ namespace StuiPodcast.Infra
             get => ConfigStore.Current.ViewDefaults.UnplayedOnly;
             set { ConfigStore.Current.ViewDefaults.UnplayedOnly = value; ConfigStore.SaveAsync(); }
         }
-
-        public string? LastFeedId
-        {
-            get => ConfigStore.Current.LastSelection.FeedId;
-            set { ConfigStore.Current.LastSelection.FeedId = value; ConfigStore.SaveAsync(); }
-        }
-
-        public string? LastEpisodeId
-        {
-            get => ConfigStore.Current.LastSelection.EpisodeId;
-            set { ConfigStore.Current.LastSelection.EpisodeId = value; ConfigStore.SaveAsync(); }
-        }
-
-        public string LastSearch
-        {
-            get => ConfigStore.Current.LastSelection.Search;
-            set { ConfigStore.Current.LastSelection.Search = value ?? string.Empty; ConfigStore.SaveAsync(); }
-        }
-
-        // =====================================================================
-        // INHALTE / LIBRARY (Read-Views und Mutationen)
-        // =====================================================================
+        
 
         // Read-Only Views – UI kann direkt enumerieren
         public IReadOnlyList<Feed>    Feeds    => new ReadOnlyCollection<Feed>(LibraryStore.Current.Feeds);
@@ -158,8 +111,7 @@ namespace StuiPodcast.Infra
         public IReadOnlyList<Guid>    Queue    => new ReadOnlyCollection<Guid>(LibraryStore.Current.Queue);
         public IReadOnlyList<HistoryItem> History => new ReadOnlyCollection<HistoryItem>(LibraryStore.Current.History);
 
-        // Lookups / Convenience
-        public bool TryGetEpisode(Guid episodeId, out Episode? ep) => LibraryStore.TryGetEpisode(episodeId, out ep);
+
         public Episode GetEpisodeOrThrow(Guid episodeId) => LibraryStore.GetEpisodeOrThrow(episodeId);
 
         // Mutationen – leiten direkt an LibraryStore weiter (der speichert gebatcht)
