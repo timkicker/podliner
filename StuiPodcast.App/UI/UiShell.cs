@@ -231,7 +231,7 @@ public void SetTheme(ThemeMode mode)
             EpisodeSelectionChanged?.Invoke();
         };
 
-        // --- Player ---
+        // --- AudioPlayer ---
         _player = new UiPlayerPanel();
         _player.ProgressSchemeProvider = MakeProgressScheme;
         _player.WireSeeks(cmd => Command?.Invoke(cmd), () => _lastEffLenTs, s => ShowOsd(s));
@@ -312,7 +312,7 @@ public void SetTheme(ThemeMode mode)
             _episodesPane?.Details
         );
 
-        // Player initial unten
+        // AudioPlayer initial unten
         SetPlayerPlacement(false);
 
         // Nach erstem Layout auf Episodes fokussieren
@@ -490,7 +490,7 @@ public void SetTheme(ThemeMode mode)
         });
     }
 
-    // ---- NEU: Snapshot-basierte Player-UI-Aktualisierung ----
+    // ---- NEU: Snapshot-basierte AudioPlayer-UI-Aktualisierung ----
     public void UpdatePlayerSnapshot(PlaybackSnapshot snap, int volume0to100)
     {
         UI(() =>
@@ -518,7 +518,7 @@ public void SetTheme(ThemeMode mode)
         });
     }
 
-    // ---- ALT: Player UI tick (Kompatibilität) ----
+    // ---- ALT: AudioPlayer UI tick (Kompatibilität) ----
     public void UpdatePlayerUI(PlayerState s)
     {
         UI(() =>
@@ -765,7 +765,7 @@ public void SetTheme(ThemeMode mode)
             if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = u.Main;
             if (_episodesPane?.List != null)      _episodesPane.List.ColorScheme = u.List;
 
-            // Player
+            // AudioPlayer
             if (_player != null)
             {
                 _player.ColorScheme          = u.Main;

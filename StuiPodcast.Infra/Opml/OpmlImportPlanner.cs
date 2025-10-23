@@ -6,81 +6,66 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Opml
 {
-    /// <summary>
-    /// Status eines OPML-Imports für einen einzelnen Eintrag.
-    /// </summary>
+    // import status for a single opml entry
     public enum OpmlImportStatus
     {
         New,
-        Duplicate, // bereits vorhanden ODER Duplikat innerhalb der OPML-Datei
+        Duplicate, // already present or duplicate within the same opml
         Invalid
     }
 
-    /// <summary>
-    /// Ein geplanter Import-Eintrag mit Diagnose.
-    /// </summary>
+    // planned import item with diagnosis
     public sealed class OpmlImportItem
     {
         public OpmlEntry Entry { get; init; } = null!;
         public OpmlImportStatus Status { get; init; }
         public string? Reason { get; init; }
 
-        /// <summary>Wenn als Duplicate erkannt wurde, verweist dies (falls verfügbar) auf den existierenden Feed.</summary>
+        // if marked duplicate, points to the existing feed when available
         public Feed? ExistingMatch { get; init; }
 
-        /// <summary>
-        /// true, wenn (gemäß Plan-Option) das Überschreiben/Setzen des Feed-Titels
-        /// sinnvoll wäre (Entry.Title vorhanden & vom bestehenden Titel abweichend/leer).
-        /// Wird nur dann auf true gesetzt, wenn der Planner mit updateTitles=true gebaut wurde.
-        /// </summary>
+        // true if a title update is recommended (only when planner was built with updateTitles=true)
         public bool UpdateTitleRecommended { get; init; }
     }
 
-    /// <summary>
-    /// Ergebnis eines OPML-Import-Plans (Vorschau).
-    /// </summary>
+    // result of an opml import plan (preview)
     public sealed class OpmlImportPlan
     {
         public IReadOnlyList<OpmlImportItem> Items { get; init; } = Array.Empty<OpmlImportItem>();
-        public int NewCount        { get; init; }
-        public int DuplicateCount  { get; init; }
-        public int InvalidCount    { get; init; }
+        public int NewCount       { get; init; }
+        public int DuplicateCount { get; init; }
+        public int InvalidCount   { get; init; }
 
-        /// <summary>Alle Einträge mit Status New (bereit für AddFeedAsync).</summary>
+        // entries with status new (ready for AddFeedAsync)
         public IEnumerable<OpmlImportItem> NewItems() => Items.Where(i => i.Status == OpmlImportStatus.New);
 
-        /// <summary>Alle Einträge, die als Duplicate erkannt wurden.</summary>
+        // entries detected as duplicates
         public IEnumerable<OpmlImportItem> DuplicateItems() => Items.Where(i => i.Status == OpmlImportStatus.Duplicate);
 
-        /// <summary>Alle formal ungültigen Einträge.</summary>
+        // formally invalid entries
         public IEnumerable<OpmlImportItem> InvalidItems() => Items.Where(i => i.Status == OpmlImportStatus.Invalid);
 
-        /// <summary>Kandidaten für Titel-Update (nur gesetzt, wenn updateTitles=true).</summary>
+        // title update candidates (only set when updateTitles=true)
         public IEnumerable<OpmlImportItem> TitleUpdateCandidates() => Items.Where(i => i.UpdateTitleRecommended);
     }
 
-    /// <summary>
-    /// Erzeugt aus einem OPML-Dokument eine idempotente Import-Vorschau gegen eine bestehende Feed-Liste.
-    /// </summary>
+    // builds an idempotent import preview against an existing feed list
     public static class OpmlImportPlanner
     {
-        /// <summary>
-        /// Erzeugt einen Plan:
-        /// - NEW, wenn xmlUrl formal valide und weder in bestehender Liste noch bereits früher im OPML gesehen.
-        /// - DUPLICATE, wenn bereits in Bibliothek ODER die gleiche URL im OPML mehrfach vorkommt.
-        /// - INVALID, wenn xmlUrl formal fehlt/ungültig.
-        /// Titel werden standardmäßig NICHT überschrieben; wird updateTitles=true gesetzt,
-        /// markiert der Plan sinnvolle Kandidaten (UpdateTitleRecommended=true).
-        /// </summary>
+        // plan rules:
+        // - new: xmlurl valid and not in existing list and not seen earlier in the same opml
+        // - duplicate: already in library or appears multiple times in the same opml
+        // - invalid: xmlurl missing or invalid
+        // when updateTitles=true, plan marks sensible candidates via UpdateTitleRecommended
         public static OpmlImportPlan Plan(OpmlDocument doc, IReadOnlyList<Feed> existingFeeds, bool updateTitles = false)
         {
             if (doc == null) throw new ArgumentNullException(nameof(doc));
             existingFeeds ??= Array.Empty<Feed>();
 
-            // 1) Bestehende Feeds in Map (kanonische URL → Feed)
+            // existing feeds by canonical url
             var existingByCanon = BuildExistingMap(existingFeeds);
 
-            // 2) OPML Einträge verarbeiten; Duplikate innerhalb der OPML-Datei erkennen
+            // process opml entries and detect duplicates within the file
             var seenCanon = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var items = new List<OpmlImportItem>(doc.Count);
 
@@ -99,7 +84,7 @@ namespace StuiPodcast.Infra.Opml
 
                 var canon = entry.CanonicalUrl();
 
-                // a) In der Bibliothek vorhanden?
+                // already in library
                 if (existingByCanon.TryGetValue(canon, out var existing))
                 {
                     items.Add(new OpmlImportItem
@@ -113,7 +98,7 @@ namespace StuiPodcast.Infra.Opml
                     continue;
                 }
 
-                // b) Innerhalb derselben OPML-Datei bereits gesehen?
+                // duplicate within opml
                 if (!seenCanon.Add(canon))
                 {
                     items.Add(new OpmlImportItem
@@ -125,7 +110,7 @@ namespace StuiPodcast.Infra.Opml
                     continue;
                 }
 
-                // c) Neu
+                // new
                 items.Add(new OpmlImportItem
                 {
                     Entry = entry,
@@ -143,7 +128,7 @@ namespace StuiPodcast.Infra.Opml
             };
         }
 
-        // -------------------- Internals --------------------
+        // internals
 
         private static Dictionary<string, Feed> BuildExistingMap(IReadOnlyList<Feed> existingFeeds)
         {
@@ -162,16 +147,13 @@ namespace StuiPodcast.Infra.Opml
             return dict;
         }
 
-        /// <summary>
-        /// Holt die Feed-URL robust via Reflection (da die Property in den Modellen unterschiedlich benannt sein kann).
-        /// Kandidaten: Url, FeedUrl, XmlUrl, SourceUrl, RssUrl
-        /// </summary>
+        // get feed url via reflection; property names can vary
+        // prefers: url, feedurl, xmlurl, sourceurl, rssurl
         private static string? GetFeedUrlRobust(Feed f)
         {
             if (f == null) return null;
 
             var t = f.GetType();
-            // Häufigste Property-Namen zuerst
             string[] names = { "Url", "FeedUrl", "XmlUrl", "SourceUrl", "RssUrl" };
 
             foreach (var n in names)
@@ -184,7 +166,7 @@ namespace StuiPodcast.Infra.Opml
                 }
             }
 
-            // Fallback: Suche nach *Url String-Property
+            // fallback: first string property ending with "url"
             var anyUrl = t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                           .FirstOrDefault(pi => pi.PropertyType == typeof(string) &&
                                                 pi.Name.EndsWith("Url", StringComparison.OrdinalIgnoreCase));
@@ -197,13 +179,8 @@ namespace StuiPodcast.Infra.Opml
             return null;
         }
 
-        /// <summary>
-        /// Kanonisiert eine URL wie OpmlEntry.CanonicalUrl():
-        /// - Trim, absolute URI
-        /// - Host lowercase
-        /// - Fragment entfernt
-        /// - Schema bleibt (kein https-Enforce)
-        /// </summary>
+        // canonicalize url similar to OpmlEntry.CanonicalUrl
+        // trim, absolute uri, lowercase host, remove fragment, keep scheme
         private static string CanonicalizeUrl(string raw)
         {
             raw = raw?.Trim() ?? "";
@@ -217,11 +194,8 @@ namespace StuiPodcast.Infra.Opml
             return ub.Uri.ToString();
         }
 
-        /// <summary>
-        /// Ob (falls updateTitles=true) ein Titel-Update sinnvoll wäre:
-        /// - Entry.Title vorhanden/nicht-blank UND
-        /// - Bestehender Titel fehlt oder unterscheidet sich nach Trim/Case-Ignore deutlich.
-        /// </summary>
+        // whether a title update would be useful when updateTitles=true
+        // entry has a title and existing title is missing or different (trim and case-insensitive)
         private static bool ShouldUpdateTitle(Feed existing, OpmlEntry entry)
         {
             var newTitle = (entry.Title ?? "").Trim();
@@ -230,7 +204,6 @@ namespace StuiPodcast.Infra.Opml
             var existingTitle = GetFeedTitleRobust(existing)?.Trim() ?? "";
             if (existingTitle.Length == 0) return true;
 
-            // Unterschied?
             return !string.Equals(existingTitle, newTitle, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -239,7 +212,6 @@ namespace StuiPodcast.Infra.Opml
             if (f == null) return null;
 
             var t = f.GetType();
-            // Übliche Kandidaten: Title, Name
             string[] names = { "Title", "Name" };
 
             foreach (var n in names)

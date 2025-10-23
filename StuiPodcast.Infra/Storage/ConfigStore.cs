@@ -9,19 +9,15 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
 {
-    /// <summary>
-    /// Persistenz für App-/UI-Preferences (appsettings.json) mit atomarem Write:
-    /// 1) .tmp schreiben + flush
-    /// 2) Replace/Move -> Ziel
-    /// 3) .tmp entfernen
-    ///
-    /// - Debounced SaveAsync (~1s)
-    /// - SaveNow() für :w / Shutdown
-    /// - Tolerantes Load (Kommentare, trailing commas)
-    /// - ReadOnly-Erkennung (keine Schreibrechte)
-    /// </summary>
+    // persistence for app and ui preferences in appsettings.json
+    // atomic save via temp file, then replace target
+    // debounced save helper and immediate save for explicit writes
+    // tolerant load with comments and trailing commas
+    // detects read only situations
     public sealed class ConfigStore
     {
+        #region fields and state
+
         public string ConfigDirectory { get; }
         public string FilePath { get; }
         public string TmpPath  { get; }
@@ -55,6 +51,10 @@ namespace StuiPodcast.Infra.Storage
         volatile bool _readOnly;
         volatile string? _readOnlyReason;
 
+        #endregion
+
+        #region constructor
+
         public ConfigStore(string configDirectory, string fileName = "appsettings.json")
         {
             if (string.IsNullOrWhiteSpace(configDirectory))
@@ -65,14 +65,16 @@ namespace StuiPodcast.Infra.Storage
             TmpPath  = FilePath + ".tmp";
         }
 
-        /// <summary>
-        /// Lädt Config oder erzeugt Defaults. Ignoriert/entsorgt evtl. .tmp.
-        /// </summary>
+        #endregion
+
+        #region load and save api
+
+        // load config or create defaults; removes any stale temp file
         public AppConfig Load()
         {
             Directory.CreateDirectory(ConfigDirectory);
 
-            // Verwaiste .tmp vom vorherigen Crash entsorgen (nicht laden).
+            // remove orphaned temp file from a previous crash
             try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch { /* best effort */ }
 
             AppConfig cfg;
@@ -89,7 +91,7 @@ namespace StuiPodcast.Infra.Storage
                 }
                 catch
                 {
-                    // Korrupt → Defaults
+                    // fall back to defaults on corrupt data
                     cfg = new AppConfig();
                 }
             }
@@ -99,9 +101,7 @@ namespace StuiPodcast.Infra.Storage
             return cfg;
         }
 
-        /// <summary>
-        /// Debounced Save. Mehrere Aufrufe innerhalb des Fensters führen zu einem Write.
-        /// </summary>
+        // debounced save; multiple calls collapse into one write
         public void SaveAsync()
         {
             if (_readOnly) return;
@@ -119,9 +119,7 @@ namespace StuiPodcast.Infra.Storage
             }
         }
 
-        /// <summary>
-        /// Sofortiger Save (z. B. für :w / Shutdown). Überspringt Debounce.
-        /// </summary>
+        // immediate save for explicit write or shutdown
         public void SaveNow()
         {
             if (_readOnly) return;
@@ -142,9 +140,13 @@ namespace StuiPodcast.Infra.Storage
             }
             catch
             {
-                // Logging der Caller-Seite überlassen
+                // leave logging to the caller
             }
         }
+
+        #endregion
+
+        #region debounce worker
 
         void TryPerformDebouncedSave()
         {
@@ -168,7 +170,7 @@ namespace StuiPodcast.Infra.Storage
             }
             catch
             {
-                // Logging der Caller-Seite überlassen
+                // leave logging to the caller
             }
             finally
             {
@@ -176,30 +178,32 @@ namespace StuiPodcast.Infra.Storage
             }
         }
 
+        #endregion
+
+        #region file io helpers
+
         void WriteFileAtomic(AppConfig cfg)
         {
             Directory.CreateDirectory(ConfigDirectory);
 
-            // (1) Serialisieren in .tmp
+            // write json to temp file and flush
             using (var fs = File.Open(TmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = _writeOptions.WriteIndented });
                 JsonSerializer.Serialize(writer, cfg, _writeOptions);
                 writer.Flush();
-                try { fs.Flush(true); } catch { /* Flush-to-disk best effort */ }
+                try { fs.Flush(true); } catch { /* flush to disk best effort */ }
             }
 
-            // (2) Replace/Move → Ziel
+            // replace target if present, otherwise move temp into place
             if (File.Exists(FilePath))
             {
-                // Prefer Replace (atomar, wenn unterstützt)
                 try
                 {
                     File.Replace(TmpPath, FilePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
                 }
                 catch (PlatformNotSupportedException)
                 {
-                    // Fallback: delete + move
                     File.Delete(FilePath);
                     File.Move(TmpPath, FilePath);
                 }
@@ -209,7 +213,7 @@ namespace StuiPodcast.Infra.Storage
                 File.Move(TmpPath, FilePath);
             }
 
-            // (3) Cleanup (sollte nicht mehr existieren)
+            // cleanup temp file if it still exists
             try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch { /* best effort */ }
         }
 
@@ -219,9 +223,11 @@ namespace StuiPodcast.Infra.Storage
             _readOnlyReason = ex.GetType().Name + ": " + ex.Message;
         }
 
-        /// <summary>
-        /// Clamp + Normalisierung einfach halten, damit Persistenz robust bleibt.
-        /// </summary>
+        #endregion
+
+        #region validation
+
+        // simple clamp and normalization to keep persistence robust
         static void ValidateAndClamp(AppConfig c)
         {
             c.SchemaVersion = c.SchemaVersion <= 0 ? 1 : c.SchemaVersion;
@@ -233,23 +239,22 @@ namespace StuiPodcast.Infra.Storage
             if (c.Speed < 0.25) c.Speed = 0.25;
             if (c.Speed > 4.0) c.Speed = 4.0;
 
-
             c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "libvlc", "mpv", "ffplay");
-            c.Theme = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "HighContrast", "Native");
+            c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "HighContrast", "Native");
             c.GlyphSet         = NormalizeChoice(c.GlyphSet, "auto", "unicode", "ascii");
 
-            // View defaults
+            // view defaults
             c.ViewDefaults ??= new AppConfig.ViewDefaultsBlock();
             c.ViewDefaults.SortBy  = NormalizeChoice(c.ViewDefaults.SortBy, "pubdate", "title", "duration", "feed", "progress");
             c.ViewDefaults.SortDir = NormalizeChoice(c.ViewDefaults.SortDir, "asc", "desc");
 
-            // Last selection
+            // last selection
             c.LastSelection ??= new AppConfig.LastSelectionBlock();
             if (string.IsNullOrWhiteSpace(c.LastSelection.FeedId))
                 c.LastSelection.FeedId = "virtual:all";
             c.LastSelection.Search ??= string.Empty;
 
-            // UI block
+            // ui block
             c.Ui ??= new AppConfig.UiBlock();
         }
 
@@ -259,9 +264,11 @@ namespace StuiPodcast.Infra.Storage
             foreach (var a in allowed)
             {
                 if (string.Equals(value, a, StringComparison.OrdinalIgnoreCase))
-                    return a; // Rückgabe in kanonischer Schreibweise
+                    return a; // return canonical casing
             }
             return allowed[0];
         }
+
+        #endregion
     }
 }

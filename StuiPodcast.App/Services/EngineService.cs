@@ -12,12 +12,12 @@ sealed class EngineService
 {
     readonly AppData _data;
     readonly MemoryLogSink _memLog;
-    public SwappablePlayer? Current { get; private set; }
+    public SwappableAudioPlayer? Current { get; private set; }
     string? _initialInfo;
 
     
     // in class EngineService
-    public void ApplyPrefsToCurrent(SwappablePlayer sp)
+    public void ApplyPrefsToCurrent(SwappableAudioPlayer sp)
     {
         try {
             var v = Math.Clamp(_data.Volume0_100, 0, 100);
@@ -37,16 +37,16 @@ sealed class EngineService
         _memLog = memLog;
     }
 
-    public SwappablePlayer Create(out string engineInfo)
+    public SwappableAudioPlayer Create(out string engineInfo)
     {
         var core = AudioPlayerFactory.Create(_data, out var info);
         engineInfo = info;
         _initialInfo = info;
-        Current = new SwappablePlayer(core);
+        Current = new SwappableAudioPlayer(core);
         return Current;
     }
 
-    public void ApplyPrefsTo(IPlayer p)
+    public void ApplyPrefsTo(IAudioPlayer p)
     {
         try
         {
@@ -68,7 +68,7 @@ sealed class EngineService
         } catch { }
     }
 
-    public async Task SwitchAsync(SwappablePlayer player, string pref, Func<Task> onPersistTick)
+    public async Task SwitchAsync(SwappableAudioPlayer audioPlayer, string pref, Func<Task> onPersistTick)
     {
         try
         {
@@ -77,11 +77,11 @@ sealed class EngineService
 
             var next = AudioPlayerFactory.Create(_data, out var info);
             Log.Information("engine created name={Engine} caps={Caps} info={Info}",
-                player?.Name, (player?.Capabilities).ToString(), _initialInfo);
+                audioPlayer?.Name, (audioPlayer?.Capabilities).ToString(), _initialInfo);
             ApplyPrefsTo(next);
 
-            await player.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
-            Log.Information("engine switched current={Name} caps={Caps}", player.Name, player.Capabilities);
+            await audioPlayer.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
+            Log.Information("engine switched current={Name} caps={Caps}", audioPlayer.Name, audioPlayer.Capabilities);
             // OSD is raised by callers (UI)
         }
         catch (Exception ex)

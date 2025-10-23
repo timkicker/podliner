@@ -175,14 +175,14 @@ static class UiComposer
         AppFacade app,
         FeedService feeds,
         PlaybackCoordinator playback,
-        SwappablePlayer player,
+        SwappableAudioPlayer audioPlayer,
         Func<Task> save,
         Func<string, Task> engineSwitch,
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
         // Quit
-        ui.QuitRequested += () => QuitApp(ui, player, feeds, save);
+        ui.QuitRequested += () => QuitApp(ui, audioPlayer, feeds, save);
 
         // Add Feed
         ui.AddFeedRequested += async url =>
@@ -258,7 +258,7 @@ static class UiComposer
         ui.PlaySelected += () =>
         {
             var ep = ui?.GetSelectedEpisode();
-            if (ep == null || player == null || playback == null || ui == null) return;
+            if (ep == null || audioPlayer == null || playback == null || ui == null) return;
 
             var curFeed = ui.GetSelectedFeedId();
 
@@ -286,7 +286,7 @@ static class UiComposer
                 ep.AudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
             var baseline = TimeSpan.Zero;
-            try { baseline = player?.State.Position ?? TimeSpan.Zero; } catch { }
+            try { baseline = audioPlayer?.State.Position ?? TimeSpan.Zero; } catch { }
             ui.SetPlayerLoading(true, isRemote ? "Loading…" : "Opening…", baseline);
 
             var mode   = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
@@ -332,10 +332,10 @@ static class UiComposer
                 {
                     try
                     {
-                        var s = player.State;
+                        var s = audioPlayer.State;
                         if (!s.IsPlaying && s.Position == TimeSpan.Zero)
                         {
-                            try { player.Stop(); } catch { }
+                            try { audioPlayer.Stop(); } catch { }
                             var fileUri = new Uri(localPath).AbsoluteUri;
 
                             var old = ep.AudioUrl;
@@ -385,7 +385,7 @@ static class UiComposer
         ui.Command += cmd =>
         {
             Log.Debug("cmd {Cmd}", cmd);
-            if (ui == null || player == null || playback == null || Program.SkipSaveOnExit) { }
+            if (ui == null || audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
 
             if (CmdRouter.HandleQueue(cmd, ui, data, save))
             {
@@ -397,7 +397,7 @@ static class UiComposer
             if (CmdRouter.HandleDownloads(cmd, ui, data, ProgramDownloader(), save))
                 return;
 
-            CmdRouter.Handle(cmd, player, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch);
         };
 
         // Suche
@@ -458,8 +458,8 @@ static class UiComposer
             ui.ShowStartupEpisode(last, data.Volume0_100, data.Speed);
         }
 
-        // Player snapshot/status → UI (wiring here to keep UI composition encapsulated)
-        var player = (SwappablePlayer)typeof(Program)
+        // AudioPlayer snapshot/status → UI (wiring here to keep UI composition encapsulated)
+        var player = (SwappableAudioPlayer)typeof(Program)
             .GetField("_player", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
         var playback = (PlaybackCoordinator)typeof(Program)
             .GetField("_playback", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
@@ -526,7 +526,7 @@ static class UiComposer
         });
     }
 
-    static void QuitApp(UiShell ui, SwappablePlayer player, FeedService feeds, Func<Task> save)
+    static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
     {
         // Schon im Exit? Dann nichts mehr tun.
         if (Program.MarkExiting()) return;
@@ -537,7 +537,7 @@ static class UiComposer
 
         // Läufer stoppen
         try { Program.DownloaderInstance?.Stop(); } catch { }
-        try { player?.Stop(); } catch { }
+        try { audioPlayer?.Stop(); } catch { }
 
         // UI beenden
         try

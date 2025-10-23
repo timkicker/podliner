@@ -1,19 +1,14 @@
-using Serilog;
 using StuiPodcast.Core;
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using VLC = LibVLCSharp.Shared;
+
 
 namespace StuiPodcast.Infra.Player
 {
-    // --- öffentliche Player-API (unverändert) -------------------------------
-    public interface IPlayer : IDisposable
+    public interface IAudioPlayer : IDisposable
     {
         event Action<PlayerState>? StateChanged;
         PlayerState State { get; }
-        string Name { get; }                      // Anzeigename der Engine
-        PlayerCapabilities Capabilities { get; }  // Fähigkeiten
+        string Name { get; }                      // display name of engine
+        PlayerCapabilities Capabilities { get; }  // capability flags
 
         void Play(string url, long? startMs = null);
         void TogglePause();
@@ -23,6 +18,4 @@ namespace StuiPodcast.Infra.Player
         void SetSpeed(double speed);
         void Stop();
     }
-
-    
 }

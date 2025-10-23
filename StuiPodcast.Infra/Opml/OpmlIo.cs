@@ -5,16 +5,9 @@ using System.Text;
 
 namespace StuiPodcast.Infra.Opml
 {
-    /// <summary>
-    /// Datei-IO für OPML: robustes Lesen/Schreiben, Pfad-Sanitizing und Default-Exportpfade.
-    /// </summary>
     public static class OpmlIo
     {
-        /// <summary>
-        /// Liest eine Datei als Text.
-        /// - UTF-8 mit BOM-Erkennung (detectEncodingFromByteOrderMarks=true)
-        /// - "~" wird auf das User-Home expandiert
-        /// </summary>
+        // read file as text - utf 8 with bom detection - expands tilde to user home
         public static string ReadFile(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("path is empty", nameof(path));
@@ -25,13 +18,9 @@ namespace StuiPodcast.Infra.Opml
             return sr.ReadToEnd();
         }
 
-        /// <summary>
-        /// Schreibt Text in eine Datei (UTF-8 ohne BOM).
-        /// - Sanitized den Dateinamen (nur Leaf) und erzwingt .opml-Extension (falls keine vorhanden).
-        /// - Erstellt fehlende Verzeichnisse.
-        /// - Wendet auf Windows optional den Long-Path-Prefix an.
-        /// Gibt den tatsächlich verwendeten Pfad zurück (nach Sanitize/Prefix).
-        /// </summary>
+        // write text as utf 8 without bom
+        // sanitizes leaf name and ensures .opml extension when requested
+        // creates missing directories and returns the final path
         public static string WriteFile(string path, string content, bool sanitizeFileNameIfNeeded = true, bool overwrite = true)
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
@@ -43,11 +32,11 @@ namespace StuiPodcast.Infra.Opml
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-            // Windows Long-Path Unterstützung
+            // windows long path support
             if (OperatingSystem.IsWindows() && Path.IsPathFullyQualified(path))
                 path = DownloadPathSanitizer.ApplyLongPathPrefix(path);
 
-            // Schreiben (overwrite steuert, ob vorhandene Dateien ersetzt werden)
+            // atomic like write via tmp then move
             var tmp = path + ".tmp";
             using (var sw = new StreamWriter(tmp, append: false, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
             {
@@ -65,11 +54,9 @@ namespace StuiPodcast.Infra.Opml
             return path;
         }
 
-        /// <summary>
-        /// Liefert einen sinnvollen Standard-Exportpfad (z. B. "Dokumente/stui-feeds.opml").
-        /// - targetDir null/leer → MyDocuments, sonst Home-Expansion.
-        /// - baseName wird sanitizt und um ".opml" ergänzt (falls nötig).
-        /// </summary>
+        // default export path in documents or home
+        // targetDir null or empty uses documents
+        // baseName sanitized and forced to .opml if needed
         public static string GetDefaultExportPath(string? targetDir = null, string? baseName = "podliner-feeds.opml")
         {
             var dir = string.IsNullOrWhiteSpace(targetDir) ? GetDefaultDir() : ExpandHome(targetDir!);
@@ -84,13 +71,14 @@ namespace StuiPodcast.Infra.Opml
             return Path.Combine(dir, name);
         }
 
-        // -------------------- Internals --------------------
+        #region  helpers
+
 
         private static string ExpandHome(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return p;
 
-            // Unix-Style "~/" und auch "~user" vereinfachen wir auf aktuelles Home
+            // expand tilde to current user home
             if (p.StartsWith("~"))
             {
                 var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -109,14 +97,14 @@ namespace StuiPodcast.Infra.Opml
             var dir = Path.GetDirectoryName(path) ?? "";
             var leaf = Path.GetFileName(path);
 
-            // Falls keine Extension angegeben ist, .opml ergänzen.
+            // add .opml if no extension
             if (string.IsNullOrEmpty(Path.GetExtension(leaf)))
                 leaf += ".opml";
 
-            // Leaf sanitisieren (OS-gültiger Name, begrenzt)
+            // sanitize leaf
             leaf = DownloadPathSanitizer.SanitizeFileName(leaf);
 
-            // Zur Sicherheit: Extension .opml sicherstellen
+            // ensure .opml extension
             if (!leaf.EndsWith(".opml", StringComparison.OrdinalIgnoreCase))
             {
                 var baseName = Path.GetFileNameWithoutExtension(leaf);
@@ -136,5 +124,6 @@ namespace StuiPodcast.Infra.Opml
 
             return Directory.GetCurrentDirectory();
         }
+        #endregion
     }
 }

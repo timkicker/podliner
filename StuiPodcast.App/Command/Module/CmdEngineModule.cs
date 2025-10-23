@@ -8,7 +8,7 @@ internal static class CmdEngineModule
 {
     public static void ExecEngine(
         string[] args,
-        IPlayer player,
+        IAudioPlayer audioPlayer,
         UiShell ui,
         AppData data,
         Func<Task> persist,
@@ -20,11 +20,11 @@ internal static class CmdEngineModule
         {
             try
             {
-                var activeName = player?.Name;
+                var activeName = audioPlayer?.Name;
                 if (string.IsNullOrWhiteSpace(activeName))
-                    activeName = player?.GetType().Name ?? "none";
+                    activeName = audioPlayer?.GetType().Name ?? "none";
 
-                var caps = player?.Capabilities ?? 0;
+                var caps = audioPlayer?.Capabilities ?? 0;
                 bool cSeek = (caps & PlayerCapabilities.Seek) != 0;
                 bool cPause = (caps & PlayerCapabilities.Pause) != 0;
                 bool cSpeed = (caps & PlayerCapabilities.Speed) != 0;
@@ -41,8 +41,8 @@ internal static class CmdEngineModule
 
         if (string.IsNullOrEmpty(arg) || arg == "show")
         {
-            var caps = player.Capabilities;
-            var txt = $"engine active: {player.Name}\n" +
+            var caps = audioPlayer.Capabilities;
+            var txt = $"engine active: {audioPlayer.Name}\n" +
                       $"preference: {data.PreferredEngine ?? "auto"}\n" +
                       "supports: " +
                       $"{((caps & PlayerCapabilities.Seek) != 0 ? "seek " : "")}" +
@@ -81,7 +81,7 @@ internal static class CmdEngineModule
             }
             else
             {
-                ui.ShowOsd($"engine pref: {arg} (active: {player.Name})", 1500);
+                ui.ShowOsd($"engine pref: {arg} (active: {audioPlayer.Name})", 1500);
             }
             return;
         }

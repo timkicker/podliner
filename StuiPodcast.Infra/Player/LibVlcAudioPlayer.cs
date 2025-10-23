@@ -1,18 +1,15 @@
 ﻿using Serilog;
 using StuiPodcast.Core;
-using System;
-using System.IO;
-using System.Threading.Tasks;
 using VLC = LibVLCSharp.Shared;
 
 namespace StuiPodcast.Infra.Player
 {
-    /// <summary>
-    /// LibVLC-basierter Player, der LibVLC **aus NuGet-Runtime-Assets** lädt.
-    /// Kein Pfad-Resolver, kein externes VLC nötig.
-    /// </summary>
-    public sealed class LibVlcAudioPlayer : IPlayer
+    // libvlc based audioPlayer loading runtimes from nuget
+    // no external vlc install needed and no path resolver
+    public sealed class LibVlcAudioAudioPlayer : IAudioPlayer
     {
+        #region fields and ctor
+
         private readonly VLC.LibVLC _lib;
         private readonly VLC.MediaPlayer _mp;
         private VLC.Media? _media;
@@ -20,7 +17,7 @@ namespace StuiPodcast.Infra.Player
 
         private long? _pendingSeekMs;
         private int _sessionId;
-        private bool _ready; // Erst „spielend“, wenn echte Länge/Time gesichtet
+        private bool _ready; // set playing only after real length or time observed
 
         public string Name => "vlc";
 
@@ -32,16 +29,16 @@ namespace StuiPodcast.Infra.Player
         public PlayerState State { get; } = new();
         public event Action<PlayerState>? StateChanged;
 
-        public LibVlcAudioPlayer()
+        public LibVlcAudioAudioPlayer()
         {
-            // Lädt libvlc aus NuGet (z. B. VideoLAN.LibVLC.Windows)
+            // load libvlc from nuget runtime assets
             VLC.Core.Initialize();
 
-            // Optionale Log-Datei (hilfreich bei Supportfällen)
+            // optional log file for support cases
             var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
             try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
 
-            // Runtime-Optionen: leise + robuste Netzwerk-Buffer
+            // runtime options for quiet start and robust network buffering
             var opts = new[]
             {
                 "--no-video",
@@ -59,7 +56,7 @@ namespace StuiPodcast.Infra.Player
             _lib = new VLC.LibVLC(opts);
             _mp = new VLC.MediaPlayer(_lib);
 
-            // Events verdrahten
+            // wire events
             _mp.Playing += OnPlaying;
             _mp.TimeChanged += OnTimeChanged;
             _mp.LengthChanged += OnLengthChanged;
@@ -67,13 +64,17 @@ namespace StuiPodcast.Infra.Player
             _mp.EncounteredError += OnEncounteredError;
             _mp.Stopped += (_, __) => { lock (_sync) { State.IsPlaying = false; SafeFire(); } };
 
-            // Startzustand
+            // initial state
             try { _mp.Volume = Math.Clamp(State.Volume0_100, 0, 100); } catch { }
             try { _mp.SetRate((float)Math.Clamp(State.Speed, 0.25, 3.0)); } catch { }
             State.Capabilities = Capabilities;
 
             Log.Information("LibVLC initialized (nuget runtimes)");
         }
+
+        #endregion
+
+        #region public api
 
         public void Play(string url, long? startMs = null)
         {
@@ -85,14 +86,14 @@ namespace StuiPodcast.Infra.Player
 
                 _ready = false;
 
-                try { if (_mp.IsPlaying) _mp.Stop(); } catch { /* robust */ }
+                try { if (_mp.IsPlaying) _mp.Stop(); } catch { }
                 SafeDisposeMediaLocked(sid);
 
                 _pendingSeekMs = startMs is > 0 ? startMs : null;
 
                 _media = CreateMedia(_lib, url);
 
-                // Hint für Startoffset (manche Inputs springen so schneller)
+                // hint for start offset to speed up initial seek for some inputs
                 if (_pendingSeekMs is long ms && ms >= 1000)
                 {
                     var secs = (int)(ms / 1000);
@@ -101,12 +102,12 @@ namespace StuiPodcast.Infra.Player
                         _media.AddOption($":start-time={secs}");
                         _media.AddOption(":input-fast-seek");
                     }
-                    catch { /* optional */ }
+                    catch { }
                 }
 
                 var ok = _mp.Play(_media);
 
-                // Sichtbar: erst „Loading“, bis echte Signale eintreffen
+                // expose loading until real signals arrive
                 State.IsPlaying = false;
                 State.Position = TimeSpan.Zero;
                 State.Length = null;
@@ -129,7 +130,7 @@ namespace StuiPodcast.Infra.Player
 
                     State.IsPlaying = _mp.IsPlaying;
                 }
-                catch { /* robust */ }
+                catch { }
 
                 SafeFire();
             }
@@ -145,7 +146,7 @@ namespace StuiPodcast.Infra.Player
                     if (target < TimeSpan.Zero) target = TimeSpan.Zero;
                     SeekTo(target);
                 }
-                catch { /* ignore */ }
+                catch { }
             }
         }
 
@@ -167,7 +168,7 @@ namespace StuiPodcast.Infra.Player
                             _mp.Position = Math.Clamp((float)ms / len, 0f, 1f);
                     }
                 }
-                catch { /* ignore */ }
+                catch { }
             }
         }
 
@@ -181,7 +182,7 @@ namespace StuiPodcast.Infra.Player
                     _mp.Volume = v;
                     State.Volume0_100 = v;
                 }
-                catch { /* ignore */ }
+                catch { }
 
                 SafeFire();
             }
@@ -197,7 +198,7 @@ namespace StuiPodcast.Infra.Player
                     _mp.SetRate((float)s);
                     State.Speed = s;
                 }
-                catch { /* ignore */ }
+                catch { }
 
                 SafeFire();
             }
@@ -222,28 +223,9 @@ namespace StuiPodcast.Infra.Player
             try { _lib.Dispose(); } catch { }
         }
 
-        // ----------------- intern -----------------
+        #endregion
 
-        private static VLC.Media CreateMedia(VLC.LibVLC lib, string input)
-        {
-            // 1) Echte URL?
-            if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme))
-                return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
-
-            // 2) Lokaler Pfad?
-            if (File.Exists(input))
-                return new VLC.Media(lib, input, VLC.FromType.FromPath);
-
-            // 3) Fallback: als Location versuchen
-            return new VLC.Media(lib, input, VLC.FromType.FromLocation);
-        }
-
-        private void SafeDisposeMediaLocked(int sid)
-        {
-            try { _media?.Dispose(); }
-            catch (Exception ex) { Log.Debug(ex, "[#{sid}] media.Dispose"); }
-            _media = null;
-        }
+        #region event handlers
 
         private void OnPlaying(object? _, EventArgs __)
         {
@@ -251,7 +233,7 @@ namespace StuiPodcast.Infra.Player
             {
                 try
                 {
-                    // Pending-Seek einmalig nachreichen (stabil nach Playing)
+                    // apply pending seek once after playing event
                     var want = _pendingSeekMs;
                     _pendingSeekMs = null;
                     if (want is long ms && ms > 0)
@@ -297,7 +279,7 @@ namespace StuiPodcast.Infra.Player
                         State.IsPlaying = true;
                     }
 
-                    // nahe Ende: wenn nicht (mehr) playing und Zeit ≈ Länge
+                    // near end guard
                     if (len > 0 && !_mp.IsPlaying && e.Time >= Math.Max(0, len - 250))
                         State.IsPlaying = false;
 
@@ -358,9 +340,36 @@ namespace StuiPodcast.Infra.Player
             }
         }
 
+        #endregion
+
+        #region helpers
+
+        private static VLC.Media CreateMedia(VLC.LibVLC lib, string input)
+        {
+            // absolute url
+            if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme))
+                return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
+
+            // local path
+            if (File.Exists(input))
+                return new VLC.Media(lib, input, VLC.FromType.FromPath);
+
+            // fallback treat as location
+            return new VLC.Media(lib, input, VLC.FromType.FromLocation);
+        }
+
+        private void SafeDisposeMediaLocked(int sid)
+        {
+            try { _media?.Dispose(); }
+            catch (Exception ex) { Log.Debug(ex, "[#{sid}] media.Dispose"); }
+            _media = null;
+        }
+
         private void SafeFire()
         {
-            try { StateChanged?.Invoke(State); } catch { /* UI darf Player nicht crashen */ }
+            try { StateChanged?.Invoke(State); } catch { }
         }
+
+        #endregion
     }
 }

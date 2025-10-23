@@ -1,66 +1,52 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
+
 
 namespace StuiPodcast.Infra.Opml
 {
-    /// <summary>
-    /// Repräsentiert ein OPML-Dokument mit flacher Feed-Liste (Gruppen werden bewusst ignoriert).
-    /// </summary>
+    // opml document with a flat feed list; groups are intentionally ignored
     public sealed class OpmlDocument
     {
-        /// <summary>Optionale Überschrift im OPML-Header (&lt;head&gt;&lt;title&gt;…)</summary>
+        // optional title from <head><title>
         public string? Title { get; set; }
 
-        /// <summary>Optionales Erstellungs-/Export-Datum (&lt;head&gt;&lt;dateCreated&gt;…)</summary>
+        // optional creation or export date from <head><dateCreated>
         public DateTimeOffset? DateCreated { get; set; }
 
-        /// <summary>Alle Feeds (flach, ohne Ordner/Gruppen).</summary>
+        // all feeds, flat without folders
         public List<OpmlEntry> Entries { get; } = new();
 
-        /// <summary>Anzahl der Einträge (Bequemlichkeit).</summary>
+        // convenience count
         public int Count => Entries.Count;
 
-        /// <summary>
-        /// Fügt einen Eintrag hinzu (Nulls werden ignoriert).
-        /// </summary>
+        // add an entry; ignores null
         public void Add(OpmlEntry? entry)
         {
             if (entry is not null) Entries.Add(entry);
         }
 
-        /// <summary>
-        /// Liefert alle formal gültigen Einträge (xmlUrl vorhanden & plausibel).
-        /// </summary>
+        // all formally valid entries (xmlurl present and plausible)
         public IEnumerable<OpmlEntry> ValidEntries() => Entries.Where(e => e.IsValid());
 
-        /// <summary>
-        /// Liefert alle formal ungültigen Einträge (z. B. fehlende/kaputte xmlUrl).
-        /// </summary>
+        // all formally invalid entries (for example missing or broken xmlurl)
         public IEnumerable<OpmlEntry> InvalidEntries() => Entries.Where(e => !e.IsValid());
     }
 
-    /// <summary>
-    /// Ein einzelner OPML-Feed-Eintrag (&lt;outline xmlUrl="…" title="…" htmlUrl="…" type="rss"/&gt;).
-    /// </summary>
+    // single opml feed entry: <outline xmlUrl="..." title="..." htmlUrl="..." type="rss" />
     public sealed class OpmlEntry
     {
-        /// <summary>Pflichtfeld: URL des RSS/Atom-Feeds (http/https).</summary>
+        // required feed url, http or https
         public string? XmlUrl { get; set; }
 
-        /// <summary>Optionale Website-URL (Landing-Page des Feeds).</summary>
+        // optional website url, the landing page
         public string? HtmlUrl { get; set; }
 
-        /// <summary>Optionaler Titel/Name des Feeds. Kann leer sein – der Parser darf das setzen.</summary>
+        // optional feed title; may be empty and can be set by the parser
         public string? Title { get; set; }
 
-        /// <summary>Optionaler Typ-Hinweis (z. B. "rss", "atom"). Wird beim Export ggf. auf "rss" normalisiert.</summary>
+        // optional type hint, for example "rss" or "atom"; export may normalize to "rss"
         public string? Type { get; set; }
 
-        /// <summary>
-        /// Formale Mindestvalidierung: xmlUrl vorhanden, absolute URI, Schema http/https.
-        /// (Keine Online-Validierung.)
-        /// </summary>
+        // minimal formal validation: xmlurl present, absolute uri, scheme is http or https
+        // no online validation
         public bool IsValid()
         {
             if (string.IsNullOrWhiteSpace(XmlUrl)) return false;
@@ -72,19 +58,13 @@ namespace StuiPodcast.Infra.Opml
             return scheme == "http" || scheme == "https";
         }
 
-        /// <summary>
-        /// Liefert eine kanonische Vergleichs-URL (für Duplikaterkennung):
-        /// - Trim
-        /// - Host lowercased
-        /// - Fragment entfernt
-        /// - Schema beibehalten (kein https-Enforce hier)
-        /// </summary>
+        // returns a canonical comparison url for duplicate detection
+        // trim, lowercase host, remove fragment, keep original scheme
         public string CanonicalUrl()
         {
             var raw = (XmlUrl ?? string.Empty).Trim();
             if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return raw;
 
-            // Host lowercased, Fragment entfernt
             var builder = new UriBuilder(uri)
             {
                 Host = uri.Host.ToLowerInvariant(),

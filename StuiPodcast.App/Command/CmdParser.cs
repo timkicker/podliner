@@ -100,7 +100,7 @@ internal static class CmdParser
         if (cmd.StartsWith(":save", StringComparison.OrdinalIgnoreCase)) return TopCommand.Save;
         if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase)) return TopCommand.Sort;
         if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase)) return TopCommand.Filter;
-        if (cmd.StartsWith(":player", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayerBar;
+        if (cmd.StartsWith(":audioPlayer", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayerBar;
 
         if (cmd.StartsWith(":net", StringComparison.OrdinalIgnoreCase)) return TopCommand.Net;
         if (cmd.StartsWith(":play-source", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlaySource;

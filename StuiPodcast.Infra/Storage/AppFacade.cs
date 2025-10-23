@@ -5,56 +5,46 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
 {
-    /// <summary>
-    /// App-Façade: ein einziger Einstieg für UI/Orchestrierung.
-    /// Kapselt ConfigStore (appsettings.json) + LibraryStore (library.json)
-    /// und stellt eine stabile Oberfläche bereit. Downloads werden NICHT persistiert;
-    /// "Downloaded?" wird virtuell über ILocalDownloadLookup ermittelt.
-    /// </summary>
+    // app facade: single entry point for ui and orchestration
+    // wraps config store and library store; downloads are not persisted
     public sealed class AppFacade
     {
         public ConfigStore  ConfigStore  { get; }
         public LibraryStore LibraryStore { get; }
         public ILocalDownloadLookup Downloads { get; }
 
-        /// <summary>
-        /// Änderungen am Persistenzzustand (koalesziert). UI kann hierauf reagieren.
-        /// </summary>
+        #region events
+        // coalesced persistence changes; ui can observe
         public event Action? Changed;
+        #endregion
 
+        #region constructor
         public AppFacade(ConfigStore configStore, LibraryStore libraryStore, ILocalDownloadLookup? downloadLookup = null)
         {
             ConfigStore  = configStore  ?? throw new ArgumentNullException(nameof(configStore));
             LibraryStore = libraryStore ?? throw new ArgumentNullException(nameof(libraryStore));
             Downloads    = downloadLookup ?? NullDownloadLookup.Instance;
 
-            // Durchreichen der Changed-Events beider Stores
+            // forward change events from both stores
             ConfigStore.Changed  += () => Changed?.Invoke();
             LibraryStore.Changed += () => Changed?.Invoke();
         }
+        #endregion
 
-        // =====================================================================
-        // Laden (Start-Reihenfolge bleibt: zuerst Config, dann Library)
-        // =====================================================================
-
+        #region load and save
+        // load order: config first, then library
         public AppConfig LoadConfig()  => ConfigStore.Load();
         public Library   LoadLibrary() => LibraryStore.Load();
 
-        // =====================================================================
-        // SAVE-APIs (UI ruft üblicherweise SaveAsync; :w/Exit → SaveNow)
-        // =====================================================================
-
-        /// <summary>Sofortiges Speichern – für :w / Exit.</summary>
+        // immediate save for explicit write or exit
         public void SaveNow()
         {
             ConfigStore.SaveNow();
             LibraryStore.SaveNow();
         }
+        #endregion
 
-        // =====================================================================
-        // PREFS / CONFIG (Getter/Setter spiegeln AppConfig; persistieren via SaveAsync)
-        // =====================================================================
-
+        #region config properties
         public string EnginePreference
         {
             get => ConfigStore.Current.EnginePreference;
@@ -79,7 +69,6 @@ namespace StuiPodcast.Infra.Storage
             set { ConfigStore.Current.Theme = value ?? "Base"; ConfigStore.SaveAsync(); }
         }
 
-
         public bool PlayerAtTop
         {
             get => ConfigStore.Current.Ui.PlayerAtTop;
@@ -103,18 +92,21 @@ namespace StuiPodcast.Infra.Storage
             get => ConfigStore.Current.ViewDefaults.UnplayedOnly;
             set { ConfigStore.Current.ViewDefaults.UnplayedOnly = value; ConfigStore.SaveAsync(); }
         }
-        
+        #endregion
 
-        // Read-Only Views – UI kann direkt enumerieren
-        public IReadOnlyList<Feed>    Feeds    => new ReadOnlyCollection<Feed>(LibraryStore.Current.Feeds);
+        #region read only views
+        // ui can enumerate these directly
+        public IReadOnlyList<Feed> Feeds => new ReadOnlyCollection<Feed>(LibraryStore.Current.Feeds);
         public IReadOnlyList<Episode> Episodes => new ReadOnlyCollection<Episode>(LibraryStore.Current.Episodes);
-        public IReadOnlyList<Guid>    Queue    => new ReadOnlyCollection<Guid>(LibraryStore.Current.Queue);
+        public IReadOnlyList<Guid> Queue => new ReadOnlyCollection<Guid>(LibraryStore.Current.Queue);
         public IReadOnlyList<HistoryItem> History => new ReadOnlyCollection<HistoryItem>(LibraryStore.Current.History);
 
-
+        // fast episode access
         public Episode GetEpisodeOrThrow(Guid episodeId) => LibraryStore.GetEpisodeOrThrow(episodeId);
+        #endregion
 
-        // Mutationen – leiten direkt an LibraryStore weiter (der speichert gebatcht)
+        #region mutations
+        // changes are forwarded to the library store which batches writes
         public Feed AddOrUpdateFeed(Feed feed) => LibraryStore.AddOrUpdateFeed(feed);
         public Episode AddOrUpdateEpisode(Episode ep) => LibraryStore.AddOrUpdateEpisode(ep);
 
@@ -124,59 +116,35 @@ namespace StuiPodcast.Infra.Storage
         public void SetSaved(Guid episodeId, bool saved)
             => LibraryStore.SetSaved(episodeId, saved);
 
-        // Queue
+        // queue operations
         public void QueuePush(Guid episodeId) => LibraryStore.QueuePush(episodeId);
         public bool QueueRemove(Guid episodeId) => LibraryStore.QueueRemove(episodeId);
         public void QueueTrimBefore(Guid episodeId) => LibraryStore.QueueTrimBefore(episodeId);
         public void QueueClear() => LibraryStore.QueueClear();
 
-        // History
+        // history operations
         public void HistoryAdd(Guid episodeId, DateTimeOffset atUtc) => LibraryStore.HistoryAdd(episodeId, atUtc);
         public void HistoryClear() => LibraryStore.HistoryClear();
+        #endregion
 
-        // =====================================================================
-        // DOWNLOADS – reines ReadModel (keine Persistenz!)
-        // =====================================================================
-
-        /// <summary>
-        /// Gibt true zurück, wenn die Episode lokal im Standard-"Podcasts"-Ordner vorhanden ist.
-        /// Quelle ist ausschließlich der Download-Manager/Dateisystem, nicht die Library.
-        /// </summary>
+        #region downloads
+        // true if a local file exists in the standard podcasts folder
+        // source is the download manager or the file system, not the library
         public bool IsDownloaded(Guid episodeId) => Downloads.IsDownloaded(episodeId);
 
-        /// <summary>
-        /// Liefert den lokalen Pfad (falls vorhanden). Keine Persistenz.
-        /// </summary>
+        // returns local path if present; no persistence
         public bool TryGetLocalPath(Guid episodeId, out string? path) => Downloads.TryGetLocalPath(episodeId, out path);
+        #endregion
 
-        // =====================================================================
-        // Hilfs-Interface & Null-Implementierung für die Download-Abfrage
-        // =====================================================================
-
-        /// <summary>
-        /// Lesender Adapter auf deinen DownloadManager/Dateisystem.
-        /// Implementiere einen kleinen Adapter, der hieran andockt, z. B.:
-        /// 
-        /// public sealed class DownloadLookupAdapter : ILocalDownloadLookup {
-        ///     private readonly DownloadManager _mgr;
-        ///     public DownloadLookupAdapter(DownloadManager mgr) { _mgr = mgr; }
-        ///     public bool IsDownloaded(Guid episodeId) => _mgr.IsDownloaded(episodeId);
-        ///     public bool TryGetLocalPath(Guid episodeId, out string? path) => _mgr.TryGetLocalPath(episodeId, out path);
-        /// }
-        /// 
-        /// Und dann beim Composition Root:
-        /// var facade = new AppFacade(cfgStore, libStore, new DownloadLookupAdapter(downloadManager));
-        /// </summary>
+        #region lookup types
+        // read only adapter for a download manager or file system
         public interface ILocalDownloadLookup
         {
             bool IsDownloaded(Guid episodeId);
             bool TryGetLocalPath(Guid episodeId, out string? path);
         }
 
-        /// <summary>
-        /// Fallback, falls (noch) kein Download-Adapter bereitsteht:
-        /// Immer "nicht geladen".
-        /// </summary>
+        // fallback when no adapter is provided
         sealed class NullDownloadLookup : ILocalDownloadLookup
         {
             public static readonly NullDownloadLookup Instance = new();
@@ -184,5 +152,6 @@ namespace StuiPodcast.Infra.Storage
             public bool IsDownloaded(Guid episodeId) => false;
             public bool TryGetLocalPath(Guid episodeId, out string? path) { path = null; return false; }
         }
+        #endregion
     }
 }

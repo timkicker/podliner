@@ -45,7 +45,7 @@ namespace StuiPodcast.App.UI
             catch { return Profile.Unicode; }
         }
 
-        // ---------- Player / NowPlaying ----------
+        // ---------- AudioPlayer / NowPlaying ----------
 
         /// <summary>Prefix für Listenzeile: aktiv vs. normal.</summary>
         public static string NowPrefix(bool isNow) => isNow

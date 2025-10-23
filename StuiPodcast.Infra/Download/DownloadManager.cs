@@ -1,13 +1,7 @@
-using System;
-using System.IO;
+
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Serilog;
@@ -15,10 +9,12 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Download
 {
+    // on-disk index for finished downloads
     class DownloadIndex
     {
         public int SchemaVersion { get; set; } = 1;
         public List<Item> Items { get; set; } = new();
+
         public sealed class Item
         {
             public Guid EpisodeId { get; set; }
@@ -26,8 +22,11 @@ namespace StuiPodcast.Infra.Download
         }
     }
 
+    // download manager with queue, retries and atomic writes
     public sealed class DownloadManager : IDisposable
     {
+        #region fields
+
         private readonly string _indexPath;
         private readonly string _indexTmpPath;
 
@@ -46,12 +45,16 @@ namespace StuiPodcast.Infra.Download
 
         public event Action<Guid, DownloadStatus>? StatusChanged;
 
-        private const int CONNECT_TIMEOUT_MS   = 4000;
-        private const int REQUEST_TIMEOUT_MS   = 15000;
-        private const int READ_TIMEOUT_MS      = 12000;
-        private const int MAX_RETRIES          = 3;
-        private const int BACKOFF_BASE_MS      = 400;
-        private const int PROGRESS_PULSE_MS    = 400;
+        private const int CONNECT_TIMEOUT_MS = 4000;
+        private const int REQUEST_TIMEOUT_MS = 15000;
+        private const int READ_TIMEOUT_MS    = 12000;
+        private const int MAX_RETRIES        = 3;
+        private const int BACKOFF_BASE_MS    = 400;
+        private const int PROGRESS_PULSE_MS  = 400;
+
+        #endregion
+
+        #region ctor and setup
 
         public DownloadManager(AppData data, string configDir)
         {
@@ -75,10 +78,15 @@ namespace StuiPodcast.Infra.Download
                 Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS)
             };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
-       
+
             TryLoadIndex();
         }
 
+        #endregion
+
+        #region index persistence
+
+        // best effort load of finished entries into the in-memory map
         void TryLoadIndex()
         {
             try
@@ -124,6 +132,7 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        // debounce writes to index file
         void SaveIndexDebounced()
         {
             lock (_persistGate)
@@ -138,6 +147,7 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        // atomic write of index file
         void TrySaveIndex()
         {
             List<DownloadIndex.Item> items;
@@ -187,6 +197,11 @@ namespace StuiPodcast.Infra.Download
             try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
         }
 
+        #endregion
+
+        #region public control api
+
+        // make sure background worker runs
         public void EnsureRunning()
         {
             lock (_gate)
@@ -200,6 +215,7 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        // request worker stop
         public void Stop()
         {
             lock (_gate)
@@ -233,6 +249,11 @@ namespace StuiPodcast.Infra.Download
             _http.Dispose();
         }
 
+        #endregion
+
+        #region queue api
+
+        // add episode to queue
         public void Enqueue(Guid episodeId)
         {
             lock (_gate)
@@ -246,6 +267,7 @@ namespace StuiPodcast.Infra.Download
             EnsureRunning();
         }
 
+        // move episode to front
         public void ForceFront(Guid episodeId)
         {
             lock (_gate)
@@ -259,6 +281,7 @@ namespace StuiPodcast.Infra.Download
             EnsureRunning();
         }
 
+        // cancel queued or running job
         public void Cancel(Guid episodeId)
         {
             bool pulsed = false;
@@ -281,6 +304,7 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        // read-only state snapshot
         public DownloadState GetState(Guid episodeId)
         {
             lock (_gate)
@@ -290,6 +314,10 @@ namespace StuiPodcast.Infra.Download
             }
             return DownloadState.None;
         }
+
+        #endregion
+
+        #region worker loop
 
         private async Task WorkerLoopAsync(CancellationToken cancel)
         {
@@ -315,7 +343,7 @@ namespace StuiPodcast.Infra.Download
 
                 if (ep == null)
                 {
-                    SetState(nextId, s => { s.State = DownloadState.Failed; s.Error = "Episode not found."; });
+                    SetState(nextId, s => { s.State = DownloadState.Failed; s.Error = "episode not found"; });
                     Log.Warning("dl/worker episode-not-found id={Id}", nextId);
                     continue;
                 }
@@ -360,6 +388,10 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        #endregion
+
+        #region download flow
+
         private async Task DownloadWithRetriesAsync(Episode ep, CancellationToken cancel)
         {
             Exception? last = null;
@@ -393,48 +425,21 @@ namespace StuiPodcast.Infra.Download
             }
 
             Log.Error(last, "dl/failed-after-retries id={Id} title={Title}", ep.Id, ep.Title);
-            throw new IOException($"Download failed after retries: {last?.GetType().Name}: {last?.Message}", last);
-        }
-
-        private static bool IsTransient(Exception ex)
-        {
-            if (ex is HttpRequestException) return true;
-            if (ex is IOException ioex && ioex.InnerException is SocketException) return true;
-            if (ex is IOException iox && iox.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)) return true;
-            if (ex is SocketException) return true;
-            return false;
-        }
-
-        private static int BackoffWithJitter(int attempt0)
-        {
-            var pow = 1 << attempt0;
-            var baseMs = BACKOFF_BASE_MS * pow;
-            var jitter = Random.Shared.Next(0, 150);
-            return Math.Min(baseMs + jitter, 4000);
-        }
-
-        private async Task<int> ComputeRetryDelayAsync(Exception? last, int attempt)
-        {
-            if (last is HttpRequestException hre && hre.Data != null && hre.Data.Contains("RetryAfterMs"))
-            {
-                var v = hre.Data["RetryAfterMs"];
-                if (v is int ms && ms > 0) return ms;
-            }
-            return BackoffWithJitter(attempt);
+            throw new IOException($"download failed after retries: {last?.GetType().Name}: {last?.Message}", last);
         }
 
         private async Task DownloadOneAsync(Episode ep, CancellationToken outerCancel)
         {
             var url = ep.AudioUrl;
             if (string.IsNullOrWhiteSpace(url))
-                throw new InvalidOperationException("Episode has no AudioUrl");
+                throw new InvalidOperationException("episode has no audio url");
 
             var rootDir = ResolveDownloadRoot();
 
             string FeedTitle()
             {
                 var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
-                return feed?.Title ?? "Podcast";
+                return feed?.Title ?? "podcast";
             }
 
             var feedTitle = FeedTitle();
@@ -485,14 +490,14 @@ namespace StuiPodcast.Infra.Download
             if ((int)resp.StatusCode == 429)
             {
                 var retry = ParseRetryAfterMs(resp.Headers.RetryAfter);
-                var ex = new HttpRequestException($"429 Too Many Requests");
+                var ex = new HttpRequestException("429 too many requests");
                 if (retry > 0) ex.Data["RetryAfterMs"] = retry;
                 throw ex;
             }
 
             if ((int)resp.StatusCode == 408 || (int)resp.StatusCode >= 500)
             {
-                throw new HttpRequestException($"Server returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                throw new HttpRequestException($"server returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
             }
 
             if (resume && resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
@@ -519,7 +524,7 @@ namespace StuiPodcast.Infra.Download
             ).ConfigureAwait(false);
         }
 
-        // WICHTIG: Kein 'ref' mehr! Wir geben den finalen Zielpfad zurück.
+        // writes response content to disk and finalizes file name
         private async Task<string> ReceiveToFileAsync(
             HttpResponseMessage resp,
             Episode ep,
@@ -614,11 +619,11 @@ namespace StuiPodcast.Infra.Download
 
                     if (have != expected)
                     {
-                        const long TOLERANCE_BYTES = 64 * 1024; // optional
+                        const long TOLERANCE_BYTES = 64 * 1024; // soft tolerance
                         if (Math.Abs(have - expected) > TOLERANCE_BYTES)
                         {
                             Log.Warning("dl/verify size-mismatch id={Id} have={Have} expected={Expected}", ep.Id, have, expected);
-                            throw new IOException($"Size mismatch after download (have {have}, expected {expected}).");
+                            throw new IOException($"size mismatch after download (have {have}, expected {expected})");
                         }
                         else
                         {
@@ -631,41 +636,36 @@ namespace StuiPodcast.Infra.Download
                     }
                 }
 
-
-                // Atomar/failsafe finalisieren
+                // finalize file atomically
                 try
                 {
                     var destDir = Path.GetDirectoryName(effectiveTargetPath)!;
-                    Directory.CreateDirectory(destDir); // falls sich der Name per Header geändert hat
+                    Directory.CreateDirectory(destDir);
 
                     if (File.Exists(effectiveTargetPath))
                     {
-                        // Wenn Ziel existiert, ist Replace ideal (erhält Metadaten besser als Move)
                         try
                         {
-                            // Optional: Backup-Datei weglassen -> null ist NICHT erlaubt; also kleine temp-backup verwenden
                             var backup = Path.Combine(destDir, ".backup_" + Path.GetFileName(effectiveTargetPath));
                             File.Replace(effectiveTmpPath, effectiveTargetPath, backup, ignoreMetadataErrors: true);
                             try { if (File.Exists(backup)) File.Delete(backup); } catch { }
                         }
                         catch (PlatformNotSupportedException)
                         {
-                            // Fallback: Move mit Overwrite
 #if NET6_0_OR_GREATER
                             File.Move(effectiveTmpPath, effectiveTargetPath, overwrite: true);
 #else
-            File.Delete(effectiveTargetPath);
-            File.Move(effectiveTmpPath, effectiveTargetPath);
+                            File.Delete(effectiveTargetPath);
+                            File.Move(effectiveTmpPath, effectiveTargetPath);
 #endif
                         }
                     }
                     else
                     {
-                        // Ziel existiert nicht -> einfach Move (Replace würde hier FileNotFoundException werfen)
 #if NET6_0_OR_GREATER
                         File.Move(effectiveTmpPath, effectiveTargetPath, overwrite: false);
 #else
-        File.Move(effectiveTmpPath, effectiveTargetPath);
+                        File.Move(effectiveTmpPath, effectiveTargetPath);
 #endif
                     }
                 }
@@ -675,7 +675,6 @@ namespace StuiPodcast.Infra.Download
                     throw;
                 }
 
-                
                 var mb = (resumeFrom + bytesEmitted) / (1024.0 * 1024.0);
                 var mbps = mb / Math.Max(0.001, sw.Elapsed.TotalSeconds);
                 Log.Information("dl/done id={Id} wrote={MB:F1} MB dur={Sec:F2}s avg={MBps:F2} MB/s -> \"{Path}\"",
@@ -700,6 +699,38 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        #endregion
+
+        #region helpers
+
+        private static bool IsTransient(Exception ex)
+        {
+            if (ex is HttpRequestException) return true;
+            if (ex is IOException ioex && ioex.InnerException is SocketException) return true;
+            if (ex is IOException iox && iox.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)) return true;
+            if (ex is SocketException) return true;
+            return false;
+        }
+
+        // exponential backoff with jitter
+        private static int BackoffWithJitter(int attempt0)
+        {
+            var pow = 1 << attempt0;
+            var baseMs = BACKOFF_BASE_MS * pow;
+            var jitter = Random.Shared.Next(0, 150);
+            return Math.Min(baseMs + jitter, 4000);
+        }
+
+        private async Task<int> ComputeRetryDelayAsync(Exception? last, int attempt)
+        {
+            if (last is HttpRequestException hre && hre.Data != null && hre.Data.Contains("RetryAfterMs"))
+            {
+                var v = hre.Data["RetryAfterMs"];
+                if (v is int ms && ms > 0) return ms;
+            }
+            return BackoffWithJitter(attempt);
+        }
+
         private int ParseRetryAfterMs(RetryConditionHeaderValue? retryAfter)
         {
             if (retryAfter == null) return 0;
@@ -717,6 +748,7 @@ namespace StuiPodcast.Infra.Download
             return 0;
         }
 
+        // resolve and create download root folder
         private string ResolveDownloadRoot()
         {
             string root;
@@ -735,6 +767,7 @@ namespace StuiPodcast.Infra.Download
             return root;
         }
 
+        // mutate and publish state changes
         private void SetState(Guid epId, Action<DownloadStatus> mutate)
         {
             DownloadStatus? before = null;
@@ -794,5 +827,7 @@ namespace StuiPodcast.Infra.Download
             }
             catch { }
         }
+
+        #endregion
     }
 }

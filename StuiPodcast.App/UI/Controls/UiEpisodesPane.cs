@@ -274,7 +274,7 @@ internal sealed class UiEpisodesPane
         long lenMs = e.DurationMs;
         long posMs = e.Progress.LastPosMs;
 
-        // Snapshot-Override NUR für aktive Episode anwenden (synchron mit Player)
+        // Snapshot-Override NUR für aktive Episode anwenden (synchron mit AudioPlayer)
         if (isNow && snapForActive is PlaybackSnapshot snap)
         {
             var sp = (long)Math.Max(0, snap.Position.TotalMilliseconds);
@@ -340,7 +340,7 @@ internal sealed class UiEpisodesPane
         RebuildRowsPreservingView();
     }
 
-    // Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur Player-Anzeige
+    // Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur AudioPlayer-Anzeige
     public void InjectNowPlaying(Guid? nowId, PlaybackSnapshot snapshot)
     {
         _nowPlayingId = nowId;

@@ -1,8 +1,6 @@
-// PlayerFactory.cs
-using System;
+
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
 using System.Runtime.InteropServices;
 using Serilog;
 using StuiPodcast.Core;
@@ -11,16 +9,16 @@ namespace StuiPodcast.Infra.Player;
 
 public static class AudioPlayerFactory
 {
-    // Engine-Auswahl: bevorzugt VLC; OS-spezifische Fallback-Ketten
-    public static IPlayer Create(AppData data, out string infoOsd)
+    // engine choice prefers vlc with os specific fallbacks
+    public static IAudioPlayer Create(AppData data, out string infoOsd)
     {
         var pref = (data.PreferredEngine ?? "auto").Trim().ToLowerInvariant();
 
-        bool TryVlc(out IPlayer p, out string reason)
+        bool TryVlc(out IAudioPlayer p, out string reason)
         {
             try
             {
-                p = new LibVlcAudioPlayer();
+                p = new LibVlcAudioAudioPlayer();
                 reason = "ok";
                 return true;
             }
@@ -32,17 +30,17 @@ public static class AudioPlayerFactory
             }
         }
 
-        bool TryMpv(out IPlayer p, out string reason)
+        bool TryMpv(out IAudioPlayer p, out string reason)
         {
             p = null!;
             if (!ExecutableExists("mpv"))
             {
-                reason = "mpv not found in PATH";
+                reason = "mpv not found in path";
                 return false;
             }
             try
             {
-                p = new MpvAudioPlayer();
+                p = new MpvAudioAudioPlayer();
                 reason = "ok";
                 return true;
             }
@@ -58,12 +56,12 @@ public static class AudioPlayerFactory
             }
         }
 
-        bool TryFfp(out IPlayer p, out string reason)
+        bool TryFfp(out IAudioPlayer p, out string reason)
         {
             if (!ExecutableExists("ffplay"))
             {
                 p = null!;
-                reason = "ffplay not found in PATH";
+                reason = "ffplay not found in path";
                 return false;
             }
             p = new FfplayAudioPlayer();
@@ -71,15 +69,15 @@ public static class AudioPlayerFactory
             return true;
         }
 
-        IPlayer? chosen = null;
+        IAudioPlayer? chosen = null;
         string why = "";
 
-        // 1) Explizite Präferenz zuerst
+        // explicit preference first
         if (pref is "vlc" && !TryVlc(out chosen!, out why)) pref = "auto";
         if (pref is "mpv" && !TryMpv(out chosen!, out why)) pref = "auto";
         if (pref is "ffplay" && !TryFfp(out chosen!, out why)) pref = "auto";
 
-        // 2) Auto-Kette nach OS
+        // auto chain by os
         if (chosen == null)
         {
             bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
@@ -94,19 +92,19 @@ public static class AudioPlayerFactory
             {
                 if (isWin || isMac)
                 {
-                    // Windows/macOS: ffplay → mpv
+                    // windows or macos: try ffplay then mpv
                     if (TryFfp(out chosen!, out var wFfp))      { why = $"ffplay: {wFfp}"; }
                     else if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; }
                 }
                 else if (isLin)
                 {
-                    // Linux: mpv → ffplay
+                    // linux: try mpv then ffplay
                     if (TryMpv(out chosen!, out var wMpv))      { why = $"mpv: {wMpv}"; }
                     else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; }
                 }
                 else
                 {
-                    // Unbekanntes OS: mpv → ffplay
+                    // unknown os: try mpv then ffplay
                     if (TryMpv(out chosen!, out var wMpv))      { why = $"mpv: {wMpv}"; }
                     else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; }
                 }
@@ -115,10 +113,10 @@ public static class AudioPlayerFactory
                     throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
             }
 
-            // Degradierter Hinweis (für OSD)
+            // degraded hint for osd
             bool degraded =
                 string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase) ||
-                isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase); // optional
+                isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase);
 
             infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : $"Engine: {chosen.Name}";
         }
@@ -127,7 +125,7 @@ public static class AudioPlayerFactory
             infoOsd = $"Engine: {chosen.Name}";
         }
 
-        // Netzprofil in OSD mit anzeigen (reine Info; Engines können es separat berücksichtigen)
+        // include network profile info in osd
         if (data.NetProfile == NetworkProfile.BadNetwork)
             infoOsd += " • Net: bad";
 
@@ -137,9 +135,8 @@ public static class AudioPlayerFactory
         return chosen;
     }
 
-    // Cross-platform Executable lookup:
-    //  - Unix: 'which'
-    //  - Windows: PATH + PATHEXT + letzter Startversuch (abgefangen)
+    // cross platform executable lookup
+    // unix uses which; windows scans path and pathext then last resort start attempt
     private static bool ExecutableExists(string fileName)
     {
         try
@@ -161,7 +158,7 @@ public static class AudioPlayerFactory
                     }
                 }
 
-                // Letzter Versuch: Starten & Fehler fangen (Datei nicht gefunden)
+                // last resort: try to start and catch file not found
                 using var p = new Process
                 {
                     StartInfo = new ProcessStartInfo

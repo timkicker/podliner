@@ -6,22 +6,22 @@ using StuiPodcast.Infra.Player;
 namespace StuiPodcast.App
 {
     /// <summary>
-    /// Stabiler Proxy für IPlayer, dessen innere Engine zur Laufzeit austauschbar ist.
+    /// Stabiler Proxy für IAudioPlayer, dessen innere Engine zur Laufzeit austauschbar ist.
     /// Thread-safe: Öffentliche Methoden greifen auf einen Snapshot der aktuellen Engine zu.
     /// </summary>
-    public sealed class SwappablePlayer : IPlayer, IDisposable
+    public sealed class SwappableAudioPlayer : IAudioPlayer, IDisposable
     {
-        private IPlayer _inner;
+        private IAudioPlayer _inner;
         private readonly object _gate = new();
 
-        public SwappablePlayer(IPlayer inner)
+        public SwappableAudioPlayer(IAudioPlayer inner)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             _inner.StateChanged += ForwardState;
         }
 
         // Snapshot-Helfer: gibt die aktuell aktive Engine atomar zurück
-        private IPlayer Inner
+        private IAudioPlayer Inner
         {
             get { lock (_gate) return _inner; }
         }
@@ -88,7 +88,7 @@ namespace StuiPodcast.App
 
         public void Dispose()
         {
-            IPlayer old;
+            IAudioPlayer old;
             lock (_gate)
             {
                 old = _inner;
@@ -102,11 +102,11 @@ namespace StuiPodcast.App
         /// <summary>
         /// Tauscht die Engine im Laufenden Betrieb aus. Optionaler Hook vor Dispose der alten Engine.
         /// </summary>
-        public async Task SwapToAsync(IPlayer next, Action<IPlayer>? onBeforeDispose = null)
+        public async Task SwapToAsync(IAudioPlayer next, Action<IAudioPlayer>? onBeforeDispose = null)
         {
             if (next == null) throw new ArgumentNullException(nameof(next));
 
-            IPlayer old;
+            IAudioPlayer old;
             lock (_gate)
             {
                 old = _inner;
@@ -122,7 +122,7 @@ namespace StuiPodcast.App
 
         private void ForwardState(PlayerState s)
         {
-            try { StateChanged?.Invoke(s); } catch { /* UI darf Player nicht crashen */ }
+            try { StateChanged?.Invoke(s); } catch { /* UI darf AudioPlayer nicht crashen */ }
         }
     }
 }

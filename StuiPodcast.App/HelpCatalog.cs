@@ -168,7 +168,7 @@ namespace StuiPodcast.App
                 Aliases: new[]{":H",":M",":L"},
                 Category: HelpCategory.Navigation, Rank: 55),
 
-            // ===== Sort/Filter/Player/Theme =====
+            // ===== Sort/Filter/AudioPlayer/Theme =====
             new(":sort", "Sort the episode list.",
                 "show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]",
                 Examples: new[]{ ":sort show", ":sort reverse", ":sort by title asc" },
@@ -179,9 +179,9 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":filter unplayed", ":filter toggle" },
                 Category: HelpCategory.SortFilter, Rank: 24),
 
-            new(":player", "Place the player bar.",
+            new(":audioPlayer", "Place the audioPlayer bar.",
                 "[top|bottom|toggle]",
-                Examples: new[]{ ":player top", ":player toggle" },
+                Examples: new[]{ ":audioPlayer top", ":audioPlayer toggle" },
                 Category: HelpCategory.PlayerTheme, Rank: 52),
 
             new(":theme", "Switch theme or toggle.",

@@ -107,7 +107,7 @@ internal sealed class UiPlayerPanel : FrameView
         try { SetNeedsDisplay(); Application.Top?.SetNeedsDisplay(); } catch { }
     }
 
-    public UiPlayerPanel() : base("Player")
+    public UiPlayerPanel() : base("AudioPlayer")
     {
         X = SidePad;
         Width  = Dim.Fill(SidePad * 2);

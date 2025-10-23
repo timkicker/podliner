@@ -56,7 +56,7 @@ class Program
     static AppData           _data = new();   // UI-Laufzeitstate
     static FeedService?      _feeds;
 
-    static SwappablePlayer?  _player;
+    static SwappableAudioPlayer?  _player;
     static PlaybackCoordinator? _playback;
     static MemoryLogSink     _memLog = new(2000);
     static DownloadManager?  _downloader;
@@ -114,11 +114,11 @@ class Program
 
         AppBridge.SyncFromFacadeToAppData(_app, _data);
 
-        // CLI: Engine-Präferenz vor Player-Erzeugung übernehmen
+        // CLI: Engine-Präferenz vor AudioPlayer-Erzeugung übernehmen
         if (!string.IsNullOrWhiteSpace(cli.Engine))
             _data.PreferredEngine = cli.Engine!.Trim().ToLowerInvariant();
 
-        // ---- Player / Engine service ----
+        // ---- AudioPlayer / Engine service ----
         _engineSvc = new EngineService(_data, _memLog);
         _player = _engineSvc.Create(out var engineInfo);
 
@@ -130,7 +130,7 @@ class Program
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
 
-        // ---- Apply Player Prefs ----
+        // ---- Apply AudioPlayer Prefs ----
         _engineSvc.ApplyPrefsTo(_player);
 
         // ---- UI init ----
@@ -185,7 +185,7 @@ class Program
             app: _app!,
             feeds: _feeds!,
             playback: _playback!,
-            player: _player!,
+            audioPlayer: _player!,
             save: _saver.RequestSaveAsync,
             engineSwitch: pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data),

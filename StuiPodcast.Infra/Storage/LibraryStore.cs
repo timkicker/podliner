@@ -1,44 +1,34 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
 {
-    /// <summary>
-    /// Persistenz für die Bibliothek (Feeds, Episoden, Queue, History) unter library/library.json
-    /// mit atomarem Write (.tmp → replace), Debounce-Saves und Grundvalidierung.
-    /// 
-    /// WICHTIG:
-    /// - KEINE Download-Felder in der Library.
-    /// - Call-Site (z. B. FeedService) sollte URLs bereits kanonisieren.
-    /// </summary>
+    // persistence for feeds, episodes, queue, history in library/library.json
+    // atomic write via temp file and replace
+    // debounced saves and basic validation
+    // no download fields in the library
+    // callers should canonicalize urls before storing
     public sealed class LibraryStore
     {
-        // Pfade
+        #region fields and state
+
+        // paths
         public string ConfigDirectory { get; }
         public string LibraryDirectory { get; }
         public string FilePath { get; }
         public string TmpPath  { get; }
 
-        // Status
-        public bool   IsReadOnly      => _readOnly;
-        public string? ReadOnlyReason => _readOnlyReason;
-
-        // Aktueller Stand (In-Memory)
+        // current in memory snapshot
         public Library Current { get; private set; } = new();
 
-        // Indizes (In-Memory, nicht persistiert)
+        // in memory indices, not persisted
         readonly Dictionary<Guid, Feed>    _feedsById    = new();
         readonly Dictionary<Guid, Episode> _episodesById = new();
 
         public event Action? Changed;
 
-        // JSON-Optionen
+        // json options
         readonly JsonSerializerOptions _readOptions = new()
         {
             AllowTrailingCommas = true,
@@ -52,7 +42,7 @@ namespace StuiPodcast.Infra.Storage
             DefaultIgnoreCondition = JsonIgnoreCondition.Never
         };
 
-        // Save-Steuerung
+        // save coordination
         readonly object _gate = new();
         Timer? _debounceTimer;
         TimeSpan _debounceInterval = TimeSpan.FromMilliseconds(2500);
@@ -61,6 +51,10 @@ namespace StuiPodcast.Infra.Storage
         volatile bool _readOnly;
         volatile string? _readOnlyReason;
 
+        #endregion
+
+        #region constructor
+
         public LibraryStore(string configDirectory, string? subFolder = "library", string fileName = "library.json")
         {
             if (string.IsNullOrWhiteSpace(configDirectory))
@@ -68,7 +62,7 @@ namespace StuiPodcast.Infra.Storage
 
             ConfigDirectory  = configDirectory;
 
-            // WICHTIG: wenn subFolder leer/null → direkt ins ConfigDirectory schreiben
+            // if subFolder is empty or null then write directly into config directory
             LibraryDirectory = string.IsNullOrWhiteSpace(subFolder)
                 ? ConfigDirectory
                 : Path.Combine(ConfigDirectory, subFolder);
@@ -77,11 +71,11 @@ namespace StuiPodcast.Infra.Storage
             TmpPath  = FilePath + ".tmp";
         }
 
+        #endregion
 
-        /// <summary>
-        /// Lädt oder erstellt eine leere Library. Ignoriert/entsorgt evtl. .tmp.
-        /// Führt Grundvalidierung/Normalisierung durch und baut Indizes.
-        /// </summary>
+        #region load and save
+
+        // load or create an empty library, remove stale temp, validate, build indices
         public Library Load()
         {
             Directory.CreateDirectory(LibraryDirectory);
@@ -101,7 +95,7 @@ namespace StuiPodcast.Infra.Storage
                 }
                 catch
                 {
-                    // Korrupt → leere Library
+                    // fall back to empty library on corrupt data
                     lib = new Library();
                 }
             }
@@ -112,9 +106,7 @@ namespace StuiPodcast.Infra.Storage
             return lib;
         }
 
-        /// <summary>
-        /// Debounced Save (Batch). Mehrere Mutationen in kurzem Abstand → ein Write.
-        /// </summary>
+        // debounced save, batches multiple mutations
         public void SaveAsync()
         {
             if (_readOnly) return;
@@ -132,9 +124,7 @@ namespace StuiPodcast.Infra.Storage
             }
         }
 
-        /// <summary>
-        /// Sofortiges Speichern (für :w / Abschluss). Überspringt Debounce.
-        /// </summary>
+        // immediate save, skips debounce
         public void SaveNow()
         {
             if (_readOnly) return;
@@ -156,14 +146,15 @@ namespace StuiPodcast.Infra.Storage
             }
             catch
             {
-                // Logging dem Caller überlassen
+                // leave logging to the caller
             }
         }
 
-        // ---------------------------
-        // Mutations-API (Convenience)
-        // ---------------------------
+        #endregion
 
+        #region mutations
+
+        // feed upsert
         public Feed AddOrUpdateFeed(Feed feed)
         {
             if (feed == null) throw new ArgumentNullException(nameof(feed));
@@ -171,7 +162,6 @@ namespace StuiPodcast.Infra.Storage
             if (string.IsNullOrWhiteSpace(feed.Title)) feed.Title = string.Empty;
             feed.Url ??= string.Empty;
 
-            // Upsert
             if (_feedsById.TryGetValue(feed.Id, out var existing))
             {
                 existing.Title = feed.Title;
@@ -188,6 +178,7 @@ namespace StuiPodcast.Infra.Storage
             return _feedsById[feed.Id];
         }
 
+        // episode upsert, preserves usage flags
         public Episode AddOrUpdateEpisode(Episode ep)
         {
             if (ep == null) throw new ArgumentNullException(nameof(ep));
@@ -207,14 +198,13 @@ namespace StuiPodcast.Infra.Storage
 
             if (_episodesById.TryGetValue(ep.Id, out var existing))
             {
-                // Nur Metadaten updaten; Nutzungsstatus bleibt erhalten
+                // update metadata only
                 existing.Title = ep.Title;
                 existing.AudioUrl = ep.AudioUrl;
                 existing.RssGuid = ep.RssGuid;
                 existing.PubDate = ep.PubDate;
                 existing.DurationMs = ep.DurationMs;
                 existing.DescriptionText = ep.DescriptionText;
-                // Saved/Progress/ManuallyMarkedPlayed bewusst nicht überschreiben
             }
             else
             {
@@ -261,7 +251,7 @@ namespace StuiPodcast.Infra.Storage
             SaveAsync();
         }
 
-        // Queue-Operationen
+        // queue operations
         public void QueuePush(Guid episodeId)
         {
             if (!_episodesById.ContainsKey(episodeId))
@@ -278,10 +268,7 @@ namespace StuiPodcast.Infra.Storage
             return removed;
         }
 
-        /// <summary>
-        /// Entfernt alle Einträge in der Queue bis einschließlich episodeId (typisch: „bis aktuelles“).
-        /// Wenn episodeId nicht gefunden wird, wird nichts entfernt.
-        /// </summary>
+        // removes entries up to and including the given episode id
         public void QueueTrimBefore(Guid episodeId)
         {
             var idx = Current.Queue.IndexOf(episodeId);
@@ -299,7 +286,7 @@ namespace StuiPodcast.Infra.Storage
             SaveAsync();
         }
 
-        // History
+        // history operations
         public void HistoryAdd(Guid episodeId, DateTimeOffset atUtc)
         {
             if (!_episodesById.ContainsKey(episodeId))
@@ -316,9 +303,9 @@ namespace StuiPodcast.Infra.Storage
             SaveAsync();
         }
 
-        // ---------------------------
-        // Interna
-        // ---------------------------
+        #endregion
+
+        #region internals
 
         void TryPerformDebouncedSave()
         {
@@ -342,7 +329,7 @@ namespace StuiPodcast.Infra.Storage
             }
             catch
             {
-                // Logging dem Caller überlassen
+                // leave logging to the caller
             }
             finally
             {
@@ -354,7 +341,7 @@ namespace StuiPodcast.Infra.Storage
         {
             Directory.CreateDirectory(LibraryDirectory);
 
-            // (1) Serialisieren → .tmp
+            // serialize into temp and flush
             using (var fs = File.Open(TmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = _writeOptions.WriteIndented });
@@ -363,7 +350,7 @@ namespace StuiPodcast.Infra.Storage
                 try { fs.Flush(true); } catch { /* best effort */ }
             }
 
-            // (2) Replace/Move → Ziel
+            // replace target or move temp into place
             if (File.Exists(FilePath))
             {
                 try
@@ -381,7 +368,7 @@ namespace StuiPodcast.Infra.Storage
                 File.Move(TmpPath, FilePath);
             }
 
-            // (3) Cleanup
+            // cleanup temp
             try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch { /* best effort */ }
         }
 
@@ -412,7 +399,7 @@ namespace StuiPodcast.Infra.Storage
 
             lib.SchemaVersion = lib.SchemaVersion <= 0 ? 1 : lib.SchemaVersion;
 
-            // Feeds deduplizieren & säubern
+            // feed cleanup and dedupe
             var feedMap = new Dictionary<Guid, Feed>();
             foreach (var f in lib.Feeds ?? new List<Feed>())
             {
@@ -428,13 +415,13 @@ namespace StuiPodcast.Infra.Storage
 
             var validFeedIds = new HashSet<Guid>(lib.Feeds.Select(x => x.Id));
 
-            // Episoden deduplizieren & säubern
+            // episode cleanup and dedupe
             var episodeMap = new Dictionary<Guid, Episode>();
             foreach (var e in lib.Episodes ?? new List<Episode>())
             {
                 if (e == null) continue;
                 if (e.Id == Guid.Empty) e.Id = Guid.NewGuid();
-                if (!validFeedIds.Contains(e.FeedId)) continue; // verwaiste Episode verwerfen
+                if (!validFeedIds.Contains(e.FeedId)) continue;
 
                 e.Title ??= string.Empty;
                 e.AudioUrl ??= string.Empty;
@@ -456,7 +443,7 @@ namespace StuiPodcast.Infra.Storage
 
             var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
 
-            // Queue & History bereinigen
+            // queue and history cleanup
             if (lib.Queue == null) lib.Queue = new List<Guid>();
             lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
 
@@ -476,5 +463,7 @@ namespace StuiPodcast.Infra.Storage
             try { if (File.Exists(TmpPath)) File.Delete(TmpPath); }
             catch { /* best effort */ }
         }
+
+        #endregion
     }
 }

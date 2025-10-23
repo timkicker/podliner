@@ -2,9 +2,6 @@ using Serilog;
 
 namespace StuiPodcast.App.Command.Handler;
 
-// ==========================================================
-// Error handlers
-// ==========================================================
 static class CmdErrorHandlers
 {
     public static void Install()

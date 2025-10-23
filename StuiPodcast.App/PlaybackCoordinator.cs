@@ -18,7 +18,7 @@ sealed class PlaybackCoordinator
 {
     // ---- Dependencies / State --------------------------------------------------
     private readonly AppData _data;
-    private readonly IPlayer _player;
+    private readonly IAudioPlayer _audioPlayer;
     private readonly Func<Task> _saveAsync;
     private readonly MemoryLogSink _mem;
 
@@ -61,10 +61,10 @@ sealed class PlaybackCoordinator
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
-    public PlaybackCoordinator(AppData data, IPlayer player, Func<Task> saveAsync, MemoryLogSink mem)
+    public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem)
     {
         _data = data;
-        _player = player;
+        _audioPlayer = audioPlayer;
         _saveAsync = saveAsync;
         _mem = mem;
     }
@@ -113,7 +113,7 @@ sealed class PlaybackCoordinator
 
         // 1) Erst sauber starten (ohne Startoffset, stabilisiert Demux)
         FireStatus(PlaybackStatus.Loading);
-        _player.Play(ep.AudioUrl, null);
+        _audioPlayer.Play(ep.AudioUrl, null);
 
         // 2) Danach einmalig resumen, wenn gewünscht – aber session-sicher
         if (startMs is long want && want > 0)
@@ -127,16 +127,16 @@ sealed class PlaybackCoordinator
             sid,
             ep.Id,
             TimeSpan.Zero,
-            _player.State.Length ?? TimeSpan.Zero,
-            _player.State.IsPlaying,
-            _player.State.Speed,
+            _audioPlayer.State.Length ?? TimeSpan.Zero,
+            _audioPlayer.State.IsPlaying,
+            _audioPlayer.State.Speed,
             DateTimeOffset.Now
         );
         FireSnapshot(_lastSnapshot);
     }
 
     /// <summary>
-    /// Wird regelmäßig aus Player.StateChanged + UI-Timer aufgerufen.
+    /// Wird regelmäßig aus AudioPlayer.StateChanged + UI-Timer aufgerufen.
     /// Persistiert Fortschritt, markiert Played, schlägt Auto-Advance vor und
     /// triggert leichte UI-Refreshs. Außerdem erzeugt sie genau EINEN
     /// atomischen Fortschritts-Snapshot (Position & Länge) für die UI.
@@ -257,9 +257,9 @@ sealed class PlaybackCoordinator
                     try
                     {
                         if (sid != _sid) return; // Session-Check auch hier
-                        var lenMs = _player.State.Length?.TotalMilliseconds ?? 0;
+                        var lenMs = _audioPlayer.State.Length?.TotalMilliseconds ?? 0;
                         if (lenMs > 0 && ms > lenMs - 10_000) return; // nahe Ende ignorieren
-                        _player.SeekTo(TimeSpan.FromMilliseconds(ms));
+                        _audioPlayer.SeekTo(TimeSpan.FromMilliseconds(ms));
                     }
                     catch { /* ignore */ }
                 });
@@ -310,7 +310,7 @@ sealed class PlaybackCoordinator
 
     /// <summary>
     /// Robuste End-Erkennung.
-    /// - Priorität: *Player*-Länge (falls vorhanden).
+    /// - Priorität: *AudioPlayer*-Länge (falls vorhanden).
     /// - Fallback: effektive Länge = max(PlayerLen, MetaLen, Pos).
     /// - Stall-Fälle: IsPlaying==false & (Rest sehr klein bzw. pos≈len).
     /// </summary>
@@ -323,7 +323,7 @@ sealed class PlaybackCoordinator
         effLenMs = Math.Max(Math.Max(lenMsPlayer, lenMsMeta), posMs); // nie kleiner als Pos
         if (effLenMs <= 0) return false;
 
-        // Primär gegen die *Player*-Länge prüfen (am zuverlässigsten)
+        // Primär gegen die *AudioPlayer*-Länge prüfen (am zuverlässigsten)
         if (lenMsPlayer > 0)
         {
             var remainPlayer = Math.Max(0, lenMsPlayer - posMs);
@@ -338,7 +338,7 @@ sealed class PlaybackCoordinator
                 return true;
         }
 
-        // Fallback gegen effLenMs (falls Player-Länge 0 bleibt)
+        // Fallback gegen effLenMs (falls AudioPlayer-Länge 0 bleibt)
         var remainEff = Math.Max(0, effLenMs - posMs);
         var ratioEff  = (double)posMs / Math.Max(1, effLenMs);
 

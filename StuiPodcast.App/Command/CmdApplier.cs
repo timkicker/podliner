@@ -18,7 +18,7 @@ static class CmdApplier
         CliEntrypoint.Options cli,
         UiShell ui,
         AppData data,
-        SwappablePlayer player,
+        SwappableAudioPlayer audioPlayer,
         PlaybackCoordinator playback,
         MemoryLogSink memLog,
         Func<Task> save,
@@ -29,19 +29,19 @@ static class CmdApplier
         {
             try
             {
-                if (ui == null || player == null || playback == null || downloader == null) return;
+                if (ui == null || audioPlayer == null || playback == null || downloader == null) return;
 
                 if (cli.Offline)
-                    CmdRouter.Handle(":net offline", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                    CmdRouter.Handle(":net offline", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
 
                 if (!string.IsNullOrWhiteSpace(cli.Engine))
-                    CmdRouter.Handle($":engine {cli.Engine}", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                    CmdRouter.Handle($":engine {cli.Engine}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlExport))
                 {
                     var path = cli.OpmlExport!;
                     Log.Information("cli/opml export path={Path}", path);
-                    CmdRouter.Handle($":opml export {path}", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                    CmdRouter.Handle($":opml export {path}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlImport))
@@ -81,19 +81,19 @@ static class CmdApplier
                         }
 
                         var path = cli.OpmlImport!.Contains(' ') ? $"\"{cli.OpmlImport}\"" : cli.OpmlImport!;
-                        CmdRouter.Handle($":opml import {path}", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                        CmdRouter.Handle($":opml import {path}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
                     }
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Feed))
                 {
                     var f = cli.Feed!.Trim();
-                    CmdRouter.Handle($":feed {f}", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                    CmdRouter.Handle($":feed {f}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Search))
                 {
-                    CmdRouter.Handle($":search {cli.Search}", player, playback, ui, memLog, data, save, downloader, engineSwitch);
+                    CmdRouter.Handle($":search {cli.Search}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch);
                 }
             }
             catch { }

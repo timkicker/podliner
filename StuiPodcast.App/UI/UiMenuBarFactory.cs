@@ -137,7 +137,7 @@ internal static class UiMenuBarFactory
 
             new MenuBarItem("_View", new[]
             {
-                Act("Toggle _Player Position (Ctrl+P)", "Top/bottom player bar", () => cb.Command(":player toggle")),
+                Act("Toggle _Player Position (Ctrl+P)", "Top/bottom audioPlayer bar", () => cb.Command(":audioPlayer toggle")),
                 Act("Toggle _Theme (t)", "Switch base/menu accent", cb.ToggleTheme),
                 Cmd("Filter: _Unplayed (u)", "", ":filter toggle"),
             }),
@@ -160,7 +160,7 @@ internal static class UiMenuBarFactory
             {
                 Act("_Keys & Commands (:h)", "Help browser", () => StuiPodcast.App.UI.UiHelpBrowserDialog.Show()),
                 Act("_Logs (F12)", "Show logs overlay", () => cb.Command(":logs")),
-                Act("_About", "", () => MessageBox.Query("About", "Podliner: TUI podcast player", "OK")),
+                Act("_About", "", () => MessageBox.Query("About", "Podliner: TUI podcast audioPlayer", "OK")),
             }),
         });
 

@@ -24,7 +24,7 @@ static class CmdRouter
 
     public static void Handle(
         string raw,
-        IPlayer player,
+        IAudioPlayer audioPlayer,
         PlaybackCoordinator playback,
         UiShell ui,
         MemoryLogSink mem,
@@ -54,7 +54,7 @@ static class CmdRouter
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(player, playback, ui, mem, data, persist, dlm, switchEngine);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine);
 
         // Dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);

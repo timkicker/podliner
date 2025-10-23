@@ -1,18 +1,16 @@
-using System;
 using System.Diagnostics;
-using System.IO;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Player;
 
-public sealed class MpvAudioPlayer : IPlayer
+public sealed class MpvAudioAudioPlayer : IAudioPlayer
 {
+    #region fields and ctor
+
     public event Action<PlayerState>? StateChanged;
 
     public PlayerState State { get; } = new()
@@ -31,17 +29,20 @@ public sealed class MpvAudioPlayer : IPlayer
     private Timer? _poll;
     private volatile bool _disposed;
 
-    // Ready-Gate: Erst wenn wir das erste Mal valide time-pos oder duration erhalten haben,
-    // wird IsPlaying = true gesetzt und ein StateChanged gefeuert.
+    // ready gate: set isplaying to true only after first valid time or duration update
     private bool _ready;
 
-    public MpvAudioPlayer()
+    public MpvAudioAudioPlayer()
     {
-        // mpv IPC braucht Unix Domain Sockets (Linux/macOS)
+        // mpv ipc needs unix domain sockets on linux and macos
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
             !RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             throw new PlatformNotSupportedException("mpv IPC requires Unix domain sockets (Linux/macOS)");
     }
+
+    #endregion
+
+    #region public api
 
     public void Play(string url, long? startMs = null)
     {
@@ -52,24 +53,23 @@ public sealed class MpvAudioPlayer : IPlayer
         {
             StopInternal_NoEvents();
 
-            _ready = false;              // neue Session: noch nicht "ready"
-            State.IsPlaying = false;     // nicht optimistisch setzen
+            _ready = false;              // new session not ready yet
+            State.IsPlaying = false;     // do not set optimistically
             State.Position = TimeSpan.Zero;
             State.Length = null;
 
             sock = _sockPath = Path.Combine(
                 Path.GetTempPath(), $"podliner-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
 
-            try { if (File.Exists(sock)) File.Delete(sock); } catch { /* ignore */ }
+            try { if (File.Exists(sock)) File.Delete(sock); } catch { }
 
             started = StartMpvProcess(url, sock, startMs);
             _proc = started;
 
-            StartPolling(); // Timer, der regelmäßig TryUpdateFromMpv() aufruft
+            StartPolling(); // timer that calls tryupdatefrommpv regularly
         }
 
-        // Ein initiales StateChanged ist ok (UI kann darauf Loading anzeigen),
-        // aber ohne IsPlaying=true – das kommt erst nach dem ersten IPC-Read.
+        // fire initial state change without isplaying true so ui can show loading
         FireStateChanged();
     }
 
@@ -136,7 +136,9 @@ public sealed class MpvAudioPlayer : IPlayer
         Stop();
     }
 
-    // ---- intern ---------------------------------------------------------------
+    #endregion
+
+    #region helpers
 
     private Process StartMpvProcess(string url, string sockPath, long? startMs)
     {
@@ -148,14 +150,14 @@ public sealed class MpvAudioPlayer : IPlayer
             RedirectStandardOutput = true
         };
 
-        // Basis-Argumente (deterministischer, ruhiger Start)
+        // base args for quiet deterministic start
         psi.ArgumentList.Add("--no-video");
         psi.ArgumentList.Add("--really-quiet");
         psi.ArgumentList.Add("--terminal=no");
         psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
         psi.ArgumentList.Add("--keep-open=no");
 
-        // Startoffset (nur als Hint; Coordinator resumiert ggf. später einmalig)
+        // optional start offset hint
         if (startMs is long ms && ms > 0)
             psi.ArgumentList.Add($"--start={(ms / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
 
@@ -167,7 +169,7 @@ public sealed class MpvAudioPlayer : IPlayer
             bool raise = false;
             lock (_gate)
             {
-                // Bei Exit sofort auf nicht spielend
+                // on exit set not playing immediately
                 if (State.IsPlaying) { State.IsPlaying = false; raise = true; }
             }
             if (raise) FireStateChanged();
@@ -178,16 +180,13 @@ public sealed class MpvAudioPlayer : IPlayer
 
     private void StartPolling()
     {
-        // leichte Poll-Periode; der Timer ruft TryUpdateFromMpv() regelmäßig auf
-        // erster Tick nach kurzer Verzögerung, damit mpv IPC-Socket anlegt
-        _poll = new Timer(_ => { try { TryUpdateFromMpv(); } catch { /* swallow */ } },
+        // light polling period; first tick after short delay so socket exists
+        _poll = new Timer(_ => { try { TryUpdateFromMpv(); } catch { } },
                           null, dueTime: 250, period: 500);
     }
 
-    /// <summary>
-    /// Liest time-pos und duration via IPC und aktualisiert State.
-    /// Beim *ersten* erfolgreichen Read wird State.IsPlaying=true gesetzt (Ready-Gate).
-    /// </summary>
+    // read time and duration via ipc and update state
+    // on first successful read switch to playing via the ready gate
     private bool TryUpdateFromMpv()
     {
         if (_disposed) return false;
@@ -204,21 +203,21 @@ public sealed class MpvAudioPlayer : IPlayer
             bool raise = false;
             lock (_gate)
             {
-                // Position
+                // position
                 if (posVal is double p && p >= 0)
                 {
                     var ts = TimeSpan.FromSeconds(p);
                     if (ts != State.Position) { State.Position = ts; raise = true; }
                 }
 
-                // Länge
+                // length
                 if (durVal is double d && d > 0)
                 {
                     var ts = TimeSpan.FromSeconds(d);
                     if (State.Length != ts) { State.Length = ts; raise = true; }
                 }
 
-                // Ready-Gate: Erst jetzt "spielend"
+                // ready gate now playing
                 if (!_ready && (posVal is double pp && pp > 0 || durVal is double dd && dd > 0))
                 {
                     _ready = true;
@@ -245,7 +244,7 @@ public sealed class MpvAudioPlayer : IPlayer
             if (doc.RootElement.TryGetProperty("data", out var d))
                 return JsonSerializer.Deserialize<T>(d.GetRawText());
         }
-        catch { /* ignore */ }
+        catch { }
         return default;
     }
 
@@ -297,7 +296,9 @@ public sealed class MpvAudioPlayer : IPlayer
 
     private void FireStateChanged()
     {
-        var snapshot = State; // nur Referenz
-        try { StateChanged?.Invoke(snapshot); } catch { /* UI-Subscriber sollen App nicht crashen */ }
+        var snapshot = State;
+        try { StateChanged?.Invoke(snapshot); } catch { }
     }
+
+    #endregion
 }
