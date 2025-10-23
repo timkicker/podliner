@@ -1,6 +1,6 @@
 using Serilog;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Handler;
 
 // ==========================================================
 // Error handlers

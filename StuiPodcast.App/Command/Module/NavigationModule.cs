@@ -1,7 +1,7 @@
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class NavigationModule
 {
@@ -67,7 +67,7 @@ internal static class NavigationModule
         else if (feedId != VirtualFeeds.All) baseList = baseList.Where(e => e.FeedId == feedId);
 
         List<Episode> eps =
-            (feedId == VirtualFeeds.History)
+            feedId == VirtualFeeds.History
             ? baseList.OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
                       .ThenByDescending(e => e.Progress.LastPosMs).ToList()
             : baseList.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue).ToList();

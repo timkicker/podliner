@@ -1,4 +1,6 @@
-namespace StuiPodcast.App;
+using StuiPodcast.App.Command.Module;
+
+namespace StuiPodcast.App.Command.Handler;
 
 internal sealed class IoHandler : ICommandHandler
 {

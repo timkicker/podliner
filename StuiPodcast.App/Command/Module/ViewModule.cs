@@ -1,7 +1,7 @@
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class ViewModule
 {
@@ -89,8 +89,8 @@ internal static class ViewModule
             "base"   => Shell.ThemeMode.Base,
             "accent" => Shell.ThemeMode.MenuAccent,
             "native" => Shell.ThemeMode.Native,
-            "auto"   => (OperatingSystem.IsWindows() ? Shell.ThemeMode.Base : Shell.ThemeMode.MenuAccent),
-            _        => (OperatingSystem.IsWindows() ? Shell.ThemeMode.Base : Shell.ThemeMode.MenuAccent)
+            "auto"   => OperatingSystem.IsWindows() ? Shell.ThemeMode.Base : Shell.ThemeMode.MenuAccent,
+            _        => OperatingSystem.IsWindows() ? Shell.ThemeMode.Base : Shell.ThemeMode.MenuAccent
         };
 
         try { ui.SetTheme(mode); data.ThemePref = mode.ToString(); _ = persist(); ui.ShowOsd($"theme: {mode}"); }
@@ -105,7 +105,7 @@ internal static class ViewModule
         { data.SortBy = "pubdate"; data.SortDir = "desc"; _ = persist(); ui.ShowOsd("sort: pubdate desc"); return; }
 
         if (arg.Equals("reverse", StringComparison.OrdinalIgnoreCase))
-        { data.SortDir = (data.SortDir?.Equals("desc", StringComparison.OrdinalIgnoreCase) == true) ? "asc" : "desc"; _ = persist(); ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}"); return; }
+        { data.SortDir = data.SortDir?.Equals("desc", StringComparison.OrdinalIgnoreCase) == true ? "asc" : "desc"; _ = persist(); ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}"); return; }
 
         string[] keys = new[] { "pubdate", "title", "played", "progress", "feed" };
         var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

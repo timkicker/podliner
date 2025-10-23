@@ -3,7 +3,7 @@ using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class PlaybackModule
 {

@@ -11,6 +11,7 @@ using StuiPodcast.Infra;
 using StuiPodcast.Infra.Opml;
 using StuiPodcast.Infra.Player;
 using ThemeMode = StuiPodcast.App.UI.Shell.ThemeMode;
+using StuiPodcast.App.Command.Module;
 
 // ============================================================================
 // Public Facade

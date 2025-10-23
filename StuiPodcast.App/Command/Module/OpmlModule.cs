@@ -2,7 +2,7 @@ using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Opml;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class OpmlModule
 {
@@ -50,7 +50,7 @@ internal static class OpmlModule
 
         if (sub is "export")
         {
-            string? path = (argv.Length >= 2 ? argv[1] : null);
+            string? path = argv.Length >= 2 ? argv[1] : null;
             if (string.IsNullOrWhiteSpace(path))
                 path = OpmlIo.GetDefaultExportPath(baseName: "podliner-feeds.opml");
 

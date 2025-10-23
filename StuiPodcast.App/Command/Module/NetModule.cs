@@ -1,7 +1,7 @@
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class NetModule
 {

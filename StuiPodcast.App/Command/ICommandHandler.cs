@@ -1,4 +1,4 @@
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command;
 
 internal interface ICommandHandler
 {

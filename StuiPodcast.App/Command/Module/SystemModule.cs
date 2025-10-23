@@ -1,6 +1,6 @@
 using StuiPodcast.App.UI;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class SystemModule
 {

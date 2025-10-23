@@ -1,6 +1,8 @@
+using StuiPodcast.App.Command;
+using StuiPodcast.App.Command.Module;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Handler;
 
 internal sealed class PlaybackHandler : ICommandHandler
 {

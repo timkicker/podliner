@@ -2,7 +2,7 @@ using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class DownloadsModule
 {
@@ -13,7 +13,7 @@ internal static class DownloadsModule
         if (cmd.StartsWith(":downloads", StringComparison.OrdinalIgnoreCase))
         {
             var dparts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var sub = (dparts.Length > 1 ? dparts[1].ToLowerInvariant() : "");
+            var sub = dparts.Length > 1 ? dparts[1].ToLowerInvariant() : "";
 
             if (string.IsNullOrEmpty(sub))
             {
@@ -67,7 +67,7 @@ internal static class DownloadsModule
         if (ep == null) return true;
 
         var dlParts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var arg = (dlParts.Length > 1 ? dlParts[1].ToLowerInvariant() : "");
+        var arg = dlParts.Length > 1 ? dlParts[1].ToLowerInvariant() : "";
 
         switch (arg)
         {
@@ -144,8 +144,8 @@ internal static class DownloadsModule
         {
             var any = data.DownloadMap.Values
                 .Where(v => v.State == DownloadState.Done && !string.IsNullOrWhiteSpace(v.LocalPath))
-                .Select(v => System.IO.Path.GetDirectoryName(v.LocalPath!)!)
-                .FirstOrDefault(p => p != null && System.IO.Directory.Exists(p));
+                .Select(v => Path.GetDirectoryName(v.LocalPath!)!)
+                .FirstOrDefault(p => p != null && Directory.Exists(p));
             return any;
         }
         catch { return null; }

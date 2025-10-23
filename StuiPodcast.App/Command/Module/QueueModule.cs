@@ -1,7 +1,7 @@
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App;
+namespace StuiPodcast.App.Command.Module;
 
 internal static class QueueModule
 {
@@ -64,7 +64,7 @@ internal static class QueueModule
 
             case "move":
             {
-                var dir = (parts.Length >= 3 ? parts[2].ToLowerInvariant() : "down");
+                var dir = parts.Length >= 3 ? parts[2].ToLowerInvariant() : "down";
                 var sel = ui.GetSelectedEpisode(); if (sel == null) return true;
 
                 int idx = data.Queue.FindIndex(id => id == sel.Id);
