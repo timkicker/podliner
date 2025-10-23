@@ -15,6 +15,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 
 using StuiPodcast.App;
+using StuiPodcast.App.Command.Handler;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Player;
