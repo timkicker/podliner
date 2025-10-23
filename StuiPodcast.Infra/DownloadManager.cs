@@ -15,7 +15,7 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra
 {
-     class DownloadIndex
+    class DownloadIndex
     {
         public int SchemaVersion { get; set; } = 1;
         public List<Item> Items { get; set; } = new();
@@ -26,19 +26,6 @@ namespace StuiPodcast.Infra
         }
     }
 
-    
-    /// <summary>
-    /// Robuster Download-Manager mit:
-    /// - globalem Worker (Queue),
-    /// - pro-Job-Cancel,
-    /// - Timeouts (Connect/Overall/Read),
-    /// - Retry mit Exponential Backoff + Jitter (5xx/408/429/transiente Netzwerkfehler),
-    /// - atomarem Move nach .part-Datei,
-    /// - moderatem Progress-Reporting.
-    /// Öffentliche API & Events unverändert.
-    /// </summary>
-    
-    
     public sealed class DownloadManager : IDisposable
     {
         private readonly string _indexPath;
@@ -46,162 +33,159 @@ namespace StuiPodcast.Infra
 
         private readonly object _persistGate = new();
         private Timer? _persistTimer;
-        private volatile bool _persistPending;
 
         private readonly AppData _data;
-
-        // HttpClient mit vernünftigen Defaults; pro Request verwenden wir zusätzlich CTS für granularere Kontrolle
         private readonly HttpClient _http;
 
         private readonly object _gate = new();
 
-        private CancellationTokenSource? _cts;      // global worker CTS
+        private CancellationTokenSource? _cts;
         private Task? _worker;
 
-        // pro-Job Abbruch (für laufende Downloads)
         private readonly Dictionary<Guid, CancellationTokenSource> _running = new();
 
-        public event Action<Guid, DownloadStatus>? StatusChanged; // (episodeId, status)
+        public event Action<Guid, DownloadStatus>? StatusChanged;
 
-        // --- Tuning-Parameter (bei Bedarf zentral verstellen) ---
-        private const int CONNECT_TIMEOUT_MS   = 4000;   // Verbindungsaufbau
-        private const int REQUEST_TIMEOUT_MS   = 15000;  // gesamte HTTP-Anfrage, hart
-        private const int READ_TIMEOUT_MS      = 12000;  // pro Read/Chunk
-        private const int MAX_RETRIES          = 3;      // zusätzlich zum ersten Versuch → insgesamt max. 4 Versuche
-        private const int BACKOFF_BASE_MS      = 400;    // 0,4s → 0,8s → 1,6s (+ Jitter)
-        private const int PROGRESS_PULSE_MS    = 400;    // Progress-Events höchstens ~2.5x/s
+        private const int CONNECT_TIMEOUT_MS   = 4000;
+        private const int REQUEST_TIMEOUT_MS   = 15000;
+        private const int READ_TIMEOUT_MS      = 12000;
+        private const int MAX_RETRIES          = 3;
+        private const int BACKOFF_BASE_MS      = 400;
+        private const int PROGRESS_PULSE_MS    = 400;
 
         public DownloadManager(AppData data, string configDir)
         {
             _data = data;
 
-            _indexPath   = Path.Combine(configDir, "downloads.json");
+            _indexPath    = Path.Combine(configDir, "downloads.json");
             _indexTmpPath = _indexPath + ".tmp";
 
-            // SocketsHttpHandler ...
-            var handler = new SocketsHttpHandler { /* wie gehabt */ };
+            var handler = new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+                ConnectTimeout = TimeSpan.FromMilliseconds(CONNECT_TIMEOUT_MS),
+                AllowAutoRedirect = true,
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                MaxConnectionsPerServer = 6,
+                EnableMultipleHttp2Connections = true
+            };
+
             _http = new HttpClient(handler, disposeHandler: true)
             {
                 Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS)
             };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
-            _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
-            _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("deflate"));
-            _http.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("br"));
-
-            // NEU: beim Start Index laden
+       
             TryLoadIndex();
         }
-        
+
         void TryLoadIndex()
-{
-    try
-    {
-        if (!File.Exists(_indexPath)) return;
-
-        var json = File.ReadAllText(_indexPath);
-        var idx = JsonSerializer.Deserialize<DownloadIndex>(json, new JsonSerializerOptions
         {
-            PropertyNameCaseInsensitive = true,
-            AllowTrailingCommas = true,
-            ReadCommentHandling = JsonCommentHandling.Skip
-        }) ?? new DownloadIndex();
-
-        int restored = 0;
-        foreach (var it in idx.Items ?? new List<DownloadIndex.Item>())
-        {
-            if (it.EpisodeId == Guid.Empty) continue;
-            if (string.IsNullOrWhiteSpace(it.LocalPath)) continue;
-            if (!File.Exists(it.LocalPath)) continue;
-
-            // In-Memory wiederherstellen
-            _data.DownloadMap[it.EpisodeId] = new DownloadStatus
+            try
             {
-                State = DownloadState.Done,
-                LocalPath = it.LocalPath,
-                BytesReceived = 0,
-                TotalBytes = null,
-                UpdatedAt = DateTimeOffset.Now
+                if (!File.Exists(_indexPath)) return;
+
+                var json = File.ReadAllText(_indexPath);
+                var idx = JsonSerializer.Deserialize<DownloadIndex>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    AllowTrailingCommas = true,
+                    ReadCommentHandling = JsonCommentHandling.Skip
+                }) ?? new DownloadIndex();
+
+                int restored = 0;
+                foreach (var it in idx.Items ?? new List<DownloadIndex.Item>())
+                {
+                    if (it.EpisodeId == Guid.Empty) continue;
+                    if (string.IsNullOrWhiteSpace(it.LocalPath)) continue;
+                    if (!File.Exists(it.LocalPath)) continue;
+
+                    lock (_gate)
+                    {
+                        _data.DownloadMap[it.EpisodeId] = new DownloadStatus
+                        {
+                            State = DownloadState.Done,
+                            LocalPath = it.LocalPath,
+                            BytesReceived = 0,
+                            TotalBytes = null,
+                            UpdatedAt = DateTimeOffset.Now
+                        };
+                    }
+
+                    try { StatusChanged?.Invoke(it.EpisodeId, _data.DownloadMap[it.EpisodeId]); } catch { }
+                    restored++;
+                }
+
+                Log.Information("downloads: restored {Count} entries from index", restored);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "downloads: index load failed");
+            }
+        }
+
+        void SaveIndexDebounced()
+        {
+            lock (_persistGate)
+            {
+                _persistTimer ??= new Timer(_ =>
+                {
+                    try { TrySaveIndex(); }
+                    catch { }
+                }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+
+                _persistTimer.Change(TimeSpan.FromMilliseconds(800), Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        void TrySaveIndex()
+        {
+            List<DownloadIndex.Item> items;
+            lock (_gate)
+            {
+                items = _data.DownloadMap
+                    .Where(kv => kv.Value.State == DownloadState.Done &&
+                                 !string.IsNullOrWhiteSpace(kv.Value.LocalPath) &&
+                                 File.Exists(kv.Value.LocalPath))
+                    .Select(kv => new DownloadIndex.Item { EpisodeId = kv.Key, LocalPath = kv.Value.LocalPath! })
+                    .ToList();
+            }
+
+            var idx = new DownloadIndex { SchemaVersion = 1, Items = items };
+
+            var opts = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                DefaultIgnoreCondition = JsonIgnoreCondition.Never
             };
 
-            try { StatusChanged?.Invoke(it.EpisodeId, _data.DownloadMap[it.EpisodeId]); } catch { }
-            restored++;
+            Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
+            var tmp = _indexTmpPath;
+
+            using (var fs = File.Open(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
+                JsonSerializer.Serialize(writer, idx, opts);
+                writer.Flush();
+                try { fs.Flush(true); } catch { }
+            }
+
+            if (File.Exists(_indexPath))
+            {
+                try { File.Replace(tmp, _indexPath, null, ignoreMetadataErrors: true); }
+                catch (PlatformNotSupportedException)
+                {
+                    try { File.Delete(_indexPath); } catch { }
+                    File.Move(tmp, _indexPath);
+                }
+            }
+            else
+            {
+                File.Move(tmp, _indexPath);
+            }
+
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
         }
-
-        Serilog.Log.Information("downloads: restored {Count} entries from index", restored);
-    }
-    catch (Exception ex)
-    {
-        Serilog.Log.Debug(ex, "downloads: index load failed");
-    }
-}
-
-void SaveIndexDebounced()
-{
-    lock (_persistGate)
-    {
-        _persistPending = true;
-        _persistTimer ??= new Timer(_ =>
-        {
-            try { TrySaveIndex(); }
-            catch { }
-        }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-
-        _persistTimer.Change(TimeSpan.FromMilliseconds(800), Timeout.InfiniteTimeSpan);
-    }
-}
-
-void TrySaveIndex()
-{
-    List<DownloadIndex.Item> items;
-    lock (_gate)
-    {
-        items = _data.DownloadMap
-            .Where(kv => kv.Value.State == DownloadState.Done &&
-                         !string.IsNullOrWhiteSpace(kv.Value.LocalPath) &&
-                         File.Exists(kv.Value.LocalPath))
-            .Select(kv => new DownloadIndex.Item { EpisodeId = kv.Key, LocalPath = kv.Value.LocalPath! })
-            .ToList();
-    }
-
-    var idx = new DownloadIndex { SchemaVersion = 1, Items = items };
-
-    var opts = new JsonSerializerOptions
-    {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
-    };
-
-    Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
-    var tmp = _indexTmpPath;
-
-    // atomar schreiben
-    using (var fs = File.Open(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-    {
-        using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
-        JsonSerializer.Serialize(writer, idx, opts);
-        writer.Flush();
-        try { fs.Flush(true); } catch { }
-    }
-
-    if (File.Exists(_indexPath))
-    {
-        try { File.Replace(tmp, _indexPath, null, ignoreMetadataErrors: true); }
-        catch (PlatformNotSupportedException)
-        {
-            File.Delete(_indexPath);
-            File.Move(tmp, _indexPath);
-        }
-    }
-    else
-    {
-        File.Move(tmp, _indexPath);
-    }
-
-    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-}
-
-
 
         public void EnsureRunning()
         {
@@ -229,12 +213,23 @@ void TrySaveIndex()
         public void Dispose()
         {
             try { Stop(); } catch { }
+
+            try
+            {
+                var t = _worker;
+                if (t != null && !t.IsCompleted) t.Wait(2000);
+            }
+            catch { }
+
             try { _cts?.Dispose(); } catch { }
+
             lock (_gate)
             {
                 foreach (var kv in _running.Values) { try { kv.Cancel(); kv.Dispose(); } catch { } }
                 _running.Clear();
             }
+
+            try { _persistTimer?.Dispose(); } catch { }
             _http.Dispose();
         }
 
@@ -280,7 +275,7 @@ void TrySaveIndex()
                     try { jcts.Cancel(); } catch { }
                 }
                 if (pulsed) Monitor.Pulse(_gate);
-                
+
                 Log.Information("dl/cancel id={Id} removedFromQueue={Removed} wasRunning={WasRunning}",
                     episodeId, pulsed, _running.ContainsKey(episodeId));
             }
@@ -288,14 +283,14 @@ void TrySaveIndex()
 
         public DownloadState GetState(Guid episodeId)
         {
-            if (_data.DownloadMap.TryGetValue(episodeId, out var st))
-                return st.State;
+            lock (_gate)
+            {
+                if (_data.DownloadMap.TryGetValue(episodeId, out var st))
+                    return st.State;
+            }
             return DownloadState.None;
         }
 
-        // --------------------------------------------------------------------
-        // Worker-Loop
-        // --------------------------------------------------------------------
         private async Task WorkerLoopAsync(CancellationToken cancel)
         {
             while (!cancel.IsCancellationRequested)
@@ -311,11 +306,13 @@ void TrySaveIndex()
                     nextId = _data.DownloadQueue[0];
                     _data.DownloadQueue.RemoveAt(0);
                 }
-                
-                
+
                 Log.Debug("dl/worker pick id={Id} queueLeft={Queue}", nextId, _data.DownloadQueue.Count);
 
-                var ep = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
+                Episode? ep;
+                lock (_gate)
+                    ep = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
+
                 if (ep == null)
                 {
                     SetState(nextId, s => { s.State = DownloadState.Failed; s.Error = "Episode not found."; });
@@ -323,14 +320,17 @@ void TrySaveIndex()
                     continue;
                 }
 
-                // Bereits vorhanden?
-                if (_data.DownloadMap.TryGetValue(ep.Id, out var st0) &&
-                    st0.State == DownloadState.Done &&
-                    !string.IsNullOrWhiteSpace(st0.LocalPath) &&
-                    File.Exists(st0.LocalPath))
+                bool alreadyDone;
+                lock (_gate)
                 {
-                    // erledigt – still weiter
-                    Log.Information("dl/worker already-done id={Id} file=\"{Path}\"", ep.Id, st0.LocalPath);
+                    alreadyDone = _data.DownloadMap.TryGetValue(ep.Id, out var st0) &&
+                                  st0.State == DownloadState.Done &&
+                                  !string.IsNullOrWhiteSpace(st0.LocalPath) &&
+                                  File.Exists(st0.LocalPath);
+                }
+                if (alreadyDone)
+                {
+                    Log.Information("dl/worker already-done id={Id}", ep.Id);
                     continue;
                 }
 
@@ -340,11 +340,11 @@ void TrySaveIndex()
                     jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancel);
                     lock (_gate) { _running[ep.Id] = jobCts; }
 
-                    await DownloadWithRetriesAsync(ep, jobCts.Token);
+                    await DownloadWithRetriesAsync(ep, jobCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
-                    Log.Warning("dl/worker canceled id={Id}", ep.Id);
+                    Log.Information("dl/worker canceled id={Id}", ep.Id);
                     SetState(ep.Id, s => s.State = DownloadState.Canceled);
                 }
                 catch (Exception ex)
@@ -360,12 +360,8 @@ void TrySaveIndex()
             }
         }
 
-        // --------------------------------------------------------------------
-        // Retry-Hülle
-        // --------------------------------------------------------------------
         private async Task DownloadWithRetriesAsync(Episode ep, CancellationToken cancel)
         {
-            
             Exception? last = null;
             for (int attempt = 0; attempt <= MAX_RETRIES; attempt++)
             {
@@ -374,39 +370,24 @@ void TrySaveIndex()
 
                 try
                 {
-                    await DownloadOneAsync(ep, cancel);
-                    return; // success
+                    await DownloadOneAsync(ep, cancel).ConfigureAwait(false);
+                    return;
                 }
                 catch (OperationCanceledException)
                 {
-                    throw; // kein Retry auf Cancel
+                    throw;
                 }
-                catch (HttpRequestException ex) when (IsTransient(ex))
-                {
-                    last = ex;
-                }
-                catch (IOException ex) when (IsTransient(ex))
-                {
-                    last = ex;
-                }
-                catch (SocketException ex)
-                {
-                    last = ex;
-                }
-                catch (Exception ex)
-                {
-                    // Nicht offensichtlich transient → nur einmal probieren (kein weiterer Retry)
-                    last = ex;
-                    break;
-                }
+                catch (HttpRequestException ex) when (IsTransient(ex)) { last = ex; }
+                catch (IOException ex)        when (IsTransient(ex)) { last = ex; }
+                catch (SocketException ex)                              { last = ex; }
+                catch (Exception ex)                                    { last = ex; break; }
 
                 if (attempt < MAX_RETRIES)
                 {
-                    var delay = BackoffWithJitter(attempt);
-                    Log.Debug("dl/retry wait {Delay}ms id={Id} title={Title} cause={Cause}",
-                        delay, ep.Id, ep.Title, last?.GetType().Name ?? "?");
-                    try { await Task.Delay(delay, cancel); } catch (OperationCanceledException) { throw; }
-                    // Status sichtbar halten
+                    var delay = await ComputeRetryDelayAsync(last, attempt).ConfigureAwait(false);
+                    Log.Debug("dl/retry wait {Delay}ms id={Id} cause={Cause}",
+                        delay, ep.Id, last?.GetType().Name ?? "?");
+                    try { await Task.Delay(delay, cancel).ConfigureAwait(false); } catch (OperationCanceledException) { throw; }
                     SetState(ep.Id, s => s.State = DownloadState.Running);
                 }
             }
@@ -417,8 +398,7 @@ void TrySaveIndex()
 
         private static bool IsTransient(Exception ex)
         {
-            // Netzwerk / Zeitüberschreitungen / Abbrüche → retrybar
-            if (ex is HttpRequestException hre) return true;
+            if (ex is HttpRequestException) return true;
             if (ex is IOException ioex && ioex.InnerException is SocketException) return true;
             if (ex is IOException iox && iox.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)) return true;
             if (ex is SocketException) return true;
@@ -427,105 +407,163 @@ void TrySaveIndex()
 
         private static int BackoffWithJitter(int attempt0)
         {
-            var pow = 1 << attempt0; // 1,2,4,8
+            var pow = 1 << attempt0;
             var baseMs = BACKOFF_BASE_MS * pow;
             var jitter = Random.Shared.Next(0, 150);
             return Math.Min(baseMs + jitter, 4000);
         }
 
-        // --------------------------------------------------------------------
-        // Einzel-Download (ein Versuch)
-        // --------------------------------------------------------------------
+        private async Task<int> ComputeRetryDelayAsync(Exception? last, int attempt)
+        {
+            if (last is HttpRequestException hre && hre.Data != null && hre.Data.Contains("RetryAfterMs"))
+            {
+                var v = hre.Data["RetryAfterMs"];
+                if (v is int ms && ms > 0) return ms;
+            }
+            return BackoffWithJitter(attempt);
+        }
+
         private async Task DownloadOneAsync(Episode ep, CancellationToken outerCancel)
         {
             var url = ep.AudioUrl;
-            
-            
             if (string.IsNullOrWhiteSpace(url))
                 throw new InvalidOperationException("Episode has no AudioUrl");
 
-            // ---- Zielpfade vorbereiten ----
             var rootDir = ResolveDownloadRoot();
-            var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
-            var feedTitle = feed?.Title ?? "Podcast";
-            
+
+            string FeedTitle()
+            {
+                var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+                return feed?.Title ?? "Podcast";
+            }
+
+            var feedTitle = FeedTitle();
             Log.Information("dl/start id={Id} title={Title} url=\"{Url}\" feed=\"{Feed}\"",
                 ep.Id, ep.Title, url, feedTitle);
 
-
             var extFromUrl = PathSanitizer.GetExtension(url, ".mp3");
 
-            var targetPath = PathSanitizer.BuildDownloadPath(
+            var targetPathGuess = PathSanitizer.BuildDownloadPath(
                 baseDir: rootDir,
                 feedTitle: feedTitle,
                 episodeTitle: ep.Title ?? "episode",
                 urlOrExtHint: extFromUrl
             );
-            targetPath = PathSanitizer.EnsureUniquePath(targetPath);
+            targetPathGuess = PathSanitizer.EnsureUniquePath(targetPathGuess);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-            var tmpPath = targetPath + ".part";
-            Log.Debug("dl/paths id={Id} tmp=\"{Tmp}\" target=\"{Target}\"", ep.Id, tmpPath, targetPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(targetPathGuess)!);
+            var tmpPath = targetPathGuess + ".part";
 
+            bool resume = File.Exists(tmpPath);
+            long resumeFrom = 0;
+            if (resume)
+            {
+                try { resumeFrom = new FileInfo(tmpPath).Length; } catch { resumeFrom = 0; }
+            }
 
-            // --- Status: Running (früh) ---
             SetState(ep.Id, s =>
             {
                 s.State = DownloadState.Running;
-                s.LocalPath = targetPath;
-                s.BytesReceived = 0;
+                s.LocalPath = targetPathGuess;
+                s.BytesReceived = resume ? resumeFrom : 0;
                 s.TotalBytes = null;
                 s.Error = null;
             });
 
-            // Per-Request-CTS für präzisere Kontrolle (Gesamt + Read)
             using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
             reqCts.CancelAfter(REQUEST_TIMEOUT_MS);
 
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            req.Headers.UserAgent.ParseAdd("podliner/1.0");
+            if (resume && resumeFrom > 0)
+            {
+                req.Headers.Range = new RangeHeaderValue(resumeFrom, null);
+                Log.Information("dl/resume request id={Id} from={From}", ep.Id, resumeFrom);
+            }
 
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, reqCts.Token).ConfigureAwait(false);
 
-            // Retry-Signale bei 408/429/5xx → Exception werfen, damit Retry-Hülle greift
-            if ((int)resp.StatusCode == 408 || (int)resp.StatusCode == 429 || (int)resp.StatusCode >= 500)
+            if ((int)resp.StatusCode == 429)
             {
-                throw new HttpRequestException($"Server returned { (int)resp.StatusCode } {resp.ReasonPhrase }");
+                var retry = ParseRetryAfterMs(resp.Headers.RetryAfter);
+                var ex = new HttpRequestException($"429 Too Many Requests");
+                if (retry > 0) ex.Data["RetryAfterMs"] = retry;
+                throw ex;
             }
-            resp.EnsureSuccessStatusCode();
-            Log.Debug("dl/http ok id={Id} code={Code} len={Len} type={Type}",
-                ep.Id, (int)resp.StatusCode,
-                resp.Content.Headers.ContentLength?.ToString() ?? "?",
-                resp.Content.Headers.ContentType?.MediaType ?? "?");
 
-
-            var total = resp.Content.Headers.ContentLength;
-            SetState(ep.Id, s => s.TotalBytes = total);
-
-            // Content-Disposition → ggf. Endung feinjustieren
-            try
+            if ((int)resp.StatusCode == 408 || (int)resp.StatusCode >= 500)
             {
-                var cd = resp.Content.Headers.ContentDisposition;
-                var fn = cd?.FileNameStar ?? cd?.FileName;
-                if (!string.IsNullOrWhiteSpace(fn))
-                {
-                    var ext = PathSanitizer.GetExtension(fn.Trim('"'), extFromUrl);
-                    if (!string.IsNullOrWhiteSpace(ext) && !targetPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var dir = Path.GetDirectoryName(targetPath)!;
-                        var baseName = Path.GetFileNameWithoutExtension(targetPath);
-                        var newPath = Path.Combine(dir, baseName + ext);
-                        newPath = PathSanitizer.EnsureUniquePath(newPath);
-                        tmpPath = newPath + ".part";
-                        targetPath = newPath;
-                        Log.Debug("dl/filename-from-header id={Id} headerName=\"{Name}\" → ext=\"{Ext}\" newTarget=\"{Target}\"",
-                            ep.Id, fn, ext, targetPath);
+                throw new HttpRequestException($"Server returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+            }
 
-                        SetState(ep.Id, s => s.LocalPath = targetPath);
+            if (resume && resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+            {
+                Log.Information("dl/resume 416 → restart id={Id}, wiping .part", ep.Id);
+                try { File.Delete(tmpPath); } catch { }
+                resume = false;
+                resumeFrom = 0;
+
+                using var req2 = new HttpRequestMessage(HttpMethod.Get, url);
+                using var resp2 = await _http.SendAsync(req2, HttpCompletionOption.ResponseHeadersRead, reqCts.Token).ConfigureAwait(false);
+                resp2.EnsureSuccessStatusCode();
+
+                targetPathGuess = await ReceiveToFileAsync(resp2, ep, reqCts, tmpPath, targetPathGuess, allowHeaderFileNameAdjust: true, resumeFrom: 0).ConfigureAwait(false);
+                return;
+            }
+
+            resp.EnsureSuccessStatusCode();
+
+            targetPathGuess = await ReceiveToFileAsync(
+                resp, ep, reqCts, tmpPath, targetPathGuess,
+                allowHeaderFileNameAdjust: !resume,
+                resumeFrom: resumeFrom
+            ).ConfigureAwait(false);
+        }
+
+        // WICHTIG: Kein 'ref' mehr! Wir geben den finalen Zielpfad zurück.
+        private async Task<string> ReceiveToFileAsync(
+            HttpResponseMessage resp,
+            Episode ep,
+            CancellationTokenSource reqCts,
+            string tmpPath,
+            string targetPath,
+            bool allowHeaderFileNameAdjust,
+            long resumeFrom)
+        {
+            var total = resp.Content.Headers.ContentLength;
+            bool identityEncoding = !(resp.Content.Headers.ContentEncoding?.Any() ?? false);
+
+            string effectiveTargetPath = targetPath;
+            string effectiveTmpPath = tmpPath;
+
+            if (allowHeaderFileNameAdjust)
+            {
+                try
+                {
+                    var extHint = Path.GetExtension(effectiveTargetPath);
+                    var cd = resp.Content.Headers.ContentDisposition;
+                    var fn = cd?.FileNameStar ?? cd?.FileName;
+                    if (!string.IsNullOrWhiteSpace(fn))
+                    {
+                        var ext = PathSanitizer.GetExtension(fn.Trim('"'), string.IsNullOrWhiteSpace(extHint) ? ".mp3" : extHint);
+                        if (!string.IsNullOrWhiteSpace(ext) && !effectiveTargetPath.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var dir = Path.GetDirectoryName(effectiveTargetPath)!;
+                            var baseName = Path.GetFileNameWithoutExtension(effectiveTargetPath);
+                            var newPath = Path.Combine(dir, baseName + ext);
+                            newPath = PathSanitizer.EnsureUniquePath(newPath);
+
+                            effectiveTargetPath = newPath;
+                            effectiveTmpPath = newPath + ".part";
+                            Log.Debug("dl/filename-from-header id={Id} → newTarget=\"{Target}\"", ep.Id, effectiveTargetPath);
+
+                            SetState(ep.Id, s => s.LocalPath = effectiveTargetPath);
+                        }
                     }
                 }
+                catch { }
             }
-            catch { /* optional */ }
+
+            SetState(ep.Id, s => s.TotalBytes = (total.HasValue ? total + resumeFrom : null));
 
             long bytesEmitted = 0;
             var lastPulse = DateTime.UtcNow;
@@ -533,16 +571,13 @@ void TrySaveIndex()
             try
             {
                 await using var net = await resp.Content.ReadAsStreamAsync(reqCts.Token).ConfigureAwait(false);
-                await using var file = File.Create(tmpPath);
+                await using var file = new FileStream(effectiveTmpPath, resumeFrom > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
 
                 var buf = new byte[64 * 1024];
-                
                 var sw = System.Diagnostics.Stopwatch.StartNew();
 
-                
                 while (true)
                 {
-                    // Read mit separatem Read-Timeout absichern
                     using var readCts = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
                     readCts.CancelAfter(READ_TIMEOUT_MS);
                     var n = await net.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token).ConfigureAwait(false);
@@ -555,7 +590,9 @@ void TrySaveIndex()
                     if ((now - lastPulse).TotalMilliseconds >= PROGRESS_PULSE_MS)
                     {
                         lastPulse = now;
-                        var cg = bytesEmitted; var ct = total;
+                        var cg = resumeFrom + bytesEmitted;
+                        var ct = (total.HasValue ? resumeFrom + total.Value : (long?)null);
+
                         SetState(ep.Id, s =>
                         {
                             s.BytesReceived = cg;
@@ -565,105 +602,197 @@ void TrySaveIndex()
                     }
                 }
 
-                // Verifying
+                await file.FlushAsync(reqCts.Token).ConfigureAwait(false);
+                sw.Stop();
+
                 SetState(ep.Id, s => s.State = DownloadState.Verifying);
+                var fi = new FileInfo(effectiveTmpPath);
+                if (identityEncoding && total.HasValue)
+                {
+                    long expected = resumeFrom + total.Value;
+                    long have = fi.Length;
 
-                var fi = new FileInfo(tmpPath);
-                Log.Warning("dl/verify-size-mismatch id={Id} have={Have} expected={Expected}", ep.Id, fi.Length, total.Value);
-                if (total.HasValue && fi.Length != total.Value)
-                    throw new IOException($"Size mismatch after download (have {fi.Length}, expected {total.Value}).");
+                    if (have != expected)
+                    {
+                        const long TOLERANCE_BYTES = 64 * 1024; // optional
+                        if (Math.Abs(have - expected) > TOLERANCE_BYTES)
+                        {
+                            Log.Warning("dl/verify size-mismatch id={Id} have={Have} expected={Expected}", ep.Id, have, expected);
+                            throw new IOException($"Size mismatch after download (have {have}, expected {expected}).");
+                        }
+                        else
+                        {
+                            Log.Warning("dl/verify tolerated-mismatch id={Id} have={Have} expected={Expected}", ep.Id, have, expected);
+                        }
+                    }
+                    else
+                    {
+                        Log.Debug("dl/verify ok id={Id} size={Size}", ep.Id, have);
+                    }
+                }
 
-                // Atomar finalisieren
-                if (File.Exists(targetPath)) File.Delete(targetPath);
-                File.Move(tmpPath, targetPath);
+
+                // Atomar/failsafe finalisieren
+                try
+                {
+                    var destDir = Path.GetDirectoryName(effectiveTargetPath)!;
+                    Directory.CreateDirectory(destDir); // falls sich der Name per Header geändert hat
+
+                    if (File.Exists(effectiveTargetPath))
+                    {
+                        // Wenn Ziel existiert, ist Replace ideal (erhält Metadaten besser als Move)
+                        try
+                        {
+                            // Optional: Backup-Datei weglassen -> null ist NICHT erlaubt; also kleine temp-backup verwenden
+                            var backup = Path.Combine(destDir, ".backup_" + Path.GetFileName(effectiveTargetPath));
+                            File.Replace(effectiveTmpPath, effectiveTargetPath, backup, ignoreMetadataErrors: true);
+                            try { if (File.Exists(backup)) File.Delete(backup); } catch { }
+                        }
+                        catch (PlatformNotSupportedException)
+                        {
+                            // Fallback: Move mit Overwrite
+#if NET6_0_OR_GREATER
+                            File.Move(effectiveTmpPath, effectiveTargetPath, overwrite: true);
+#else
+            File.Delete(effectiveTargetPath);
+            File.Move(effectiveTmpPath, effectiveTargetPath);
+#endif
+                        }
+                    }
+                    else
+                    {
+                        // Ziel existiert nicht -> einfach Move (Replace würde hier FileNotFoundException werfen)
+#if NET6_0_OR_GREATER
+                        File.Move(effectiveTmpPath, effectiveTargetPath, overwrite: false);
+#else
+        File.Move(effectiveTmpPath, effectiveTargetPath);
+#endif
+                    }
+                }
+                catch
+                {
+                    try { if (File.Exists(effectiveTmpPath)) File.Delete(effectiveTmpPath); } catch { }
+                    throw;
+                }
 
                 
-                sw.Stop();
-                var mb = bytesEmitted / (1024.0 * 1024.0);
+                var mb = (resumeFrom + bytesEmitted) / (1024.0 * 1024.0);
                 var mbps = mb / Math.Max(0.001, sw.Elapsed.TotalSeconds);
                 Log.Information("dl/done id={Id} wrote={MB:F1} MB dur={Sec:F2}s avg={MBps:F2} MB/s -> \"{Path}\"",
-                    ep.Id, mb, sw.Elapsed.TotalSeconds, mbps, targetPath);
+                    ep.Id, mb, sw.Elapsed.TotalSeconds, mbps, effectiveTargetPath);
 
-                
-                StatusChanged?.Invoke(ep.Id, new DownloadStatus {
-                    State = DownloadState.Done,
-                });
                 SetState(ep.Id, s =>
                 {
                     s.State = DownloadState.Done;
-                    s.LocalPath = targetPath;
+                    s.LocalPath = effectiveTargetPath;
                     s.Error = null;
+                    s.BytesReceived = resumeFrom + bytesEmitted;
+                    s.TotalBytes = resumeFrom + (total ?? (resumeFrom + bytesEmitted));
                 });
-                SaveIndexDebounced();
 
+                SaveIndexDebounced();
+                return effectiveTargetPath;
             }
             catch
             {
-                Log.Warning("dl/cleanup tmp-delete id={Id} tmp=\"{Tmp}\" exists={Exists}", ep.Id, tmpPath, File.Exists(tmpPath));
-                try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
+                Log.Information("dl/tmp kept for resume id={Id} tmp=\"{Tmp}\" exists={Exists}", ep.Id, effectiveTmpPath, File.Exists(effectiveTmpPath));
                 throw;
             }
         }
 
+        private int ParseRetryAfterMs(RetryConditionHeaderValue? retryAfter)
+        {
+            if (retryAfter == null) return 0;
+            if (retryAfter.Delta.HasValue)
+            {
+                var ms = (int)Math.Clamp(retryAfter.Delta.Value.TotalMilliseconds, 0, 120_000);
+                return ms;
+            }
+            if (retryAfter.Date.HasValue)
+            {
+                var delta = retryAfter.Date.Value - DateTimeOffset.UtcNow;
+                var ms = (int)Math.Clamp(delta.TotalMilliseconds, 0, 120_000);
+                return ms;
+            }
+            return 0;
+        }
+
         private string ResolveDownloadRoot()
         {
-            var root = _data.DownloadDir;
-            if (string.IsNullOrWhiteSpace(root))
+            string root;
+            lock (_gate)
             {
-                // default: ~/Podcasts
-                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                root = Path.Combine(home, "Podcasts");
-                _data.DownloadDir = root;
+                root = _data.DownloadDir;
+                if (string.IsNullOrWhiteSpace(root))
+                {
+                    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    root = Path.Combine(home, "Podcasts");
+                    _data.DownloadDir = root;
+                }
             }
             Directory.CreateDirectory(root);
             Log.Debug("dl/root resolved dir=\"{Dir}\"", root);
-
             return root;
         }
 
         private void SetState(Guid epId, Action<DownloadStatus> mutate)
         {
-            var had = _data.DownloadMap.TryGetValue(epId, out var s);
-            var before = had ? new DownloadStatus {
-                State = s.State, BytesReceived = s.BytesReceived, TotalBytes = s.TotalBytes,
-                LocalPath = s.LocalPath, Error = s.Error, UpdatedAt = s.UpdatedAt
-            } : null;
+            DownloadStatus? before = null;
+            DownloadStatus st;
 
-            var st = had ? s! : new DownloadStatus();
-            mutate(st);
-            st.UpdatedAt = DateTimeOffset.Now;
-            _data.DownloadMap[epId] = st;
-
-            try { StatusChanged?.Invoke(epId, st); } catch { }
-
-            // Logging: nur bei State-Änderung oder signifikantem Fortschritt
-            if (!had || before!.State != st.State)
+            lock (_gate)
             {
-                Log.Information("dl/state id={Id} {From}→{To} bytes={Recv}/{Total} path=\"{Path}\" err={Err}",
-                    epId, had ? before!.State : DownloadState.None, st.State,
-                    st.BytesReceived, st.TotalBytes?.ToString() ?? "?", st.LocalPath, st.Error);
+                var had = _data.DownloadMap.TryGetValue(epId, out var s);
+                if (had)
+                {
+                    before = new DownloadStatus
+                    {
+                        State = s.State, BytesReceived = s.BytesReceived, TotalBytes = s.TotalBytes,
+                        LocalPath = s.LocalPath, Error = s.Error, UpdatedAt = s.UpdatedAt
+                    };
+                    st = s!;
+                }
+                else
+                {
+                    st = new DownloadStatus();
+                }
+
+                mutate(st);
+                st.UpdatedAt = DateTimeOffset.Now;
+                _data.DownloadMap[epId] = st;
+
+                if (before == null || before.State != st.State)
+                {
+                    Log.Information("dl/state id={Id} {From}→{To} bytes={Recv}/{Total} path=\"{Path}\" err={Err}",
+                        epId, before?.State ?? DownloadState.None, st.State,
+                        st.BytesReceived, st.TotalBytes?.ToString() ?? "?", st.LocalPath, st.Error);
+                }
+                else if (st.State == DownloadState.Running)
+                {
+                    const long STEP = 25L * 1024 * 1024;
+                    var crossed = (before.BytesReceived / STEP) != (st.BytesReceived / STEP);
+                    bool pctStep = false;
+                    if (st.TotalBytes is long tot && tot > 0)
+                    {
+                        var oldPct = (int)(before.BytesReceived * 100 / tot);
+                        var newPct = (int)(st.BytesReceived * 100 / tot);
+                        pctStep = (newPct / 10) != (oldPct / 10);
+                    }
+                    if (crossed || pctStep)
+                    {
+                        Log.Debug("dl/progress id={Id} bytes={Recv}/{Total} (~{Pct}%)",
+                            epId, st.BytesReceived, st.TotalBytes?.ToString() ?? "?",
+                            (st.TotalBytes is long t && t > 0) ? ((int)(st.BytesReceived * 100 / t)).ToString() : "?");
+                    }
+                }
             }
-            else if (st.State == DownloadState.Running)
+
+            try
             {
-                // alle ~25 MB (oder wenn Total bekannt: alle ~10%)
-                const long STEP = 25L * 1024 * 1024;
-                var crossed = (before!.BytesReceived / STEP) != (st.BytesReceived / STEP);
-                bool pctStep = false;
-                if (st.TotalBytes is long tot && tot > 0)
-                {
-                    var oldPct = (int)(before.BytesReceived * 100 / tot);
-                    var newPct = (int)(st.BytesReceived * 100 / tot);
-                    pctStep = (newPct / 10) != (oldPct / 10); // 0,10,20,...
-                }
-                if (crossed || pctStep)
-                {
-                    Log.Debug("dl/progress id={Id} bytes={Recv}/{Total} (~{Pct}%)",
-                        epId, st.BytesReceived, st.TotalBytes?.ToString() ?? "?",
-                        (st.TotalBytes is long t && t > 0) ? ((int)(st.BytesReceived * 100 / t)).ToString() : "?");
-                }
+                if (_data.DownloadMap.TryGetValue(epId, out var stNow))
+                    StatusChanged?.Invoke(epId, stNow);
             }
+            catch { }
         }
-
-
     }
 }
