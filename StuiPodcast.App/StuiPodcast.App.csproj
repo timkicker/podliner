@@ -19,13 +19,7 @@
         <!-- Native Runtimes NUR OS-spezifisch:
              - Windows: NuGet-paketiert
              - Linux/macOS: KEINE NuGet-Natives; System-Installation verwenden -->
-        <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20"
-                          Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <Folder Include="Command\Handler\" />
-      <Folder Include="Command\Module\" />
+        <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     </ItemGroup>
 
     <PropertyGroup>
