@@ -8,6 +8,9 @@ using AngleSharp.Html.Parser;
 using CodeHollow.FeedReader;
 using Serilog;
 using StuiPodcast.Core;
+using StuiPodcast.Infra.Storage;
+
+
 
 // Aliases
 using CoreFeed = StuiPodcast.Core.Feed;
@@ -118,7 +121,7 @@ public class FeedService
             if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
 
             var pub   = ParseDate(item);
-            var lenMs = (long)(TryGetDurationMs(item) ?? 0);
+            var lenMs = TryGetDurationMs(item) ?? 0;
             var desc  = HtmlToText(item.Content ?? item.Description ?? "");
             var title = item.Title ?? "(untitled)";
 

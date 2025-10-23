@@ -1,3 +1,4 @@
+using StuiPodcast.Infra.Download;
 using System;
 using System.IO;
 using System.Text;
@@ -44,7 +45,7 @@ namespace StuiPodcast.Infra.Opml
 
             // Windows Long-Path Unterstützung
             if (OperatingSystem.IsWindows() && Path.IsPathFullyQualified(path))
-                path = PathSanitizer.ApplyLongPathPrefix(path);
+                path = DownloadPathSanitizer.ApplyLongPathPrefix(path);
 
             // Schreiben (overwrite steuert, ob vorhandene Dateien ersetzt werden)
             var tmp = path + ".tmp";
@@ -76,7 +77,7 @@ namespace StuiPodcast.Infra.Opml
 
             var name = baseName;
             if (string.IsNullOrWhiteSpace(name)) name = "podliner-feeds.opml";
-            name = PathSanitizer.SanitizeFileName(name!);
+            name = DownloadPathSanitizer.SanitizeFileName(name!);
             if (!name.EndsWith(".opml", StringComparison.OrdinalIgnoreCase) && string.IsNullOrEmpty(Path.GetExtension(name)))
                 name += ".opml";
 
@@ -113,7 +114,7 @@ namespace StuiPodcast.Infra.Opml
                 leaf += ".opml";
 
             // Leaf sanitisieren (OS-gültiger Name, begrenzt)
-            leaf = PathSanitizer.SanitizeFileName(leaf);
+            leaf = DownloadPathSanitizer.SanitizeFileName(leaf);
 
             // Zur Sicherheit: Extension .opml sicherstellen
             if (!leaf.EndsWith(".opml", StringComparison.OrdinalIgnoreCase))
