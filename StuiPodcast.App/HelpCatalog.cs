@@ -1,8 +1,7 @@
-using System.Collections.Generic;
-using System.Linq;
 
 namespace StuiPodcast.App
 {
+    #region types
     public record KeyHelp(string Key, string Description, string? Notes = null);
 
     public enum HelpCategory
@@ -26,12 +25,13 @@ namespace StuiPodcast.App
         string[]? Aliases = null,
         string[]? Examples = null,
         HelpCategory Category = HelpCategory.Misc,
-        int Rank = 100 // 0 = sehr häufig / ganz oben in „Meistgenutzt“
+        int Rank = 100 // 0 = most used / top
     );
+    #endregion
 
     public static class HelpCatalog
     {
-        // ---------- KEY BINDS ----------
+        #region key binds
         public static readonly List<KeyHelp> Keys = new()
         {
             new("Space", "Toggle play/pause"),
@@ -61,11 +61,12 @@ namespace StuiPodcast.App
             new("F12", "Logs overlay"),
             new("q", "Quit"),
         };
+        #endregion
 
-        // ---------- COMMANDS ----------
+        #region commands
         public static readonly List<CmdHelp> Commands = new()
         {
-            // ===== Feeds =====
+            // feeds
             new(":add", "Add a new podcast feed by RSS/Atom URL.",
                 "<rss-url>",
                 Aliases: new[]{ ":a" },
@@ -87,7 +88,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":feed all", ":feed queue" },
                 Category: HelpCategory.Feeds, Rank: 35),
 
-            // ===== App / General =====
+            // app / general
             new(":help", "Show this help.",
                 Aliases: new[]{ ":h" },
                 Examples: new[]{ ":help", ":h" },
@@ -108,7 +109,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":osd Hello world" },
                 Category: HelpCategory.Misc, Rank: 90),
 
-            // ===== Playback =====
+            // playback
             new(":toggle", "Toggle pause/resume (if supported)",
                 Category: HelpCategory.Playback, Rank: 0),
 
@@ -117,7 +118,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":seek +10", ":seek 80%", ":seek 12:34", ":seek 01:02:03" },
                 Category: HelpCategory.Playback, Rank: 5),
 
-            new(":jump", "Seek using the same syntax as :seek (alias/QoL).",
+            new(":jump", "Seek using the same syntax as :seek (alias/qol).",
                 "<hh:mm[:ss]|+/-sec|%>",
                 Examples: new[]{ ":jump 10%", ":jump +90", ":jump 00:30" },
                 Category: HelpCategory.Playback, Rank: 45),
@@ -137,7 +138,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":speed 1.0", ":speed +0.1", ":speed -0.25" },
                 Category: HelpCategory.Playback, Rank: 22),
 
-            // ===== Navigation (Listen) =====
+            // navigation
             new(":next", "Select next item (no auto-play).",
                 Category: HelpCategory.Navigation, Rank: 38),
 
@@ -168,7 +169,7 @@ namespace StuiPodcast.App
                 Aliases: new[]{":H",":M",":L"},
                 Category: HelpCategory.Navigation, Rank: 55),
 
-            // ===== Sort/Filter/AudioPlayer/Theme =====
+            // sort/filter/player/theme
             new(":sort", "Sort the episode list.",
                 "show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]",
                 Examples: new[]{ ":sort show", ":sort reverse", ":sort by title asc" },
@@ -189,13 +190,13 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":theme", ":theme toggle", ":theme native" },
                 Category: HelpCategory.PlayerTheme, Rank: 58),
 
-            // ===== Flags & Downloads =====
+            // flags & downloads
             new(":save", "Toggle or set 'saved' (★) for selected episode.",
                 "[on|off|true|false|+|-]",
                 Examples: new[]{ ":save", ":save on", ":save -" },
                 Category: HelpCategory.Downloads, Rank: 44),
 
-            new(":download", "Mark/Unmark for download (auto-queued).",
+            new(":download", "Mark/unmark for download (auto-queued).",
                 "[start|cancel]",
                 Aliases: new[]{ ":dl" },
                 Examples: new[]{ ":download", ":download start", ":dl", ":dl cancel" },
@@ -206,7 +207,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":downloads", ":downloads retry-failed", ":downloads clear-queue", ":downloads open-dir" },
                 Category: HelpCategory.Downloads, Rank: 32),
 
-            // ===== Queue =====
+            // queue
             new(":queue", "Queue operations (selection-based).",
                 "add|toggle|rm|remove|clear|move <up|down|top|bottom>|shuffle|uniq",
                 Aliases: new[]{ "q" },
@@ -220,7 +221,7 @@ namespace StuiPodcast.App
                 },
                 Category: HelpCategory.Queue, Rank: 16),
 
-            // ===== Links & Clipboard =====
+            // links & clipboard
             new(":open", "Open episode website or audio in system default.",
                 "[site|audio]",
                 Examples: new[]{ ":open", ":open site", ":open audio" },
@@ -231,7 +232,7 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":copy", ":copy url", ":copy title", ":copy guid" },
                 Category: HelpCategory.Misc, Rank: 64),
 
-            // ===== Network / Engine / Source =====
+            // network / engine / source
             new(":net", "Set/toggle offline mode (affects list & window title).",
                 "online|offline|toggle",
                 Examples: new[]{ ":net", ":net offline", ":net toggle" },
@@ -247,13 +248,13 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":engine", ":engine mpv", ":engine help", ":engine diag" },
                 Category: HelpCategory.NetworkEngine, Rank: 48),
 
-            // ===== History =====
+            // history
             new(":history", "History actions (view-only feed).",
                 "clear | size <n>",
                 Examples: new[]{ ":history clear", ":history size 500" },
                 Category: HelpCategory.Feeds, Rank: 68),
 
-            // ===== OPML =====
+            // opml
             new(":opml", "Import or export OPML (feed migration).",
                 "import <path> [--update-titles] | export [<path>]",
                 Examples: new[]{
@@ -264,21 +265,21 @@ namespace StuiPodcast.App
                 },
                 Category: HelpCategory.OPML, Rank: 72),
         };
+        #endregion
 
-        // ---------- RENDER HELPERS ----------
-        // „Meistgenutzt“-Liste: zuerst nach Rank (aufsteigend), dann alphabetisch
+        #region render helpers
         public static IEnumerable<CmdHelp> MostUsed(int take = 8) =>
             Commands.OrderBy(c => c.Rank)
                     .ThenBy(c => c.Command, System.StringComparer.OrdinalIgnoreCase)
                     .Take(take);
 
-        // Gruppiert nach Kategorie; innerhalb der Kategorie alphabetisch
         public static ILookup<HelpCategory, CmdHelp> GroupedByCategory() =>
             Commands
                 .OrderBy(c => c.Command, System.StringComparer.OrdinalIgnoreCase)
                 .ToLookup(c => c.Category);
+        #endregion
 
-        // ---------- LONG DOCS ----------
+        #region long docs
         public static readonly string EngineDoc =
 @"Playback engines & capabilities
 
@@ -330,5 +331,6 @@ Examples
   :opml import feeds.opml --update-titles
   :opml export
   :opml export ~/stui-feeds.opml";
+        #endregion
     }
 }

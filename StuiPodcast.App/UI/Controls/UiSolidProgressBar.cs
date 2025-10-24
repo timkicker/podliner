@@ -3,11 +3,12 @@ using Terminal.Gui;
 
 namespace StuiPodcast.App.UI.Controls;
 
-/// <summary>Eine solide Progressbar (Track=BG, Fill=Accent-FG) mit Mouse-Seek.</summary>
+// solid progress bar with mouse seek
 internal sealed class UiSolidProgressBar : View
 {
     private DateTime _lastEmit = DateTime.MinValue;
     private float _fraction;
+
     public float Fraction
     {
         get => _fraction;
@@ -44,13 +45,10 @@ internal sealed class UiSolidProgressBar : View
             me.Flags.HasFlag(MouseFlags.Button1DoubleClicked) ||
             me.Flags.HasFlag(MouseFlags.Button1Released);
 
-        // Optional: kontinuierliches Draggen nur leicht drosseln
+        // drag throttled slightly
         bool isDrag = me.Flags.HasFlag(MouseFlags.ReportMousePosition) && me.Flags.HasFlag(MouseFlags.Button1Pressed);
         if (!(isDownLike || isDrag)) return base.MouseEvent(me);
-
-        // Drossel: max. alle 90 ms bei Drag
-        if (isDrag && DateTime.UtcNow - _lastEmit < TimeSpan.FromMilliseconds(90))
-            return true;
+        if (isDrag && DateTime.UtcNow - _lastEmit < TimeSpan.FromMilliseconds(90)) return true;
 
         int width = Math.Max(1, Bounds.Width - 1);
         int localX = Math.Clamp(me.X, 0, Math.Max(0, Bounds.Width - 1));

@@ -8,7 +8,7 @@ namespace StuiPodcast.App.UI
     /// Zentraler Zugriff auf alle TUI-Glyphen (Unicode oder ASCII-Fallback).
     /// Verwende diese Klasse statt harter Literale in UI-Renderern.
     /// </summary>
-    public static class GlyphSet
+    public static class UIGlyphSet
     {
         public enum Profile { Unicode, Ascii }
 

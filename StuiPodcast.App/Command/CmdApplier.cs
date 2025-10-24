@@ -9,10 +9,7 @@ using Terminal.Gui;
 
 namespace StuiPodcast.App.Command;
 
-// ==========================================================
-// Post-UI CLI flags applier
-// ==========================================================
-static class CmdApplier
+static class  CmdApplier
 {
     public static void ApplyPostUiFlags(
         CliEntrypoint.Options cli,

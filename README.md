@@ -148,7 +148,7 @@ Install examples:
 
 Engine selection & fallback:
 - Default is `auto` (prefer local download if available; else remote if online).
-- You can switch engines from within the UI (hot swap) {{CONFIRM KEY}}.
+- You can switch engines from via command `:engine vlc|mpv|ffplay `
 
 ## FAQ / Troubleshooting
 
@@ -211,14 +211,9 @@ dotnet run --project StuiPodcast.App
 **Guidelines (short):**
 - C# with `nullable` enabled; keep logging via Serilog.
 - Prioritize robustness and UX over features.
-- Open an issue before large refactors.
 
 **PR flow:**
 - Fork → branch → PR to `main`
-- Prefer squash merges; keep commit messages imperative and scoped.
-
-*(Optionally move details to `docs/contributing.md` later.)*
-
 
 ## Bug reports, logs & roadmap
 When filing an issue, please include:

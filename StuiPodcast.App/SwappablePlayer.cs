@@ -1,16 +1,14 @@
-using System;
-using System.Threading.Tasks;
+
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
 
 namespace StuiPodcast.App
 {
-    /// <summary>
-    /// Stabiler Proxy für IAudioPlayer, dessen innere Engine zur Laufzeit austauschbar ist.
-    /// Thread-safe: Öffentliche Methoden greifen auf einen Snapshot der aktuellen Engine zu.
-    /// </summary>
+    // stable proxy for iaudioplayer, engine can be swapped at runtime
     public sealed class SwappableAudioPlayer : IAudioPlayer, IDisposable
     {
+        #region fields and ctor
+
         private IAudioPlayer _inner;
         private readonly object _gate = new();
 
@@ -20,7 +18,11 @@ namespace StuiPodcast.App
             _inner.StateChanged += ForwardState;
         }
 
-        // Snapshot-Helfer: gibt die aktuell aktive Engine atomar zurück
+        #endregion
+
+        #region properties and events
+
+        // snapshot of current engine
         private IAudioPlayer Inner
         {
             get { lock (_gate) return _inner; }
@@ -43,9 +45,12 @@ namespace StuiPodcast.App
 
         public event Action<PlayerState>? StateChanged;
 
+        #endregion
+
+        #region playback controls
+
         public void Play(string url, long? startMs = null)
         {
-            // Snapshot, dann aufrufen
             var p = Inner;
             p.Play(url, startMs);
         }
@@ -86,6 +91,10 @@ namespace StuiPodcast.App
             p.Stop();
         }
 
+        #endregion
+
+        #region swapping and dispose
+
         public void Dispose()
         {
             IAudioPlayer old;
@@ -93,15 +102,12 @@ namespace StuiPodcast.App
             {
                 old = _inner;
                 _inner.StateChanged -= ForwardState;
-                // Kein Null setzen – wir behalten eine gültige Referenz bis Dispose durch ist
             }
 
-            try { old.Dispose(); } catch { /* robust */ }
+            try { old.Dispose(); } catch { }
         }
 
-        /// <summary>
-        /// Tauscht die Engine im Laufenden Betrieb aus. Optionaler Hook vor Dispose der alten Engine.
-        /// </summary>
+        // swap engine while running, optional hook before disposing old engine
         public async Task SwapToAsync(IAudioPlayer next, Action<IAudioPlayer>? onBeforeDispose = null)
         {
             if (next == null) throw new ArgumentNullException(nameof(next));
@@ -115,14 +121,20 @@ namespace StuiPodcast.App
                 _inner.StateChanged += ForwardState;
             }
 
-            try { onBeforeDispose?.Invoke(old); } catch { /* ignore */ }
-            await Task.Yield(); // sanfter Kontextwechsel
-            try { old.Dispose(); } catch { /* robust */ }
+            try { onBeforeDispose?.Invoke(old); } catch { }
+            await Task.Yield();
+            try { old.Dispose(); } catch { }
         }
+
+        #endregion
+
+        #region helpers
 
         private void ForwardState(PlayerState s)
         {
-            try { StateChanged?.Invoke(s); } catch { /* UI darf AudioPlayer nicht crashen */ }
+            try { StateChanged?.Invoke(s); } catch { }
         }
+
+        #endregion
     }
 }

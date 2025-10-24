@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-using System.Collections.Generic;
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
@@ -11,18 +8,15 @@ namespace StuiPodcast.App.UI;
 
 public sealed class UiShell
 {
-    // ---- Events/API wie vorher ----
+    #region events/api
+    // events/api same as before
+    public ThemeMode CurrentTheme => _theme;
+    public event Action<ThemeMode>? ThemeChanged;
 
+    private bool _suppressFeedSelectionEvents = false;
+    private Terminal.Gui.Label? _dlBadge;
+    private Terminal.Gui.MenuBar? _menu;
 
-public ThemeMode CurrentTheme => _theme;
-public event Action<ThemeMode>? ThemeChanged;
-
-
-private bool _suppressFeedSelectionEvents = false;
-
-private Terminal.Gui.Label? _dlBadge;
-
-private Terminal.Gui.MenuBar? _menu;
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
@@ -34,17 +28,19 @@ private Terminal.Gui.MenuBar? _menu;
     public event Action<string>? Command;
     public event Action<string>? SearchApplied;
     public event Action? SelectedFeedChanged;
+    #endregion
 
-    // ---- Konstanten / virtuelle Feeds ----
+    #region constants (virtual feeds)
     private static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
     private static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
     private static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-    private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157"); // ⏱ History
-    private static readonly Guid FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE"); // ⧉ Queue
-    private static readonly Guid FEED_SEPARATOR = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
+    private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
+    private static readonly Guid FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE");
+    private static readonly Guid FEED_SEPARATOR  = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
     private static bool IsSeparator(Guid? id) => id is Guid g && g == FEED_SEPARATOR;
+    #endregion
 
-    // Public helper: Theme gezielt setzen (1=Base, 2=MenuAccent, 3=Native)
+    #region theme shortcut
     public void SetThemeByNumber(int n)
     {
         var mode = n switch
@@ -57,18 +53,18 @@ private Terminal.Gui.MenuBar? _menu;
         _theme = mode;
         ApplyTheme();
     }
+    #endregion
 
-
-    // ---- State ----
+    #region state
     private readonly MemoryLogSink _mem;
     public enum ThemeMode { MenuAccent, Base, Native, User }
 
     private ThemeMode _theme;
-    private bool _playerAtTop   = false;
+    private bool _playerAtTop = false;
     private bool _startupPinned = false;
 
-    private string? _lastSearch  = null;
-    private Guid? _nowPlayingId  = null;
+    private string? _lastSearch = null;
+    private Guid? _nowPlayingId = null;
     private TimeSpan _lastEffLenTs = TimeSpan.Zero;
 
     private enum Pane { Feeds, Episodes }
@@ -76,8 +72,9 @@ private Terminal.Gui.MenuBar? _menu;
 
     private readonly List<Episode> _episodes = new();
     private readonly List<Feed> _feeds = new();
+    #endregion
 
-    // ---- UI-Komponenten ----
+    #region ui fields
     private Window? _mainWin;
     private View? _rightRoot;
     private UiPlayerPanel? _player;
@@ -87,49 +84,49 @@ private Terminal.Gui.MenuBar? _menu;
 
     private TextField? _commandBox;
     private TextField? _searchBox;
+    #endregion
 
+    #region ctor
     public UiShell(MemoryLogSink mem)
     {
         _mem = mem;
-        SetDefaultThemeForOS();   // ← NEU: OS-Default schon hier setzen
+        SetDefaultThemeForOS();
     }
+    #endregion
 
-
-    // ---- Helpers ----
+    #region helpers (ui invoke)
     private static void UI(Action a)
     {
         if (Application.MainLoop != null) Application.MainLoop.Invoke(a);
         else a();
     }
+    #endregion
 
-    // ---- Public helpers: keep API stable ----
+    #region public helpers (stable api)
     public void SetUnplayedFilterVisual(bool on) => _episodesPane?.SetUnplayedCaption(on);
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
     public void ToggleTheme()
-{
-    _theme = _theme switch
     {
-        ThemeMode.Base       => ThemeMode.MenuAccent,
-        ThemeMode.MenuAccent => ThemeMode.Native,
-        ThemeMode.Native     => ThemeMode.User,   // <— NEU
-        _                    => ThemeMode.Base
-    };
+        _theme = _theme switch
+        {
+            ThemeMode.Base       => ThemeMode.MenuAccent,
+            ThemeMode.MenuAccent => ThemeMode.Native,
+            ThemeMode.Native     => ThemeMode.User,
+            _                    => ThemeMode.Base
+        };
 
-    ApplyTheme();
-    ThemeChanged?.Invoke(_theme); // <-- NEU: speichern lassen
+        ApplyTheme();
+        ThemeChanged?.Invoke(_theme);
+    }
 
-}
-
-public void SetTheme(ThemeMode mode)
-{
-    _theme = mode;
-    ApplyTheme();
-    ThemeChanged?.Invoke(_theme); // <-- NEU
-}
-
-
+    public void SetTheme(ThemeMode mode)
+    {
+        _theme = mode;
+        ApplyTheme();
+        ThemeChanged?.Invoke(_theme);
+    }
 
     public void SetQueueLookup(Func<Guid, bool> isQueued) => _episodesPane?.SetQueueLookup(isQueued);
 
@@ -137,15 +134,12 @@ public void SetTheme(ThemeMode mode)
     public void RequestRefresh()           => _ = RefreshRequested?.Invoke();
     public void RequestQuit()              => QuitRequested?.Invoke();
 
-    // für Coordinator/Program: Loading klar sichtbar steuern
     public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
-    {
-        UI(() => _player?.SetLoading(on, text, baseline));
-    }
+        => UI(() => _player?.SetLoading(on, text, baseline));
 
     public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
-    public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "Refreshed ✓" : "Refreshing…");
-    
+    public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "refreshed ✓" : "refreshing…");
+
     public void EnsureSelectedFeedVisibleAndTop()
     {
         UI(() =>
@@ -153,70 +147,50 @@ public void SetTheme(ThemeMode mode)
             var lv = _feedsPane?.List;
             if (lv == null) return;
 
-            // Ganz nach oben scrollen, damit die Pseudo-Feeds ("All", "Saved", …) sichtbar sind
             lv.TopItem = 0;
-
-            // Falls noch nichts selektiert ist: ersten Eintrag wählen
             if (lv.SelectedItem < 0) lv.SelectedItem = 0;
-
-            // Repaint + Fokus
             lv.SetNeedsDisplay();
             lv.SetFocus();
         });
     }
+    #endregion
 
-
-    // ---- Build ----
+    #region build
     public void Build()
     {
-        // --- Main Window ---
         _mainWin = new Window
         {
             X = 0,
-            Y = 1, // Platz für Menü
+            Y = 1,
             Width = Dim.Fill(),
             Height = Dim.Fill(UiPlayerPanel.PlayerFrameH),
             Border = { BorderStyle = BorderStyle.None }
         };
         Application.Top.Add(_mainWin);
 
-        // --- Feeds-Pane ---
         _feedsPane = new UiFeedsPane();
         _mainWin.Add(_feedsPane.Frame);
 
         _feedsPane.SelectedChanged += () =>
         {
-            // Während wir die Liste neu befüllen → keine Events verarbeiten
             if (_suppressFeedSelectionEvents) return;
 
-            // Aktuelle Auswahl holen
             var selId = _feedsPane.GetSelectedFeedId();
 
-            // Separator oder null? → gleich zur nächsten gültigen Zeile springen
             if (selId is null && _feedsPane.List is { } lv)
             {
                 var next = Math.Min(lv.SelectedItem + 1, (lv.Source?.Count ?? 1) - 1);
                 lv.SelectedItem = Math.Max(0, next);
                 selId = _feedsPane.GetSelectedFeedId();
-                if (selId is null) return; // immer noch nix → dann abbrechen
+                if (selId is null) return;
             }
 
             if (_activePane == Pane.Feeds)
                 RefreshListVisual(_feedsPane.List);
 
-            try
-            {
-                SelectedFeedChanged?.Invoke();
-            }
-            catch
-            {
-                // UI darf niemals crashen
-            }
+            try { SelectedFeedChanged?.Invoke(); } catch { }
         };
 
-
-
-        // --- Right Root + EpisodesPane ---
         _rightRoot = new View { X = Pos.Right(_feedsPane.Frame), Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
         _mainWin.Add(_rightRoot);
 
@@ -231,13 +205,11 @@ public void SetTheme(ThemeMode mode)
             EpisodeSelectionChanged?.Invoke();
         };
 
-        // --- AudioPlayer ---
         _player = new UiPlayerPanel();
         _player.ProgressSchemeProvider = MakeProgressScheme;
         _player.WireSeeks(cmd => Command?.Invoke(cmd), () => _lastEffLenTs, s => ShowOsd(s));
         Application.Top.Add(_player);
 
-        // --- Menü ---
         _menu = UiMenuBarFactory.Build(new UiMenuBarFactory.Callbacks(
             Command: (cmd) => Command?.Invoke(cmd),
             RefreshRequested: RefreshRequested,
@@ -267,26 +239,20 @@ public void SetTheme(ThemeMode mode)
             ShowSearch:  () => ShowSearchBox("/"),
             ToggleTheme: () => ToggleThemeRequested?.Invoke()
         ));
-        // Menü hinzufügen (gibt's schon bei dir)
         Application.Top.Add(_menu);
 
-// --- NEU: kompakter Download-Indicator rechts neben der Menüzeile ---
+        // compact download badge
         _dlBadge = new Terminal.Gui.Label("")
         {
             Y = 0,
-            // ~28 Zeichen rechts reservieren; an deine Breite anpassen, falls du mehr Text willst
             X = Terminal.Gui.Pos.AnchorEnd(28),
             Width = Terminal.Gui.Dim.Sized(28),
             TextAlignment = Terminal.Gui.TextAlignment.Right,
-            Visible = false // nur zeigen, wenn Text gesetzt
+            Visible = false
         };
-// Farbschema an das Menü anlehnen, wenn vorhanden
-        try { _dlBadge.ColorScheme = _menu?.ColorScheme ?? _dlBadge.ColorScheme; } catch { /* best effort */ }
-
+        try { _dlBadge.ColorScheme = _menu?.ColorScheme ?? _dlBadge.ColorScheme; } catch { }
         Application.Top.Add(_dlBadge);
 
-
-        // --- Theme ---
         ApplyTheme();
 
         if (Application.MainLoop != null)
@@ -294,11 +260,10 @@ public void SetTheme(ThemeMode mode)
             Application.MainLoop.AddIdle(() =>
             {
                 ApplyTheme();
-                return false; // einmalig
+                return false;
             });
         }
 
-        // --- Keys überall binden ---
         BindKeys(
             Application.Top,
             _menu,
@@ -312,38 +277,36 @@ public void SetTheme(ThemeMode mode)
             _episodesPane?.Details
         );
 
-        // AudioPlayer initial unten
         SetPlayerPlacement(false);
 
-        // Nach erstem Layout auf Episodes fokussieren
         Application.MainLoop?.AddIdle(() =>
         {
             FocusPane(Pane.Episodes);
             return false;
         });
     }
+    #endregion
 
-    
+    #region details theme
     private ColorScheme BuildDetailsScheme()
     {
-        // Nutze deine Palette, aber Fokus == Normal → kein Orange beim Fokus
-        var P = UserPal;
+        var p = UserPal;
 
-        var normal = Attr(C(P.Fg), C(P.Bg2));   // dunkles Grau als Hintergrund, helle Schrift
-        var hot    = Attr(C(P.Orange), C(P.Bg2));
+        var normal = Attr(C(p.Fg), C(p.Bg2));
+        var hot    = Attr(C(p.Orange), C(p.Bg2));
 
         return new ColorScheme
         {
             Normal    = normal,
-            Focus     = normal,     // <— wichtig: Fokus nicht hervorheben
+            Focus     = normal,
             HotNormal = hot,
-            HotFocus  = hot,        // <— ebenfalls neutral halten
-            Disabled  = Attr(C(P.Comment), C(P.Bg2))
+            HotFocus  = hot,
+            Disabled  = Attr(C(p.Comment), C(p.Bg2))
         };
     }
+    #endregion
 
-    
-    // ---- Feeds/Episodes (API) ----
+    #region feeds/episodes api
     public void SetFeeds(List<Feed> feeds, Guid? selectId = null)
     {
         if (feeds is null) feeds = new List<Feed>();
@@ -357,10 +320,8 @@ public void SetTheme(ThemeMode mode)
             _feeds.AddRange(viewList);
             _feedsPane?.SetFeeds(_feeds);
 
-            // >>> FEED-METADATEN AUCH AN DIE EPISODEN-PANE GEBEN (für rechte Feed-Spalte)
             _episodesPane?.SetFeedsMeta(feeds);
 
-            // Zielauswahl bestimmen
             var FEED_ALL = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
 
             bool anyRealFeeds = feeds.Count > 0;
@@ -369,17 +330,15 @@ public void SetTheme(ThemeMode mode)
                             ? _feeds.FirstOrDefault(f => f.Id != FEED_SEPARATOR)?.Id ?? FEED_ALL
                             : FEED_ALL);
 
-            // Index finden (oder 0)
             int idx = 0;
             var j = _feeds.FindIndex(f => f.Id == want);
             if (j >= 0) idx = j;
 
-            // Separator niemals selektieren → eins weiter
             if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
             {
                 idx = Math.Clamp(idx + 1, 0, Math.Max(0, _feeds.Count - 1));
                 if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
-                    idx = 0; // falls dahinter nichts mehr ist
+                    idx = 0;
             }
 
             if (_feeds.Count == 0) idx = 0;
@@ -391,12 +350,8 @@ public void SetTheme(ThemeMode mode)
             _suppressFeedSelectionEvents = false;
         }
 
-        // Jetzt, wo eine valide Auswahl steht, Episoden aktualisieren
         RefreshEpisodesForSelectedFeed(_episodes);
     }
-
-
-
 
     public Guid? GetSelectedFeedId()
     {
@@ -489,26 +444,22 @@ public void SetTheme(ThemeMode mode)
             _episodesPane?.InjectNowPlaying(_nowPlayingId);
         });
     }
+    #endregion
 
-    // ---- NEU: Snapshot-basierte AudioPlayer-UI-Aktualisierung ----
+    #region player snapshot + legacy tick
     public void UpdatePlayerSnapshot(PlaybackSnapshot snap, int volume0to100)
     {
         UI(() =>
         {
             if (_player == null) return;
 
-            // Startup-Pin erst lösen, wenn „echte“ Daten kommen
             if (_startupPinned)
             {
-                bool meaningless =
-                    snap.Length == TimeSpan.Zero &&
-                    snap.Position == TimeSpan.Zero &&
-                    !snap.IsPlaying;
+                bool meaningless = snap.Length == TimeSpan.Zero && snap.Position == TimeSpan.Zero && !snap.IsPlaying;
                 if (meaningless) return;
                 _startupPinned = false;
             }
 
-            // Effektive Länge und Progress für Seeks
             var effLen = snap.Length;
             if (snap.Position > effLen) effLen = snap.Position;
             _lastEffLenTs = effLen;
@@ -518,7 +469,6 @@ public void SetTheme(ThemeMode mode)
         });
     }
 
-    // ---- ALT: AudioPlayer UI tick (Kompatibilität) ----
     public void UpdatePlayerUI(PlayerState s)
     {
         UI(() =>
@@ -542,10 +492,10 @@ public void SetTheme(ThemeMode mode)
             _player.Update(s, effLen, F);
         });
     }
+    #endregion
 
-    // ---- Theme/Layout ----
-    // ---------- USER THEME: Palette + Helpers ----------
-
+    #region theme/layout
+    // user palette
     private record Palette(string Bg, string Bg2, string Dim, string Fg, string Comment,
         string Orange, string Green, string Pink, string Red, string Cyan,
         string Purple, string Blue, string Yellow);
@@ -565,10 +515,9 @@ public void SetTheme(ThemeMode mode)
         Blue:   "#6289b1",
         Yellow: "#d5a442"
     );
-// hex → Color (Truecolor wenn verfügbar, sonst Approx)
+
     private static Color C(string hex) => ApproxAnsi(hex);
-    
-    
+
     private static Color ApproxAnsi(string hex)
     {
         hex = (hex ?? "#000000").Trim().TrimStart('#');
@@ -577,28 +526,23 @@ public void SetTheme(ThemeMode mode)
         int g = Convert.ToInt32(hex.Substring(2, 2), 16);
         int b = Convert.ToInt32(hex.Substring(4, 2), 16);
 
-        // Kandidaten nur mit sicher vorhandenen Farben
         var candidates = new (Color color, int r, int g, int b)[]
         {
             (Color.Black,     0,   0,   0),
             (Color.DarkGray,  85,  85,  85),
             (Color.Gray,      136, 136, 136),
             (Color.White,     255, 255, 255),
-
             (Color.Red,       205, 0,   0),
             (Color.Green,     0,   205, 0),
             (Color.Blue,      0,   0,   205),
-
             (Color.Cyan,      0,   205, 205),
             (Color.Magenta,   205, 0,   205),
-
-            // Terminal.Gui nutzt "Brown" für (dunkles) Gelb
             (Color.Brown,     205, 205, 0),
         };
 
-        int Best((int r, int g, int b) a, (int r, int g, int b) b)
+        int Dist2((int r, int g, int b) a, (int r, int g, int b) bb)
         {
-            var dr = a.r - b.r; var dg = a.g - b.g; var db = a.b - b.b;
+            var dr = a.r - bb.r; var dg = a.g - bb.g; var db = a.b - bb.b;
             return dr * dr + dg * dg + db * db;
         }
 
@@ -607,18 +551,14 @@ public void SetTheme(ThemeMode mode)
         var bestD = int.MaxValue;
         foreach (var c in candidates)
         {
-            var d = Best(want, (c.r, c.g, c.b));
+            var d = Dist2(want, (c.r, c.g, c.b));
             if (d < bestD) { best = c; bestD = d; }
         }
         return best.color;
     }
 
-
-    
     private static Attribute Attr(Color fg, Color bg) => new(fg, bg);
-    
 
-    
     private sealed class UserSchemes
     {
         public ColorScheme Main  = new();
@@ -628,59 +568,57 @@ public void SetTheme(ThemeMode mode)
         public ColorScheme Dialog= new();
         public ColorScheme Status= new();
     }
-    
 
-    
     private static UserSchemes BuildUserSchemes()
     {
-        var P = UserPal;
+        var p = UserPal;
 
         var main = new ColorScheme {
-            Normal    = Attr(C(P.Fg),     C(P.Bg)),
-            Focus     = Attr(Color.Black,  C(P.Orange)),
-            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
-            HotFocus  = Attr(Color.Black,  C(P.Orange)),
-            Disabled  = Attr(C(P.Comment), C(P.Bg))
+            Normal    = Attr(C(p.Fg),     C(p.Bg)),
+            Focus     = Attr(Color.Black,  C(p.Orange)),
+            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
+            HotFocus  = Attr(Color.Black,  C(p.Orange)),
+            Disabled  = Attr(C(p.Comment), C(p.Bg))
         };
 
         var menu = new ColorScheme {
-            Normal    = Attr(C(P.Fg),     C(P.Bg)),
-            Focus     = Attr(Color.Black,  C(P.Orange)),
-            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
-            HotFocus  = Attr(Color.Black,  C(P.Orange)),
-            Disabled  = Attr(C(P.Comment), C(P.Bg))
+            Normal    = Attr(C(p.Fg),     C(p.Bg)),
+            Focus     = Attr(Color.Black,  C(p.Orange)),
+            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
+            HotFocus  = Attr(Color.Black,  C(p.Orange)),
+            Disabled  = Attr(C(p.Comment), C(p.Bg))
         };
 
         var list = new ColorScheme {
-            Normal    = Attr(C(P.Fg),     C(P.Bg)),
-            Focus     = Attr(Color.Black,  C(P.Pink)),
-            HotNormal = Attr(C(P.Orange),  C(P.Bg)),
-            HotFocus  = Attr(Color.Black,  C(P.Pink)),
-            Disabled  = Attr(C(P.Comment), C(P.Bg))
+            Normal    = Attr(C(p.Fg),     C(p.Bg)),
+            Focus     = Attr(Color.Black,  C(p.Pink)),
+            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
+            HotFocus  = Attr(Color.Black,  C(p.Pink)),
+            Disabled  = Attr(C(p.Comment), C(p.Bg))
         };
 
         var input = new ColorScheme {
-            Normal    = Attr(C(P.Fg),     C(P.Dim)),
-            Focus     = Attr(Color.Black,  C(P.Green)),
-            HotNormal = Attr(C(P.Orange),  C(P.Dim)),
-            HotFocus  = Attr(Color.Black,  C(P.Green)),
-            Disabled  = Attr(C(P.Comment), C(P.Dim))
+            Normal    = Attr(C(p.Fg),     C(p.Dim)),
+            Focus     = Attr(Color.Black,  C(p.Green)),
+            HotNormal = Attr(C(p.Orange),  C(p.Dim)),
+            HotFocus  = Attr(Color.Black,  C(p.Green)),
+            Disabled  = Attr(C(p.Comment), C(p.Dim))
         };
 
         var dialog = new ColorScheme {
-            Normal    = Attr(C(P.Fg),     C(P.Bg2)),
-            Focus     = Attr(Color.Black,  C(P.Green)),
-            HotNormal = Attr(C(P.Orange),  C(P.Bg2)),
-            HotFocus  = Attr(Color.Black,  C(P.Green)),
-            Disabled  = Attr(C(P.Comment), C(P.Bg2))
+            Normal    = Attr(C(p.Fg),     C(p.Bg2)),
+            Focus     = Attr(Color.Black,  C(p.Green)),
+            HotNormal = Attr(C(p.Orange),  C(p.Bg2)),
+            HotFocus  = Attr(Color.Black,  C(p.Green)),
+            Disabled  = Attr(C(p.Comment), C(p.Bg2))
         };
 
         var status = new ColorScheme {
-            Normal    = Attr(C(P.Fg),      C(P.Bg2)),
-            Focus     = Attr(Color.Black,   C(P.Orange)),
-            HotNormal = Attr(C(P.Yellow),   C(P.Bg2)),
-            HotFocus  = Attr(Color.Black,   C(P.Orange)),
-            Disabled  = Attr(C(P.Comment),  C(P.Bg2))
+            Normal    = Attr(C(p.Fg),      C(p.Bg2)),
+            Focus     = Attr(Color.Black,   C(p.Orange)),
+            HotNormal = Attr(C(p.Yellow),   C(p.Bg2)),
+            HotFocus  = Attr(Color.Black,   C(p.Orange)),
+            Disabled  = Attr(C(p.Comment),  C(p.Bg2))
         };
 
         return new UserSchemes { Main = main, Menu = menu, List = list, Input = input, Dialog = dialog, Status = status };
@@ -712,11 +650,7 @@ public void SetTheme(ThemeMode mode)
             RequestRepaint();
         });
     }
-    
-    /// <summary>
-    /// Setzt/verbirgt den Download-Badge oben rechts.
-    /// Übergib null/leer um auszublenden.
-    /// </summary>
+
     public void SetDownloadBadge(string? text)
     {
         try
@@ -729,103 +663,91 @@ public void SetTheme(ThemeMode mode)
                 _dlBadge.Visible = show;
                 _dlBadge.Text = show ? text : string.Empty;
 
-                // sicherstellen, dass neu gezeichnet wird
                 _dlBadge.SetNeedsDisplay();
                 Application.Top?.SetNeedsDisplay();
             });
         }
-        catch { /* UI darf App nicht crashen */ }
+        catch { }
     }
-
 
     public void TogglePlayerPlacement() => SetPlayerPlacement(!_playerAtTop);
     public void ShowDetails(Episode e) => UI(() => _episodesPane?.ShowDetails(e));
 
     private void ApplyTheme()
-{
-    UI(() =>
     {
-        if (_theme == ThemeMode.User)
+        UI(() =>
         {
-            var u = BuildUserSchemes();
-
-            // Top-Level / Fenster
-            if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
-            if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
-            if (_rightRoot != null)               _rightRoot.ColorScheme = u.Main;
-
-            // Menü + Badge
-            if (_menu != null)                    _menu.ColorScheme = u.Menu;
-            if (_dlBadge != null)                 _dlBadge.ColorScheme = u.Menu;
-
-            // Listen/Tabs/Frames
-            if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = u.Main;
-            if (_feedsPane?.List  != null)        _feedsPane.List.ColorScheme  = u.List;
-
-            if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = u.Main;
-            if (_episodesPane?.List != null)      _episodesPane.List.ColorScheme = u.List;
-
-            // AudioPlayer
-            if (_player != null)
+            if (_theme == ThemeMode.User)
             {
-                _player.ColorScheme          = u.Main;
-                _player.Progress.ColorScheme = new ColorScheme {
-                    Normal    = u.Status.Normal,
-                    Focus     = u.Status.Focus,
-                    HotNormal = u.Menu.HotNormal,
-                    HotFocus  = u.Menu.HotFocus,
-                    Disabled  = u.Status.Disabled
-                };
-                _player.VolBar.ColorScheme   = _player.Progress.ColorScheme;
+                var u = BuildUserSchemes();
+
+                if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
+                if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
+                if (_rightRoot != null)               _rightRoot.ColorScheme = u.Main;
+
+                if (_menu != null)                    _menu.ColorScheme = u.Menu;
+                if (_dlBadge != null)                 _dlBadge.ColorScheme = u.Menu;
+
+                if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = u.Main;
+                if (_feedsPane?.List  != null)        _feedsPane.List.ColorScheme  = u.List;
+
+                if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = u.Main;
+                if (_episodesPane?.List != null)      _episodesPane.List.ColorScheme = u.List;
+
+                if (_player != null)
+                {
+                    _player.ColorScheme          = u.Main;
+                    _player.Progress.ColorScheme = new ColorScheme {
+                        Normal    = u.Status.Normal,
+                        Focus     = u.Status.Focus,
+                        HotNormal = u.Menu.HotNormal,
+                        HotFocus  = u.Menu.HotFocus,
+                        Disabled  = u.Status.Disabled
+                    };
+                    _player.VolBar.ColorScheme   = _player.Progress.ColorScheme;
+                }
+
+                if (_commandBox != null) _commandBox.ColorScheme = u.Input;
+                if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
+
+                if (_episodesPane?.Details != null)
+                    _episodesPane.Details.ColorScheme = BuildDetailsScheme();
+
+                _osd.ApplyTheme();
+                RequestRepaint();
+                return;
             }
 
-            // Inputleisten
-            if (_commandBox != null) _commandBox.ColorScheme = u.Input;
-            if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
-
-            
-            if (_episodesPane?.Details != null)
+            ColorScheme scheme = _theme switch
             {
-                _episodesPane.Details.ColorScheme = BuildDetailsScheme();
+                ThemeMode.MenuAccent => Colors.Menu,
+                ThemeMode.Base       => Colors.Base,
+                ThemeMode.Native     => BuildNativeScheme(),
+                _ => Colors.Base
+            };
+
+            if (Application.Top != null) Application.Top.ColorScheme = scheme;
+
+            if (_mainWin != null)                 _mainWin.ColorScheme = scheme;
+            if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = scheme;
+            if (_rightRoot != null)               _rightRoot.ColorScheme = scheme;
+            if (_player != null)                  _player.ColorScheme = scheme;
+            if (_feedsPane?.List != null)         _feedsPane.List.ColorScheme = scheme;
+            if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = scheme;
+
+            if (_player != null)
+            {
+                _player.Progress.ColorScheme = MakeProgressScheme();
+                _player.VolBar.ColorScheme   = MakeProgressScheme();
             }
 
             _osd.ApplyTheme();
+            if (_commandBox != null) _commandBox.ColorScheme = scheme;
+            if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
+
             RequestRepaint();
-            return; // <— WICHTIG: „Base/MenuAccent/Native“-Zweig überspringen
-        }
-
-        // ==== vorhandene Modi wie gehabt ====
-        ColorScheme scheme = _theme switch
-        {
-            ThemeMode.MenuAccent => Colors.Menu,
-            ThemeMode.Base       => Colors.Base,
-            ThemeMode.Native     => BuildNativeScheme(),
-            _ => Colors.Base
-        };
-
-        if (Application.Top != null) Application.Top.ColorScheme = scheme;
-
-        if (_mainWin != null)                 _mainWin.ColorScheme = scheme;
-        if (_feedsPane?.Frame != null)        _feedsPane.Frame.ColorScheme = scheme;
-        if (_rightRoot != null)               _rightRoot.ColorScheme = scheme;
-        if (_player != null)                  _player.ColorScheme = scheme;
-        if (_feedsPane?.List != null)         _feedsPane.List.ColorScheme = scheme;
-        if (_episodesPane?.Tabs != null)      _episodesPane.Tabs.ColorScheme = scheme;
-
-        if (_player != null)
-        {
-            _player.Progress.ColorScheme = MakeProgressScheme();
-            _player.VolBar.ColorScheme   = MakeProgressScheme();
-        }
-
-        _osd.ApplyTheme();
-        if (_commandBox != null) _commandBox.ColorScheme = scheme;
-        if (_searchBox  != null) _searchBox.ColorScheme  = scheme;
-
-        RequestRepaint();
-    });
-}
-
+        });
+    }
 
     private static ColorScheme BuildNativeScheme()
     {
@@ -861,8 +783,9 @@ public void SetTheme(ThemeMode mode)
             HotFocus  = Colors.Menu.HotFocus
         };
     }
+    #endregion
 
-    // ---- Command/Search ----
+    #region command/search
     public void ShowCommandBox(string seed)
     {
         UI(() =>
@@ -904,8 +827,7 @@ public void SetTheme(ThemeMode mode)
         UI(() =>
         {
             _searchBox?.SuperView?.Remove(_searchBox);
-            _searchBox = new TextField(seed
-            )
+            _searchBox = new TextField(seed)
             {
                 X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, ColorScheme = Colors.Base
             };
@@ -935,8 +857,9 @@ public void SetTheme(ThemeMode mode)
             _searchBox.CursorPosition = _searchBox.Text.ToString()!.Length;
         });
     }
+    #endregion
 
-    // ---- Keys / Moves ----
+    #region keys
     private static bool Has(Key k, Key mask) => (k & mask) == mask;
     private static Key BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
 
@@ -954,7 +877,6 @@ public void SetTheme(ThemeMode mode)
         var key = e.KeyEvent.Key;
         var kv  = e.KeyEvent.KeyValue;
 
-        // Ctrl-C/V/X unterdrücken
         if ((key & Key.CtrlMask) != 0)
         {
             var baseKey = key & ~Key.CtrlMask;
@@ -982,7 +904,6 @@ public void SetTheme(ThemeMode mode)
         if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
         if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
 
-        // pane cycle / details
         if (key == (Key)('h'))
         {
             if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
@@ -1071,14 +992,16 @@ public void SetTheme(ThemeMode mode)
 
         return false;
     }
+    #endregion
 
+    #region downloads/ui lookups
     public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
-    {
-        _episodesPane?.SetDownloadStateLookup(fn);
-    }
+        => _episodesPane?.SetDownloadStateLookup(fn);
 
     public Guid QueueFeedId => FEED_QUEUE;
+    #endregion
 
+    #region list nav helpers
     private void MoveList(int delta)
     {
         var lv = (_activePane == Pane.Episodes) ? _episodesPane?.List : _feedsPane?.List;
@@ -1086,10 +1009,8 @@ public void SetTheme(ThemeMode mode)
         {
             int target = Math.Clamp(lv.SelectedItem + delta, 0, lv.Source.Count - 1);
 
-            // Wenn wir im Feeds-Pane sind, skippen wir die Barriere
             if (_activePane == Pane.Feeds && _feedsPane != null)
             {
-                // Iteriere maximal ein paar Schritte, falls delta groß war
                 int guard = 3;
                 while (guard-- > 0)
                 {
@@ -1105,7 +1026,6 @@ public void SetTheme(ThemeMode mode)
             RefreshListVisual(lv);
         }
     }
-
 
     private void FocusPane(Pane p)
     {
@@ -1148,20 +1068,16 @@ public void SetTheme(ThemeMode mode)
             list.SelectedItem = old;
         }
     }
+    #endregion
 
-private void SetDefaultThemeForOS()
-{
-    if (OperatingSystem.IsWindows())
+    #region defaults/layout helpers
+    private void SetDefaultThemeForOS()
     {
-        // Windows: „blaues“ Theme (das, was nach deinem 't' kommt)
-        _theme = ThemeMode.Base;   // Theme #2
+        if (OperatingSystem.IsWindows())
+            _theme = ThemeMode.Base;
+        else
+            _theme = ThemeMode.MenuAccent;
     }
-    else
-    {
-        // Linux/macOS: Standard-Theme davor
-        _theme = ThemeMode.MenuAccent;         // Theme #1
-    }
-}
 
     private void RefreshListVisual(ListView lv)
     {
@@ -1197,7 +1113,6 @@ private void SetDefaultThemeForOS()
 
     private static IEnumerable<Feed> BuildFeedsWithBarrier(IEnumerable<Feed> realFeeds)
     {
-        // Virtuelle Feeds (oben)
         var virt = new List<Feed>
         {
             new Feed { Id = FEED_ALL,        Title = "All Episodes" },
@@ -1207,27 +1122,21 @@ private void SetDefaultThemeForOS()
             new Feed { Id = FEED_HISTORY,    Title = "⏱ History" },
         };
 
-        // Barriere
         var barrier = new Feed { Id = FEED_SEPARATOR, Title = "────────" };
 
-        // Reihenfolge: virtuelle → Barriere → reale
         var reals = (realFeeds ?? Enumerable.Empty<Feed>()).ToList();
         return virt.Concat(new[] { barrier }).Concat(reals);
     }
 
-
-
     public void SetQueueOrder(IReadOnlyList<Guid> ids) => _episodesPane?.SetQueueOrder(ids);
+    #endregion
 
-    // ---- Help & Logs (öffentliche API unverändert) ----
+    #region help/logs
     public void ShowKeysHelp() => UiHelpBrowserDialog.Show();
     public void ShowError(string title, string msg) => MessageBox.ErrorQuery(title, msg, "OK");
 
-
-// Zugriff auf die spezielle "All"-Feed-GUID aus Program.cs
     public Guid AllFeedId => FEED_ALL;
 
-// Episodenliste ganz nach oben scrollen und Fokus setzen
     public void ScrollEpisodesToTopAndFocus()
     {
         UI(() =>
@@ -1243,8 +1152,6 @@ private void SetDefaultThemeForOS()
         });
     }
 
-
-    
     public void ShowLogsOverlay(int tail = 500)
     {
         try
@@ -1268,9 +1175,10 @@ private void SetDefaultThemeForOS()
     }
 
     public void SetHistoryLimit(int n) => _episodesPane?.SetHistoryLimit(n);
+    #endregion
 }
 
-// kleine Extension für sichere Titel-Zuweisung, vermeidet Null-Warnungen
+// extensions
 file static class ViewExtensions
 {
     public static void SetText(this Label? label, string text)

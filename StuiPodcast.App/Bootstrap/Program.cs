@@ -1,48 +1,19 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 using Serilog;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
 using Terminal.Gui;
-using System.Net.Http;
-using System.Net.NetworkInformation;
 using System.Reflection;
-using System.Text;
 using System.Runtime.InteropServices;
-
 using StuiPodcast.App;
 using StuiPodcast.App.Command.Handler;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
-using StuiPodcast.Infra.Player;
-using StuiPodcast.Infra.Opml;
-using ThemeMode = StuiPodcast.App.UI.UiShell.ThemeMode;
 using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Services;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
 
-// ==========================================================
-//  Program.cs — refactored into multiple classes (same file)
-//  - Program: composition root
-//  - Cli: parse args
-//  - WindowsConsoleUtil: enable VT/UTF-8 on Windows
-//  - LoggerSetup: configure Serilog
-//  - ErrorHandlers: global exception handlers
-//  - ThemeResolver: resolves effective theme (default=user)
-//  - SaveScheduler: throttled, centralized persistence
-//  - NetworkMonitor: connectivity probing + hysteresis
-//  - EngineService: create/swap audio engines and apply prefs
-//  - UiComposer: build Shell, wire events & behaviors
-//  - CommandApplier: apply post-UI CLI flags
-//  - Bridge: AppFacade <-> AppData sync
-//  - DownloadLookupAdapter: bridge downloads to AppFacade
-// ==========================================================
 
 class Program
 {
@@ -86,7 +57,7 @@ class Program
         if (cli.ShowHelp)    { PrintHelp();    return; }
 
         WinConsoleUtil.Enable();
-        if (cli.Ascii) { try { GlyphSet.Use(GlyphSet.Profile.Ascii); } catch { } }
+        if (cli.Ascii) { try { UIGlyphSet.Use(UIGlyphSet.Profile.Ascii); } catch { } }
 
         LoggerSetup.Configure(cli.LogLevel, _memLog);
         CmdErrorHandlers.Install();
@@ -234,7 +205,7 @@ class Program
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
             try { Application.Shutdown(); } catch { }
-            TerminalUtil.ResetHard();
+            ResetHard();
             try { Log.CloseAndFlush(); } catch { }
             Log.Information("shutdown end");
         }
@@ -315,5 +286,23 @@ class Program
         Console.WriteLine("  --offline");
         Console.WriteLine("  --ascii");
         Console.WriteLine("  --log-level <debug|info|warn|error>");
+    }
+    
+    static void ResetHard()
+    {
+        try
+        {
+            Console.Write(
+                "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse off
+                "\x1b[?2004l" +                                           // bracketed paste off
+                "\x1b[?25h"   +                                           // cursor on
+                "\x1b[0m"     +                                           // sgr reset
+                "\x1b[?1049l"                                            // leave alt screen
+            );
+            Console.Out.Flush();
+            Console.Write("\x1bc"); // RIS
+            Console.Out.Flush();
+        }
+        catch { }
     }
 }

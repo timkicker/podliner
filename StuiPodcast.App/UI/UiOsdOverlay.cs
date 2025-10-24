@@ -5,6 +5,7 @@ namespace StuiPodcast.App.UI;
 
 internal sealed class UiOsdOverlay
 {
+    #region fields
     private readonly object _gate = new();
     private FrameView? _win;
     private Label? _label;
@@ -12,8 +13,10 @@ internal sealed class UiOsdOverlay
     private string _lastText = string.Empty;
     private const int Padding = 2;   // 1 space left + 1 space right
     private const int MinWidth = 10; // keep it readable
+    #endregion
 
-    /// <summary>Thread-safe OSD display. Can be called from any thread.</summary>
+    #region public api (thread-safe)
+    // thread-safe osd display
     public void Show(string text, int ms)
     {
         if (Application.MainLoop != null)
@@ -30,7 +33,7 @@ internal sealed class UiOsdOverlay
             ShowOnUi(text, duration);
     }
 
-    /// <summary>Thread-safe hide.</summary>
+    // thread-safe hide
     public void Hide()
     {
         if (Application.MainLoop != null)
@@ -39,6 +42,7 @@ internal sealed class UiOsdOverlay
             HideOnUi();
     }
 
+    // thread-safe theme apply
     public void ApplyTheme()
     {
         if (Application.MainLoop != null)
@@ -46,9 +50,9 @@ internal sealed class UiOsdOverlay
         else
             ApplyThemeOnUi();
     }
+    #endregion
 
-    // -------------------- UI thread only below --------------------
-
+    #region ui thread only
     private void ShowOnUi(string text, TimeSpan duration)
     {
         EnsureCreated();
@@ -57,7 +61,7 @@ internal sealed class UiOsdOverlay
         var maxWidth = Math.Max(MinWidth, driverCols - 4); // 2 cols margin each side
         var desired = Math.Clamp(text.Length + Padding, MinWidth, maxWidth);
 
-        // Clip to one line (no wrapping)
+        // clip to one line (no wrapping)
         var clippedText = text;
         if (text.Length + Padding > maxWidth && maxWidth >= Padding)
         {
@@ -114,9 +118,9 @@ internal sealed class UiOsdOverlay
         if (_label != null) _label.ColorScheme = scheme;
         Application.Top?.SetNeedsDisplay();
     }
+    #endregion
 
-
-
+    #region creation
     private void EnsureCreated()
     {
         if (_win != null) return;
@@ -137,7 +141,6 @@ internal sealed class UiOsdOverlay
             ColorScheme = Application.Top?.ColorScheme ?? Colors.Base
         };
 
-
         _win.Border.BorderStyle = BorderStyle.Rounded;
         _win.Add(_label);
         _win.Visible = false;
@@ -146,7 +149,7 @@ internal sealed class UiOsdOverlay
         {
             Application.Top.Add(_win);
 
-            // Re-layout on terminal resize
+            // relayout on terminal resize
             Application.Top.Resized += _ =>
             {
                 if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
@@ -156,4 +159,5 @@ internal sealed class UiOsdOverlay
             };
         }
     }
+    #endregion
 }

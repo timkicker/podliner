@@ -4,9 +4,6 @@ using StuiPodcast.Infra.Storage;
 
 namespace StuiPodcast.App.Services;
 
-// ==========================================================
-// Save scheduler (centralized persistence)
-// ==========================================================
 sealed class SaveScheduler : IDisposable
 {
     readonly AppData _data;

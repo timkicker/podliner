@@ -2,9 +2,6 @@ using StuiPodcast.App.UI;
 
 namespace StuiPodcast.App.Services;
 
-// ==========================================================
-// Theme resolving (default = User)
-// ==========================================================
 static class UiThemeResolver
 {
     public sealed record Result(UiShell.ThemeMode Mode, string? ShouldPersistPref);
@@ -22,7 +19,7 @@ static class UiThemeResolver
                 "accent" => UiShell.ThemeMode.MenuAccent,
                 "native" => UiShell.ThemeMode.Native,
                 "user"   => UiShell.ThemeMode.User,
-                "auto"   => UiShell.ThemeMode.User, // default → user
+                "auto"   => UiShell.ThemeMode.User, // default user
                 _        => UiShell.ThemeMode.User
             };
             return new Result(tm, cliAskedAuto ? "auto" : tm.ToString());
@@ -34,7 +31,7 @@ static class UiThemeResolver
                 ? UiShell.ThemeMode.User
                 : Enum.TryParse(pref, out UiShell.ThemeMode saved) ? saved : UiShell.ThemeMode.User;
 
-        // Keep "auto" string if it was saved
+        // keep "auto" string if it was saved
         return new Result(desired, null);
     }
 }

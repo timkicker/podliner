@@ -3,9 +3,6 @@ using System.Text;
 
 namespace StuiPodcast.App.Bootstrap;
 
-// ==========================================================
-// Windows console VT/UTF-8
-// ==========================================================
 static class WinConsoleUtil
 {
     public static void Enable()

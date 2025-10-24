@@ -1,7 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace StuiPodcast.App.Command;
 
 internal static class CmdParser
 {
+    #region api
+    // parse raw command to structured result
     public static CmdParsed Parse(string raw)
     {
         var tokens = Tokenize(raw.Trim());
@@ -9,8 +15,10 @@ internal static class CmdParser
         var (cmd, args) = SplitCmd(tokens);
         return new CmdParsed(raw, cmd, args, MapTop(cmd));
     }
+    #endregion
 
-    // --- tokenizer/mapper (aus dem Altcode)
+    #region tokenize
+    // split input into tokens (quotes + escapes)
     private static string[] Tokenize(string raw)
     {
         var list = new List<string>();
@@ -39,6 +47,7 @@ internal static class CmdParser
         return list.ToArray();
     }
 
+    // split into command + args
     private static (string cmd, string[] args) SplitCmd(string[] tokens)
     {
         if (tokens.Length == 0) return ("", Array.Empty<string>());
@@ -46,17 +55,20 @@ internal static class CmdParser
         var args = tokens.Skip(1).ToArray();
         return (cmd, args);
     }
+    #endregion
 
+    #region mapping
+    // map top-level command
     private static TopCommand MapTop(string cmd)
     {
         if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
         if (cmd.StartsWith(":opml", StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;
 
-        // Aliases
+        // aliases
         if (cmd.Equals(":a", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
         if (cmd.Equals(":r", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
 
-        // Neue Commands
+        // new commands
         if (cmd.StartsWith(":open", StringComparison.OrdinalIgnoreCase)) return TopCommand.Open;
         if (cmd.StartsWith(":copy", StringComparison.OrdinalIgnoreCase)) return TopCommand.Copy;
 
@@ -65,12 +77,12 @@ internal static class CmdParser
         if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
         if (cmd.Equals(":q!", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit!", StringComparison.OrdinalIgnoreCase)) return TopCommand.QuitBang;
 
-        // Vim writes
+        // vim writes
         if (cmd.Equals(":w", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":write", StringComparison.OrdinalIgnoreCase)) return TopCommand.Write;
         if (cmd.Equals(":wq", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":x", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuit;
         if (cmd.Equals(":wq!", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuitBang;
 
-        // Neu
+        // search/nav/theme
         if (cmd.StartsWith(":search", StringComparison.OrdinalIgnoreCase)) return TopCommand.Search;
         if (cmd.Equals(":now", StringComparison.OrdinalIgnoreCase)) return TopCommand.Now;
         if (cmd.StartsWith(":jump", StringComparison.OrdinalIgnoreCase)) return TopCommand.Jump;
@@ -79,12 +91,14 @@ internal static class CmdParser
         if (cmd.StartsWith(":logs", StringComparison.OrdinalIgnoreCase)) return TopCommand.Logs;
         if (cmd.StartsWith(":osd", StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
 
+        // playback
         if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase)) return TopCommand.Toggle;
         if (cmd.StartsWith(":seek", StringComparison.OrdinalIgnoreCase)) return TopCommand.Seek;
         if (cmd.StartsWith(":vol", StringComparison.OrdinalIgnoreCase)) return TopCommand.Volume;
         if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Speed;
         if (cmd.StartsWith(":replay", StringComparison.OrdinalIgnoreCase)) return TopCommand.Replay;
 
+        // navigation
         if (cmd.Equals(":next", StringComparison.OrdinalIgnoreCase)) return TopCommand.Next;
         if (cmd.Equals(":prev", StringComparison.OrdinalIgnoreCase)) return TopCommand.Prev;
         if (cmd.Equals(":play-next", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayNext;
@@ -97,21 +111,26 @@ internal static class CmdParser
         if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.NextUnplayed;
         if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.PrevUnplayed;
 
+        // flags/sort/filter/ui
         if (cmd.StartsWith(":save", StringComparison.OrdinalIgnoreCase)) return TopCommand.Save;
         if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase)) return TopCommand.Sort;
         if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase)) return TopCommand.Filter;
         if (cmd.StartsWith(":audioPlayer", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayerBar;
 
+        // network/source
         if (cmd.StartsWith(":net", StringComparison.OrdinalIgnoreCase)) return TopCommand.Net;
         if (cmd.StartsWith(":play-source", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlaySource;
 
+        // feeds
         if (cmd.StartsWith(":add", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
         if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase) || cmd.StartsWith(":update", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
         if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
         if (cmd.StartsWith(":feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Feed;
 
+        // history
         if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase)) return TopCommand.History;
 
         return TopCommand.Unknown;
     }
+    #endregion
 }

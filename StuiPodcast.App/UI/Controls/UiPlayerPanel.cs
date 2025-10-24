@@ -87,7 +87,7 @@ internal sealed class UiPlayerPanel : FrameView
 
     private void UpdateLoadingVisuals()
     {
-        var isUnicode = GlyphSet.Current == GlyphSet.Profile.Unicode;
+        var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
 
         if (_isLoading)
         {
@@ -128,13 +128,13 @@ internal sealed class UiPlayerPanel : FrameView
         };
 
         const int gapL = 2;
-        BtnBack10    = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "«10s" : "<10") { X = 2, Y = 2 };
-        BtnPlayPause = new Button("Play " + (GlyphSet.Current == GlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2, Width = 12};
-        BtnFwd10     = new Button(GlyphSet.Current == GlyphSet.Profile.Unicode ? "10s»" : "10>") { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
-        BtnDownload  = new Button($"{GlyphSet.DownloadedMark} Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
+        BtnBack10    = new Button(UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "«10s" : "<10") { X = 2, Y = 2 };
+        BtnPlayPause = new Button("Play " + (UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2, Width = 12};
+        BtnFwd10     = new Button(UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "10s»" : "10>") { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
+        BtnDownload  = new Button($"{UIGlyphSet.DownloadedMark} Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
 
         const int midGap = 2;
-        SpeedLabel   = new Label(GlyphSet.SpeedLabel(1.0)) { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
+        SpeedLabel   = new Label(UIGlyphSet.SpeedLabel(1.0)) { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
         BtnSpeedDown = new Button("-spd"){ Y = 0, X = Pos.Right(SpeedLabel) + midGap };
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
         var midWidth = 6 + midGap + 6 + midGap + 6;
@@ -149,7 +149,7 @@ internal sealed class UiPlayerPanel : FrameView
         if (ProgressSchemeProvider != null) VolBar.ColorScheme = ProgressSchemeProvider();
         r += 16 + gap - 2;
 
-        VolPctLabel = new Label(GlyphSet.VolumePercent(0)) { Y = 2, Width = 5, X = Pos.AnchorEnd(r + 5), TextAlignment = TextAlignment.Left };
+        VolPctLabel = new Label(UIGlyphSet.VolumePercent(0)) { Y = 2, Width = 5, X = Pos.AnchorEnd(r + 5), TextAlignment = TextAlignment.Left };
         r += 5 + gap + 1;
 
         BtnVolUp   = new Button("Vol+") { Y = 2, X = Pos.AnchorEnd(r + 6) };
@@ -231,7 +231,7 @@ internal sealed class UiPlayerPanel : FrameView
             var v = Math.Clamp(vol, 0, 100);
             command($":vol {v}");
             VolBar.Fraction  = v / 100f; // visuelles Feedback sofort
-            VolPctLabel.Text = GlyphSet.VolumePercent(v);
+            VolPctLabel.Text = UIGlyphSet.VolumePercent(v);
         };
     }
 
@@ -279,7 +279,7 @@ internal sealed class UiPlayerPanel : FrameView
         var remSec = Math.Max(0, lenSec - posSec);
         var rem = TimeSpan.FromSeconds(remSec);
 
-        var isUnicode = GlyphSet.Current == GlyphSet.Profile.Unicode;
+        var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
         var icon = snap.IsPlaying ? isUnicode ? "▶" : ">" : isUnicode ? "⏸" : "||";
 
         var posStr = format(pos);
@@ -304,8 +304,8 @@ internal sealed class UiPlayerPanel : FrameView
 
         var v = Math.Clamp(volume0to100, 0, 100);
         VolBar.Fraction  = v / 100f;
-        VolPctLabel.Text = GlyphSet.VolumePercent(v);
-        SpeedLabel.Text  = GlyphSet.SpeedLabel(snap.Speed);
+        VolPctLabel.Text = UIGlyphSet.VolumePercent(v);
+        SpeedLabel.Text  = UIGlyphSet.SpeedLabel(snap.Speed);
 
         UpdateLoadingVisuals();
     }

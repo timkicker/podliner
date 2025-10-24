@@ -5,9 +5,6 @@ using StuiPodcast.Infra.Player;
 
 namespace StuiPodcast.App.Services;
 
-// ==========================================================
-// Engine service (create/switch/apply prefs)
-// ==========================================================
 sealed class EngineService
 {
     readonly AppData _data;
@@ -15,22 +12,24 @@ sealed class EngineService
     public SwappableAudioPlayer? Current { get; private set; }
     string? _initialInfo;
 
-    
-    // in class EngineService
+    // apply stored prefs to a swappable player
     public void ApplyPrefsToCurrent(SwappableAudioPlayer sp)
     {
-        try {
+        try
+        {
             var v = Math.Clamp(_data.Volume0_100, 0, 100);
             if (v != 0 || _data.Volume0_100 == 0) sp.SetVolume(v);
-        } catch {}
+        }
+        catch { }
 
-        try {
+        try
+        {
             var s = _data.Speed; if (s <= 0) s = 1.0;
             sp.SetSpeed(Math.Clamp(s, 0.25, 3.0));
-        } catch {}
+        }
+        catch { }
     }
 
-    
     public EngineService(AppData data, MemoryLogSink memLog)
     {
         _data = data;
@@ -46,6 +45,7 @@ sealed class EngineService
         return Current;
     }
 
+    // apply stored prefs to a raw player
     public void ApplyPrefsTo(IAudioPlayer p)
     {
         try
@@ -55,7 +55,8 @@ sealed class EngineService
                 var v = Math.Clamp(_data.Volume0_100, 0, 100);
                 p.SetVolume(v);
             }
-        } catch { }
+        }
+        catch { }
 
         try
         {
@@ -65,7 +66,8 @@ sealed class EngineService
                 if (s <= 0) s = 1.0;
                 p.SetSpeed(Math.Clamp(s, 0.25, 3.0));
             }
-        } catch { }
+        }
+        catch { }
     }
 
     public async Task SwitchAsync(SwappableAudioPlayer audioPlayer, string pref, Func<Task> onPersistTick)
@@ -77,12 +79,12 @@ sealed class EngineService
 
             var next = AudioPlayerFactory.Create(_data, out var info);
             Log.Information("engine created name={Engine} caps={Caps} info={Info}",
-                audioPlayer?.Name, (audioPlayer?.Capabilities).ToString(), _initialInfo);
+                next?.Name, next?.Capabilities, info);
+
             ApplyPrefsTo(next);
 
             await audioPlayer.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
             Log.Information("engine switched current={Name} caps={Caps}", audioPlayer.Name, audioPlayer.Capabilities);
-            // OSD is raised by callers (UI)
         }
         catch (Exception ex)
         {
@@ -90,4 +92,3 @@ sealed class EngineService
         }
     }
 }
-

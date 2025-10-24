@@ -1,8 +1,5 @@
 namespace StuiPodcast.App.Bootstrap;
 
-// ==========================================================
-// CLI
-// ==========================================================
 sealed class CliEntrypoint
 {
     internal sealed class Options

@@ -4,9 +4,6 @@ using StuiPodcast.Infra.Storage;
 
 namespace StuiPodcast.App.Services;
 
-// ==========================================================
-// Adapter for download read-model into AppFacade
-// ==========================================================
 sealed class DownloadLookupAdapter : AppFacade.ILocalDownloadLookup
 {
     private readonly DownloadManager _mgr;

@@ -3,9 +3,6 @@ using StuiPodcast.App.Debug;
 
 namespace StuiPodcast.App.Bootstrap;
 
-// ==========================================================
-// Logger setup
-// ==========================================================
 static class LoggerSetup
 {
     public static void Configure(string? level, MemoryLogSink memLog)

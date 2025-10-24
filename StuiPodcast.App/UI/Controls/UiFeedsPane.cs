@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Terminal.Gui;
 using StuiPodcast.Core;
 
@@ -26,18 +23,14 @@ internal sealed class UiFeedsPane
         List.SelectedItemChanged += _ => SelectedChanged?.Invoke();
 
         if (Application.Top != null)
-        {
             Application.Top.Resized += _ => RebuildRowsAndRefresh(preserveScroll: true);
-        }
-
-
 
         Frame.Add(List);
     }
 
     public void SetFeeds(IEnumerable<Feed> feeds)
     {
-        // Auswahl & Scrollposition sichern
+        // keep selection/scroll
         var keepTop = List.TopItem;
         var keepSel = List.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
@@ -70,7 +63,7 @@ internal sealed class UiFeedsPane
 
     public IReadOnlyList<Feed> RawFeeds => _feeds;
 
-    // -------- intern --------
+    // internals
 
     private void RebuildRowsAndRefresh(bool preserveScroll)
     {
@@ -89,7 +82,12 @@ internal sealed class UiFeedsPane
 
     private void RebuildRows()
     {
-        int viewWidth = Math.Max(4, (List.Bounds.Width > 0 ? List.Bounds.Width : Frame.Bounds.Width > 0 ? Frame.Bounds.Width : 30) - 2);
+        int viewWidth = Math.Max(
+            4,
+            ((List.Bounds.Width > 0 ? List.Bounds.Width : 0) != 0
+                ? List.Bounds.Width
+                : (Frame.Bounds.Width > 0 ? Frame.Bounds.Width : 30)) - 2);
+
         _rows = _feeds
             .Select(f => TruncateTo(f?.Title ?? string.Empty, viewWidth))
             .ToList();
@@ -100,7 +98,7 @@ internal sealed class UiFeedsPane
         if (max <= 0 || string.IsNullOrEmpty(s)) return "";
         if (s.Length <= max) return s;
         if (max <= 1) return "…";
-        return s.Substring(0, Math.Max(0, max - 1)) + "…";
+        return s[..Math.Max(0, max - 1)] + "…";
     }
 
     private static void EnsureSelectionVisible(ListView lv)
@@ -117,6 +115,6 @@ internal sealed class UiFeedsPane
             if (sel < top) lv.TopItem = sel;
             else if (sel >= top + viewHeight) lv.TopItem = Math.Max(0, sel - viewHeight + 1);
         }
-        catch { /* best effort */ }
+        catch { }
     }
 }

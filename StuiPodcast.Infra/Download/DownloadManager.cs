@@ -1,4 +1,3 @@
-
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
@@ -46,8 +45,8 @@ namespace StuiPodcast.Infra.Download
         public event Action<Guid, DownloadStatus>? StatusChanged;
 
         private const int CONNECT_TIMEOUT_MS = 4000;
-        private const int REQUEST_TIMEOUT_MS = 15000;
-        private const int READ_TIMEOUT_MS    = 12000;
+        private const int REQUEST_HEADERS_TIMEOUT_MS = 15000; // header phase only
+        private const int READ_TIMEOUT_MS    = 25000;         // per-read stall guard
         private const int MAX_RETRIES        = 3;
         private const int BACKOFF_BASE_MS    = 400;
         private const int PROGRESS_PULSE_MS  = 400;
@@ -75,7 +74,8 @@ namespace StuiPodcast.Infra.Download
 
             _http = new HttpClient(handler, disposeHandler: true)
             {
-                Timeout = TimeSpan.FromMilliseconds(REQUEST_TIMEOUT_MS)
+                // no global transfer timeout; we handle headers + per-read
+                Timeout = Timeout.InfiniteTimeSpan
             };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
 
@@ -86,7 +86,6 @@ namespace StuiPodcast.Infra.Download
 
         #region index persistence
 
-        // best effort load of finished entries into the in-memory map
         void TryLoadIndex()
         {
             try
@@ -132,7 +131,6 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
-        // debounce writes to index file
         void SaveIndexDebounced()
         {
             lock (_persistGate)
@@ -147,7 +145,6 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
-        // atomic write of index file
         void TrySaveIndex()
         {
             List<DownloadIndex.Item> items;
@@ -201,7 +198,6 @@ namespace StuiPodcast.Infra.Download
 
         #region public control api
 
-        // make sure background worker runs
         public void EnsureRunning()
         {
             lock (_gate)
@@ -215,7 +211,6 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
-        // request worker stop
         public void Stop()
         {
             lock (_gate)
@@ -253,7 +248,6 @@ namespace StuiPodcast.Infra.Download
 
         #region queue api
 
-        // add episode to queue
         public void Enqueue(Guid episodeId)
         {
             lock (_gate)
@@ -267,7 +261,6 @@ namespace StuiPodcast.Infra.Download
             EnsureRunning();
         }
 
-        // move episode to front
         public void ForceFront(Guid episodeId)
         {
             lock (_gate)
@@ -281,7 +274,6 @@ namespace StuiPodcast.Infra.Download
             EnsureRunning();
         }
 
-        // cancel queued or running job
         public void Cancel(Guid episodeId)
         {
             bool pulsed = false;
@@ -304,7 +296,6 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
-        // read-only state snapshot
         public DownloadState GetState(Guid episodeId)
         {
             lock (_gate)
@@ -405,12 +396,16 @@ namespace StuiPodcast.Infra.Download
                     await DownloadOneAsync(ep, cancel).ConfigureAwait(false);
                     return;
                 }
+                catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+                {
+                    last = new IOException("operation timed out");
+                }
                 catch (OperationCanceledException)
                 {
                     throw;
                 }
                 catch (HttpRequestException ex) when (IsTransient(ex)) { last = ex; }
-                catch (IOException ex)        when (IsTransient(ex)) { last = ex; }
+                catch (IOException ex)        when (IsTransient(ex))   { last = ex; }
                 catch (SocketException ex)                              { last = ex; }
                 catch (Exception ex)                                    { last = ex; break; }
 
@@ -475,8 +470,8 @@ namespace StuiPodcast.Infra.Download
                 s.Error = null;
             });
 
-            using var reqCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
-            reqCts.CancelAfter(REQUEST_TIMEOUT_MS);
+            using var headersCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
+            headersCts.CancelAfter(REQUEST_HEADERS_TIMEOUT_MS);
 
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             if (resume && resumeFrom > 0)
@@ -485,7 +480,7 @@ namespace StuiPodcast.Infra.Download
                 Log.Information("dl/resume request id={Id} from={From}", ep.Id, resumeFrom);
             }
 
-            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, reqCts.Token).ConfigureAwait(false);
+            using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, headersCts.Token).ConfigureAwait(false);
 
             if ((int)resp.StatusCode == 429)
             {
@@ -508,17 +503,23 @@ namespace StuiPodcast.Infra.Download
                 resumeFrom = 0;
 
                 using var req2 = new HttpRequestMessage(HttpMethod.Get, url);
-                using var resp2 = await _http.SendAsync(req2, HttpCompletionOption.ResponseHeadersRead, reqCts.Token).ConfigureAwait(false);
+                using var headersCts2 = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
+                headersCts2.CancelAfter(REQUEST_HEADERS_TIMEOUT_MS);
+
+                using var resp2 = await _http.SendAsync(req2, HttpCompletionOption.ResponseHeadersRead, headersCts2.Token).ConfigureAwait(false);
                 resp2.EnsureSuccessStatusCode();
 
-                targetPathGuess = await ReceiveToFileAsync(resp2, ep, reqCts, tmpPath, targetPathGuess, allowHeaderFileNameAdjust: true, resumeFrom: 0).ConfigureAwait(false);
+                targetPathGuess = await ReceiveToFileAsync(
+                    resp2, ep, outerCancel, tmpPath, targetPathGuess,
+                    allowHeaderFileNameAdjust: true, resumeFrom: 0
+                ).ConfigureAwait(false);
                 return;
             }
 
             resp.EnsureSuccessStatusCode();
 
             targetPathGuess = await ReceiveToFileAsync(
-                resp, ep, reqCts, tmpPath, targetPathGuess,
+                resp, ep, outerCancel, tmpPath, targetPathGuess,
                 allowHeaderFileNameAdjust: !resume,
                 resumeFrom: resumeFrom
             ).ConfigureAwait(false);
@@ -528,7 +529,7 @@ namespace StuiPodcast.Infra.Download
         private async Task<string> ReceiveToFileAsync(
             HttpResponseMessage resp,
             Episode ep,
-            CancellationTokenSource reqCts,
+            CancellationToken outerCancel,
             string tmpPath,
             string targetPath,
             bool allowHeaderFileNameAdjust,
@@ -575,7 +576,7 @@ namespace StuiPodcast.Infra.Download
 
             try
             {
-                await using var net = await resp.Content.ReadAsStreamAsync(reqCts.Token).ConfigureAwait(false);
+                await using var net = await resp.Content.ReadAsStreamAsync(outerCancel).ConfigureAwait(false);
                 await using var file = new FileStream(effectiveTmpPath, resumeFrom > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
 
                 var buf = new byte[64 * 1024];
@@ -583,12 +584,22 @@ namespace StuiPodcast.Infra.Download
 
                 while (true)
                 {
-                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(reqCts.Token);
+                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
                     readCts.CancelAfter(READ_TIMEOUT_MS);
-                    var n = await net.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token).ConfigureAwait(false);
+
+                    int n;
+                    try
+                    {
+                        n = await net.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException oce) when (!outerCancel.IsCancellationRequested)
+                    {
+                        throw new IOException("read timeout", oce);
+                    }
+
                     if (n <= 0) break;
 
-                    await file.WriteAsync(buf.AsMemory(0, n), reqCts.Token).ConfigureAwait(false);
+                    await file.WriteAsync(buf.AsMemory(0, n), outerCancel).ConfigureAwait(false);
                     bytesEmitted += n;
 
                     var now = DateTime.UtcNow;
@@ -607,7 +618,7 @@ namespace StuiPodcast.Infra.Download
                     }
                 }
 
-                await file.FlushAsync(reqCts.Token).ConfigureAwait(false);
+                await file.FlushAsync(outerCancel).ConfigureAwait(false);
                 sw.Stop();
 
                 SetState(ep.Id, s => s.State = DownloadState.Verifying);
@@ -619,7 +630,7 @@ namespace StuiPodcast.Infra.Download
 
                     if (have != expected)
                     {
-                        const long TOLERANCE_BYTES = 64 * 1024; // soft tolerance
+                        const long TOLERANCE_BYTES = 64 * 1024;
                         if (Math.Abs(have - expected) > TOLERANCE_BYTES)
                         {
                             Log.Warning("dl/verify size-mismatch id={Id} have={Have} expected={Expected}", ep.Id, have, expected);
@@ -636,7 +647,6 @@ namespace StuiPodcast.Infra.Download
                     }
                 }
 
-                // finalize file atomically
                 try
                 {
                     var destDir = Path.GetDirectoryName(effectiveTargetPath)!;
@@ -712,7 +722,6 @@ namespace StuiPodcast.Infra.Download
             return false;
         }
 
-        // exponential backoff with jitter
         private static int BackoffWithJitter(int attempt0)
         {
             var pow = 1 << attempt0;
@@ -748,7 +757,6 @@ namespace StuiPodcast.Infra.Download
             return 0;
         }
 
-        // resolve and create download root folder
         private string ResolveDownloadRoot()
         {
             string root;
@@ -767,7 +775,6 @@ namespace StuiPodcast.Infra.Download
             return root;
         }
 
-        // mutate and publish state changes
         private void SetState(Guid epId, Action<DownloadStatus> mutate)
         {
             DownloadStatus? before = null;

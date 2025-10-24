@@ -15,13 +15,10 @@ using ThemeMode = StuiPodcast.App.UI.UiShell.ThemeMode;
 using StuiPodcast.App.Command.Module;
 using StuiPodcast.Infra.Download;
 
-// ============================================================================
-// Public Facade
-// ============================================================================
+#region public facade
 static class CmdRouter
 {
-    // --------------------------- Public API (unchanged) ---------------------------
-
+ 
     public static void Handle(
         string raw,
         IAudioPlayer audioPlayer,
@@ -35,11 +32,11 @@ static class CmdRouter
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
-        // Fastpaths (beibehalten, damit bestehende Aufrufer identisch bleiben)
+        // fastpaths
         if (HandleQueue(raw, ui, data, persist)) return;
         if (HandleDownloads(raw, ui, data, dlm, persist)) return;
 
-        // Fallback für :dl ohne Sub-Arg
+        // fallback for :dl without sub-arg
         if (raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
             raw.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
         {
@@ -56,7 +53,7 @@ static class CmdRouter
 
         var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine);
 
-        // Dispatch
+        // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);
     }
 
@@ -69,10 +66,9 @@ static class CmdRouter
     public static void ApplyList(UiShell ui, AppData data)
         => CmdViewModule.ApplyList(ui, data);
 }
+#endregion
 
-// ============================================================================
-// Core types (Parser, Context, Dispatcher, Enum)
-// ============================================================================
+#region core types
 internal enum TopCommand
 {
     Unknown, Engine,
@@ -88,10 +84,9 @@ internal enum TopCommand
     Write, WriteQuit, WriteQuitBang, QuitBang,
     Search, Now, Jump, Theme
 }
+#endregion
 
-
-
-
+#region dispatcher
 internal sealed class CommandDispatcher
 {
     private readonly List<ICmdHandler> _handlers;
@@ -108,7 +103,7 @@ internal sealed class CommandDispatcher
         new CmdHistoryHandler(),
         new CmdOpmlHandler(),
         new CmdIoHandler(),
-        // Downloads & Queue bleiben über Public-Fastpaths erreichbar
+        // downloads & queue via public fastpaths
     });
 
     public CommandDispatcher(IEnumerable<ICmdHandler> handlers) => _handlers = handlers.ToList();
@@ -120,4 +115,4 @@ internal sealed class CommandDispatcher
         h.Handle(cmd, ctx);
     }
 }
-
+#endregion

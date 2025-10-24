@@ -9,15 +9,13 @@ using Terminal.Gui;
 
 namespace StuiPodcast.App.UI;
 
-// ==========================================================
-// UI composition & behaviors
-// ==========================================================
+
 static class UiComposer
 {
-    
+    #region startup helpers
+    // scroll feeds/episodes to top on first idle
     public static void ScrollAllToTopOnIdle(UiShell ui, AppData data)
     {
-        // Startfeed („All“) als initiale Selektion sicherstellen + in Sichtweite bringen
         Application.MainLoop?.AddIdle(() =>
         {
             try
@@ -28,7 +26,6 @@ static class UiComposer
             return false;
         });
 
-        // Episoden für „All“ setzen und Liste nach oben + Fokus
         Application.MainLoop?.AddIdle(() =>
         {
             try
@@ -43,8 +40,9 @@ static class UiComposer
             return false;
         });
     }
+    #endregion
 
-    
+    #region window title
     public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data)
     {
         var offlinePrefix = !data.NetworkOnline ? "[OFFLINE] " : "";
@@ -62,7 +60,9 @@ static class UiComposer
         catch { }
         ui.SetWindowTitle($"{offlinePrefix}{baseTitle}");
     }
+    #endregion
 
+    #region sorting
     public static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
     {
         if (eps == null) return Enumerable.Empty<Episode>();
@@ -134,7 +134,9 @@ static class UiComposer
         // local accessor to avoid passing data around in the sort key
         AppData ProgramData() => data;
     }
+    #endregion
 
+    #region downloader ui wiring
     public static void AttachDownloaderUi(DownloadManager downloader, UiShell ui, AppData data)
     {
         DateTime _dlLastUiPulse = DateTime.MinValue;
@@ -168,7 +170,9 @@ static class UiComposer
 
         downloader.EnsureRunning();
     }
+    #endregion
 
+    #region main ui wiring
     public static void WireUi(
         UiShell ui,
         AppData data,
@@ -181,28 +185,28 @@ static class UiComposer
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
-        // Quit
+        // quit
         ui.QuitRequested += () => QuitApp(ui, audioPlayer, feeds, save);
 
-        // Add Feed
+        // add feed
         ui.AddFeedRequested += async url =>
         {
             if (ui == null || feeds == null) return;
-            if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("Add feed: URL fehlt", 1500); return; }
+            if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("add feed: url missing", 1500); return; }
 
             Log.Information("ui/addfeed url={Url}", url);
-            ui.ShowOsd("Adding feed…", 800);
+            ui.ShowOsd("adding…", 800);
 
             try
             {
-                if (hasFeedWithUrl(url)) { ui.ShowOsd("Already added", 1200); return; }
+                if (hasFeedWithUrl(url)) { ui.ShowOsd("already added", 1200); return; }
             }
             catch { }
 
             try
             {
                 var f = await feeds.AddFeedAsync(url);
-                app?.SaveNow();  // sofort in library.json schreiben
+                app?.SaveNow();
                 Log.Information("ui/addfeed ok id={Id} title={Title}", f.Id, f.Title);
 
                 data.LastSelectedFeedId = f.Id;
@@ -212,16 +216,16 @@ static class UiComposer
                 ui.SetEpisodesForFeed(f.Id, data.Episodes);
                 ui.SelectEpisodeIndex(0);
 
-                ui.ShowOsd("Feed added ✓", 1200);
+                ui.ShowOsd("feed added ✓", 1200);
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "ui/addfeed failed url={Url}", url);
-                ui.ShowOsd($"Add failed: {ex.Message}", 2200);
+                ui.ShowOsd($"add failed: {ex.Message}", 2200);
             }
         };
 
-        // Refresh
+        // refresh
         ui.RefreshRequested += async () =>
         {
             await feeds!.RefreshAllAsync();
@@ -236,7 +240,7 @@ static class UiComposer
             CmdRouter.ApplyList(ui, data);
         };
 
-        // Selection changed
+        // feed selection change
         ui.SelectedFeedChanged += () =>
         {
             var fid = ui.GetSelectedFeedId();
@@ -251,10 +255,10 @@ static class UiComposer
             _ = save();
         };
 
-        // EpisodeSelectionChanged (Index merken optional)
+        // episode selection change
         ui.EpisodeSelectionChanged += () => { _ = save(); };
 
-        // Play selected
+        // play selected
         ui.PlaySelected += () =>
         {
             var ep = ui?.GetSelectedEpisode();
@@ -287,7 +291,7 @@ static class UiComposer
 
             var baseline = TimeSpan.Zero;
             try { baseline = audioPlayer?.State.Position ?? TimeSpan.Zero; } catch { }
-            ui.SetPlayerLoading(true, isRemote ? "Loading…" : "Opening…", baseline);
+            ui.SetPlayerLoading(true, isRemote ? "loading…" : "opening…", baseline);
 
             var mode   = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
             var online = data.NetworkOnline;
@@ -302,7 +306,7 @@ static class UiComposer
             if (string.IsNullOrWhiteSpace(source))
             {
                 ui.SetPlayerLoading(false);
-                var msg = localPath == null ? "∅ Offline: not downloaded" : "No playable source";
+                var msg = localPath == null ? "offline: not downloaded" : "no playable source";
                 ui.ShowOsd(msg, 1500);
                 return;
             }
@@ -343,7 +347,7 @@ static class UiComposer
                             {
                                 ep.AudioUrl = fileUri;
                                 playback.Play(ep);
-                                ui.ShowOsd("Retry (file://)");
+                                ui.ShowOsd("retry (file://)");
                             }
                             finally { ep.AudioUrl = old; }
                         }
@@ -354,9 +358,10 @@ static class UiComposer
             }
         };
 
+        // theme toggle
         ui.ToggleThemeRequested += () => ui.ToggleTheme();
 
-        // Manuell „gespielt“ toggeln
+        // played toggle
         ui.TogglePlayedRequested += () =>
         {
             var ep = ui?.GetSelectedEpisode();
@@ -381,7 +386,7 @@ static class UiComposer
             ui.ShowDetails(ep);
         };
 
-        // Commands
+        // command router
         ui.Command += cmd =>
         {
             Log.Debug("cmd {Cmd}", cmd);
@@ -400,7 +405,7 @@ static class UiComposer
             CmdRouter.Handle(cmd, audioPlayer, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch);
         };
 
-        // Suche
+        // search
         ui.SearchApplied += query =>
         {
             var fid = ui?.GetSelectedFeedId();
@@ -415,14 +420,16 @@ static class UiComposer
             if (fid != null) ui?.SetEpisodesForFeed(fid.Value, list);
         };
 
-        // Startup episode + initial lists are done outside (ShowInitialLists)
+        // local accessors
         static DownloadManager ProgramDownloader() => (DownloadManager)typeof(Program)
             .GetField("_downloader", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
 
         static MemoryLogSink ProgramLog() => (MemoryLogSink)typeof(Program)
             .GetField("_memLog", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
     }
+    #endregion
 
+    #region initial list + playback wiring
     public static void ShowInitialLists(UiShell ui, AppData data)
     {
         ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
@@ -458,7 +465,6 @@ static class UiComposer
             ui.ShowStartupEpisode(last, data.Volume0_100, data.Speed);
         }
 
-        // AudioPlayer snapshot/status → UI (wiring here to keep UI composition encapsulated)
         var player = (SwappableAudioPlayer)typeof(Program)
             .GetField("_player", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
         var playback = (PlaybackCoordinator)typeof(Program)
@@ -492,10 +498,10 @@ static class UiComposer
                 switch (st)
                 {
                     case PlaybackStatus.Loading:
-                        ui.SetPlayerLoading(true, "Loading…", null);
+                        ui.SetPlayerLoading(true, "loading…", null);
                         break;
                     case PlaybackStatus.SlowNetwork:
-                        ui.SetPlayerLoading(true, "Connecting… (slow)", null);
+                        ui.SetPlayerLoading(true, "connecting… (slow)", null);
                         break;
                     case PlaybackStatus.Playing:
                     case PlaybackStatus.Ended:
@@ -525,21 +531,19 @@ static class UiComposer
             catch { }
         });
     }
+    #endregion
 
+    #region quit
     static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
     {
-        // Schon im Exit? Dann nichts mehr tun.
         if (Program.MarkExiting()) return;
 
-        // Timer sauber entfernen
         try { var t  = Program.NetTimerToken; if (t  is not null) Application.MainLoop?.RemoveTimeout(t); } catch { }
         try { var ut = Program.UiTimerToken;  if (ut is not null) Application.MainLoop?.RemoveTimeout(ut); } catch { }
 
-        // Läufer stoppen
         try { Program.DownloaderInstance?.Stop(); } catch { }
         try { audioPlayer?.Stop(); } catch { }
 
-        // UI beenden
         try
         {
             Application.MainLoop?.Invoke(() =>
@@ -549,12 +553,11 @@ static class UiComposer
         }
         catch { }
 
-        // Hard-Exit fallback
         _ = Task.Run(async () =>
         {
             await Task.Delay(1500).ConfigureAwait(false);
             try { Environment.Exit(0); } catch { }
         });
     }
-
+    #endregion
 }

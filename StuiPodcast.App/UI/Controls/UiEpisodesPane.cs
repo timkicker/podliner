@@ -268,7 +268,7 @@ internal sealed class UiEpisodesPane
     {
         // Prefix: neutrales "  " oder "▶ " für aktive Episode
         bool isNow = nowId != null && e.Id == nowId.Value;
-        var nowPrefix = GlyphSet.NowPrefix(isNow);
+        var nowPrefix = UIGlyphSet.NowPrefix(isNow);
 
         // Länge/Position – Default aus Persistenz
         long lenMs = e.DurationMs;
@@ -287,10 +287,10 @@ internal sealed class UiEpisodesPane
         long effLenMs = Math.Max(lenMs, posMs);
         double r = effLenMs > 0 ? Math.Clamp((double)posMs / effLenMs, 0, 1) : 0;
 
-        char mark = GlyphSet.ProgressGlyph(r, e.ManuallyMarkedPlayed);
+        char mark = UIGlyphSet.ProgressGlyph(r, e.ManuallyMarkedPlayed);
 
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
-        string dur = GlyphSet.FormatDuration(lenMs);
+        string dur = UIGlyphSet.FormatDuration(lenMs);
 
         // Download-Zustand / Badges
         var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
@@ -298,7 +298,7 @@ internal sealed class UiEpisodesPane
         bool offline = _isOffline?.Invoke() == true;
         bool hasLocal = ds == DownloadState.Done || Program.IsDownloaded(e.Id);
 
-        string badges = GlyphSet.ComposeBadges(
+        string badges = UIGlyphSet.ComposeBadges(
             isSaved: e.Saved,
             dlState: ds,
             isQueued: _isQueued?.Invoke(e.Id) == true,
@@ -310,7 +310,7 @@ internal sealed class UiEpisodesPane
         string title = e.Title ?? string.Empty;
         int viewWidth = List.Bounds.Width > 0 ? List.Bounds.Width : 100;
 
-        int reservedRight = _showFeedColumn ? GlyphSet.Separator.Length + FEED_COL_W : 0;
+        int reservedRight = _showFeedColumn ? UIGlyphSet.Separator.Length + FEED_COL_W : 0;
         int availTitle = Math.Max(6, viewWidth - left.Length - reservedRight);
         string titleTrunc = TruncateTo(title, availTitle);
 
@@ -319,7 +319,7 @@ internal sealed class UiEpisodesPane
         string feedName = (_feedTitleMap.TryGetValue(e.FeedId, out var nm) ? nm : string.Empty) ?? string.Empty;
         string feedTrunc = TruncateTo(feedName, FEED_COL_W);
         string paddedTitle = titleTrunc.PadRight(availTitle);
-        return left + paddedTitle + GlyphSet.Separator + feedTrunc.PadRight(FEED_COL_W);
+        return left + paddedTitle + UIGlyphSet.Separator + feedTrunc.PadRight(FEED_COL_W);
     }
 
     private static string TruncateTo(string? s, int max)

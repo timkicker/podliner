@@ -6,9 +6,6 @@ using Terminal.Gui;
 
 namespace StuiPodcast.App.Services;
 
-// ==========================================================
-// Network monitor (probing + hysteresis)
-// ==========================================================
 sealed class NetworkMonitor
 {
     readonly AppData _data;
@@ -47,11 +44,10 @@ sealed class NetworkMonitor
             OnNetworkChanged(online);
         });
 
-        try
-        {
-            NetworkChange.NetworkAvailabilityChanged += (s, e) => { TriggerProbe(); };
-        } catch { }
+        // react to nic availability
+        try { NetworkChange.NetworkAvailabilityChanged += (_, __) => { TriggerProbe(); }; } catch { }
 
+        // periodic probes
         timerToken = Application.MainLoop.AddTimeout(NetProbeInterval(), _ =>
         {
             TriggerProbe();

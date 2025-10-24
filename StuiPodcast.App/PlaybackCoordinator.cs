@@ -1,22 +1,15 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
 using StuiPodcast.Infra.Player;
 
-/// <summary>
-/// Koordiniert Playback-Fortschritt, Persistenz, Auto-Advance und liefert
-/// pro Tick einen *atomischen* Fortschritts-Snapshot (Position & Länge).
-/// Öffentliche API bleibt kompatibel: Play(), PersistProgressTick(), bestehende Events.
-/// Ergänzt um: Stall-Watchdog + Status-Events (Loading/Slow/Playing/Ended).
-/// </summary>
+#region playback coordinator
+
+// coordinates playback progress, persistence and auto advance
 sealed class PlaybackCoordinator
 {
-    // ---- Dependencies / State --------------------------------------------------
+    #region deps and state
+
     private readonly AppData _data;
     private readonly IAudioPlayer _audioPlayer;
     private readonly Func<Task> _saveAsync;
@@ -24,39 +17,20 @@ sealed class PlaybackCoordinator
 
     private Episode? _current;
 
-    // Resume-Timer
     private CancellationTokenSource? _resumeCts;
-
-    // Stall-Watchdog (für „Connecting… (slow)“)
     private CancellationTokenSource? _stallCts;
     private bool _progressSeenForSession = false;
 
-    // Watchdogs / Throttles
     private DateTime _lastUiRefresh    = DateTime.MinValue;
     private DateTime _lastPeriodicSave = DateTime.MinValue;
     private DateTimeOffset _lastAutoAdv = DateTimeOffset.MinValue;
 
-    // Genau-einmal-Guard pro abgespielter Episode
     private bool _endHandledForSession = false;
-
-    // Session-Isolation: Jede Play-Session bekommt eine ID.
     private int _sid = 0;
 
     public event Action<Episode>? AutoAdvanceSuggested;
-
-    // Optional: UI kann darauf reagieren (Queue-Feed neu rendern).
     public event Action? QueueChanged;
-
-    /// <summary>
-    /// Neuer, atomischer Fortschritts-Snapshot pro Tick (Position & Länge).
-    /// Die UI wird diesen in PlayerPanel/Shell konsumieren.
-    /// </summary>
     public event Action<PlaybackSnapshot>? SnapshotAvailable;
-
-    /// <summary>
-    /// Status-Event für UI (Loading → SlowNetwork → Playing/Ended).
-    /// Nicht zwingend zu abonnieren; bricht bestehende API nicht.
-    /// </summary>
     public event Action<PlaybackStatus>? StatusChanged;
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
@@ -69,22 +43,15 @@ sealed class PlaybackCoordinator
         _mem = mem;
     }
 
-    // ---- Public API ------------------------------------------------------------
+    #endregion
 
-    /// <summary>
-    /// Startet das Abspielen einer Episode. Schneidet, falls nötig, die Queue
-    /// bis inkl. dieser Episode (FIFO) ab – das deckt den Klick im Queue-Feed ab.
-    /// Führt optional ein einmaliges Resume-Seek aus (mit kurzer Verzögerung),
-    /// um LibVLC-Zickereien zu vermeiden. Setzt „Loading“-Status und startet
-    /// einen Stall-Watchdog, der bei ausbleibendem Fortschritt „SlowNetwork“ meldet.
-    /// </summary>
+    #region public api
+
     public void Play(Episode ep)
     {
-        // neue Session
         unchecked { _sid++; }
         var sid = _sid;
 
-        // Wenn die Episode in der Queue ist: alles bis inkl. dieser ID entfernen.
         ConsumeQueueUpToInclusive(ep.Id);
 
         _current = ep;
@@ -92,37 +59,30 @@ sealed class PlaybackCoordinator
         _progressSeenForSession = false;
 
         _current.Progress.LastPlayedAt = DateTimeOffset.Now;
-        _ = _saveAsync(); // Save ist intern gedrosselt
+        _ = _saveAsync();
 
         CancelResume();
         CancelStallWatch();
 
-        // Startoffset heuristisch:
-        // - sehr nahe am Anfang → nicht resumen
-        // - sehr nahe am Ende → nicht resumen (sonst „hängen“ wir am Ende)
         long? startMs = ep.Progress.LastPosMs;
         if (startMs is long ms)
         {
             long knownLen = ep.DurationMs;
-            if ((knownLen > 0 && (ms < 5_000 || ms > knownLen - 10_000)) ||
-                (knownLen == 0 && ms < 5_000))
+            if ((knownLen > 0 && (ms < 5000 || ms > knownLen - 10000)) ||
+                (knownLen == 0 && ms < 5000))
             {
                 startMs = null;
             }
         }
 
-        // 1) Erst sauber starten (ohne Startoffset, stabilisiert Demux)
         FireStatus(PlaybackStatus.Loading);
         _audioPlayer.Play(ep.AudioUrl, null);
 
-        // 2) Danach einmalig resumen, wenn gewünscht – aber session-sicher
         if (startMs is long want && want > 0)
             StartOneShotResume(want, sid);
 
-        // 3) Stall-Watchdog starten (z. B. 5 s bis „SlowNetwork“)
         StartStallWatch(sid, TimeSpan.FromSeconds(5));
 
-        // 4) Snapshot auf definierte Ausgangswerte setzen
         _lastSnapshot = PlaybackSnapshot.From(
             sid,
             ep.Id,
@@ -135,12 +95,6 @@ sealed class PlaybackCoordinator
         FireSnapshot(_lastSnapshot);
     }
 
-    /// <summary>
-    /// Wird regelmäßig aus AudioPlayer.StateChanged + UI-Timer aufgerufen.
-    /// Persistiert Fortschritt, markiert Played, schlägt Auto-Advance vor und
-    /// triggert leichte UI-Refreshs. Außerdem erzeugt sie genau EINEN
-    /// atomischen Fortschritts-Snapshot (Position & Länge) für die UI.
-    /// </summary>
     public void PersistProgressTick(
         PlayerState s,
         Action<IEnumerable<Episode>> refreshUi,
@@ -148,14 +102,11 @@ sealed class PlaybackCoordinator
     {
         if (_current is null) return;
 
-        // 1) Effektive Länge & Position berechnen (einmal pro Tick!)
         long effLenMs, posMs;
         var endNow = IsEndReached(s, out effLenMs, out posMs);
 
-        // Fortschritt für Watchdog bewerten
         if (!_progressSeenForSession)
         {
-            // „Fortschritt gesehen“, sobald Position > 0 ODER wir Playing+Length haben
             if (posMs > 0 || (s.IsPlaying && s.Length.HasValue && s.Length.Value > TimeSpan.Zero))
             {
                 _progressSeenForSession = true;
@@ -164,12 +115,10 @@ sealed class PlaybackCoordinator
             }
         }
 
-        // 2) Persistiere bekannte Länge & Position (clamps)
         if (effLenMs > 0)
             _current.DurationMs = effLenMs;
         _current.Progress.LastPosMs = Math.Max(0, posMs);
 
-        // 3) Snapshot bilden (einmalig) und ausgeben
         var snap = PlaybackSnapshot.From(
             _sid,
             _current.Id,
@@ -182,14 +131,12 @@ sealed class PlaybackCoordinator
         _lastSnapshot = snap;
         FireSnapshot(snap);
 
-        // 4) Played-Markierung (unabhängig vom Auto-Advance)
         if (effLenMs > 0)
         {
             var ratio  = (double)posMs / effLenMs;
             var remain = TimeSpan.FromMilliseconds(Math.Max(0, effLenMs - posMs));
 
-            // Für sehr kurze Clips härten (keine zu frühe Markierung)
-            var isVeryShort = effLenMs <= 60_000; // <= 60s
+            var isVeryShort = effLenMs <= 60000;
             var remainCut   = isVeryShort ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(30);
             var ratioCut    = isVeryShort ? 0.98 : 0.90;
 
@@ -197,11 +144,10 @@ sealed class PlaybackCoordinator
             {
                 _current.ManuallyMarkedPlayed = true;
                 _current.Progress.LastPlayedAt = DateTimeOffset.Now;
-                _ = _saveAsync(); // schnelles Save bei Statuswechsel
+                _ = _saveAsync();
             }
         }
 
-        // 5) Auto-Advance: genau einmal pro Session, entkoppelt von Played-Markierung
         if (!_endHandledForSession && endNow)
         {
             _endHandledForSession = true;
@@ -213,19 +159,17 @@ sealed class PlaybackCoordinator
                 TryFindNext(_current, out var nxt))
             {
                 _lastAutoAdv = DateTimeOffset.Now;
-                try { AutoAdvanceSuggested?.Invoke(nxt); } catch { /* best effort */ }
+                try { AutoAdvanceSuggested?.Invoke(nxt); } catch { }
             }
         }
 
-        // 6) UI leicht aktualisieren (~1x/s)
         var now = DateTime.UtcNow;
         if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(1))
         {
             _lastUiRefresh = now;
-            try { refreshUi(allEpisodes); } catch { /* robust */ }
+            try { refreshUi(allEpisodes); } catch { }
         }
 
-        // 7) periodisches Save (~3s)
         if ((now - _lastPeriodicSave) > TimeSpan.FromSeconds(3))
         {
             _lastPeriodicSave = now;
@@ -233,9 +177,10 @@ sealed class PlaybackCoordinator
         }
     }
 
-    // ---- Internals -------------------------------------------------------------
+    #endregion
 
-    // Einmaliger Resume-Seek, leicht verzögert (stabiler bei LibVLC); session-sicher.
+    #region helpers
+
     private void StartOneShotResume(long ms, int sid)
     {
         _resumeCts?.Cancel();
@@ -246,26 +191,24 @@ sealed class PlaybackCoordinator
         {
             try
             {
-                await Task.Delay(350, cts.Token); // Decoder/Length settle lassen
+                await Task.Delay(350, cts.Token);
                 if (cts.IsCancellationRequested) return;
-
-                // Session noch dieselbe?
                 if (sid != _sid) return;
 
                 Application.MainLoop?.Invoke(() =>
                 {
                     try
                     {
-                        if (sid != _sid) return; // Session-Check auch hier
+                        if (sid != _sid) return;
                         var lenMs = _audioPlayer.State.Length?.TotalMilliseconds ?? 0;
-                        if (lenMs > 0 && ms > lenMs - 10_000) return; // nahe Ende ignorieren
+                        if (lenMs > 0 && ms > lenMs - 10000) return;
                         _audioPlayer.SeekTo(TimeSpan.FromMilliseconds(ms));
                     }
-                    catch { /* ignore */ }
+                    catch { }
                 });
             }
             catch (TaskCanceledException) { }
-            catch { /* ignore */ }
+            catch { }
         });
     }
 
@@ -275,11 +218,6 @@ sealed class PlaybackCoordinator
         _resumeCts = null;
     }
 
-    /// <summary>
-    /// Startet den Stall-Watchdog: Wenn innerhalb von „timeout“ kein Fortschritt
-    /// (Position>0 oder spielende Engine mit bekannter Länge) gesehen wird, wird
-    /// ein „SlowNetwork“-Status gemeldet (Session-sicher).
-    /// </summary>
     private void StartStallWatch(int sid, TimeSpan timeout)
     {
         CancelStallWatch();
@@ -292,13 +230,12 @@ sealed class PlaybackCoordinator
             {
                 await Task.Delay(timeout, cts.Token);
                 if (cts.IsCancellationRequested) return;
-                if (sid != _sid) return;               // Session gewechselt
-                if (_progressSeenForSession) return;   // Bereits Fortschritt
+                if (sid != _sid) return;
+                if (_progressSeenForSession) return;
                 FireStatus(PlaybackStatus.SlowNetwork);
-                // (Log-Zeile entfernt – MemoryLogSink hat keine Log-Methode)
             }
             catch (TaskCanceledException) { }
-            catch { /* ignore */ }
+            catch { }
         });
     }
 
@@ -308,37 +245,27 @@ sealed class PlaybackCoordinator
         _stallCts = null;
     }
 
-    /// <summary>
-    /// Robuste End-Erkennung.
-    /// - Priorität: *AudioPlayer*-Länge (falls vorhanden).
-    /// - Fallback: effektive Länge = max(PlayerLen, MetaLen, Pos).
-    /// - Stall-Fälle: IsPlaying==false & (Rest sehr klein bzw. pos≈len).
-    /// </summary>
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
         var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
         var lenMsMeta   = (long)(_current?.DurationMs!);
         posMs = (long)Math.Max(0, s.Position.TotalMilliseconds);
 
-        effLenMs = Math.Max(Math.Max(lenMsPlayer, lenMsMeta), posMs); // nie kleiner als Pos
+        effLenMs = Math.Max(Math.Max(lenMsPlayer, lenMsMeta), posMs);
         if (effLenMs <= 0) return false;
 
-        // Primär gegen die *AudioPlayer*-Länge prüfen (am zuverlässigsten)
         if (lenMsPlayer > 0)
         {
             var remainPlayer = Math.Max(0, lenMsPlayer - posMs);
             var ratioPlayer  = (double)posMs / Math.Max(1, lenMsPlayer);
 
-            // 99.5% oder weniger als 2s Rest → Ende
             if (ratioPlayer >= 0.995 || (!s.IsPlaying && remainPlayer <= 2000))
                 return true;
 
-            // „End-Stall“: nicht spielend & pos >= (lenPlayer - 250ms)
             if (!s.IsPlaying && posMs >= Math.Max(0, lenMsPlayer - 250))
                 return true;
         }
 
-        // Fallback gegen effLenMs (falls AudioPlayer-Länge 0 bleibt)
         var remainEff = Math.Max(0, effLenMs - posMs);
         var ratioEff  = (double)posMs / Math.Max(1, effLenMs);
 
@@ -348,30 +275,23 @@ sealed class PlaybackCoordinator
         return false;
     }
 
-    /// <summary>
-    /// Nächste Episode bestimmen:
-    ///   1) Erst aus der Queue (FIFO, ungültige Ids werden übersprungen)
-    ///   2) Sonst in Feed-Reihenfolge (pubdate desc), optional Wrap & UnplayedOnly
-    /// </summary>
     private bool TryFindNext(Episode current, out Episode next)
     {
-        // (1) Queue zuerst
         while (_data.Queue.Count > 0)
         {
             var nextId = _data.Queue[0];
-            _data.Queue.RemoveAt(0);             // FIFO
+            _data.Queue.RemoveAt(0);
             QueueChangedSafe();
 
             var cand = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
             if (cand != null)
             {
                 next = cand;
-                _ = _saveAsync(); // Queue-Verbrauch persistieren
+                _ = _saveAsync();
                 return true;
             }
         }
 
-        // (2) Fallback: normale Feed-Reihenfolge
         next = null!;
         var list = _data.Episodes
             .Where(e => e.FeedId == current.FeedId)
@@ -381,7 +301,6 @@ sealed class PlaybackCoordinator
         var idx = list.FindIndex(e => e.Id == current.Id);
         if (idx < 0) return false;
 
-        // nach unten (ältere) suchen
         for (int i = idx + 1; i < list.Count; i++)
         {
             var cand = list[i];
@@ -395,7 +314,6 @@ sealed class PlaybackCoordinator
             }
         }
 
-        // optional: wrap-around
         if (_data.WrapAdvance)
         {
             for (int i = 0; i < idx; i++)
@@ -415,9 +333,6 @@ sealed class PlaybackCoordinator
         return false;
     }
 
-    /// <summary>
-    /// Schneidet die Queue bis inkl. targetId; feuert QueueChanged.
-    /// </summary>
     private void ConsumeQueueUpToInclusive(Guid targetId)
     {
         if (_data.Queue.Count == 0) return;
@@ -425,7 +340,6 @@ sealed class PlaybackCoordinator
         var ix = _data.Queue.IndexOf(targetId);
         if (ix < 0) return;
 
-        // Alles bis inkl. ix entfernen
         _data.Queue.RemoveRange(0, ix + 1);
         QueueChangedSafe();
         _ = _saveAsync();
@@ -433,31 +347,32 @@ sealed class PlaybackCoordinator
 
     private void QueueChangedSafe()
     {
-        try { QueueChanged?.Invoke(); } catch { /* best effort */ }
+        try { QueueChanged?.Invoke(); } catch { }
     }
 
     private void FireStatus(PlaybackStatus status)
     {
-        try { StatusChanged?.Invoke(status); } catch { /* UI darf App nicht crashen */ }
+        try { StatusChanged?.Invoke(status); } catch { }
     }
 
-    // ---- Snapshot-API ----------------------------------------------------------
+    #endregion
 
-    /// <summary>
-    /// Liefert den letzten erzeugten Snapshot (z. B. UI-Initialisierung).
-    /// </summary>
+    #region snapshot api
+
     public PlaybackSnapshot GetLastSnapshot() => _lastSnapshot;
 
     private void FireSnapshot(PlaybackSnapshot snap)
     {
-        try { SnapshotAvailable?.Invoke(snap); } catch { /* UI darf App nicht crashen */ }
+        try { SnapshotAvailable?.Invoke(snap); } catch { }
     }
+
+    #endregion
 }
 
-/// <summary>
-/// Atomischer Fortschritts-Snapshot: beide Anzeigen (Elapsed & Remaining)
-/// basieren auf denselben Werten innerhalb eines UI-Frames.
-/// </summary>
+#endregion
+
+#region snapshot and status
+
 public readonly record struct PlaybackSnapshot(
     int SessionId,
     Guid? EpisodeId,
@@ -490,9 +405,6 @@ public readonly record struct PlaybackSnapshot(
             now);
 }
 
-/// <summary>
-/// Loading → SlowNetwork (falls kein Fortschritt) → Playing/Ended.
-/// </summary>
 public enum PlaybackStatus
 {
     Idle = 0,
@@ -501,3 +413,5 @@ public enum PlaybackStatus
     Playing = 3,
     Ended = 4
 }
+
+#endregion

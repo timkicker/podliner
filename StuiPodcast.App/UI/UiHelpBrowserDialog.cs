@@ -10,13 +10,16 @@ namespace StuiPodcast.App.UI
 {
     internal static class UiHelpBrowserDialog
     {
+        #region public api
         public static void Show()
         {
+            #region create dialog + tabs
             var dlg = new Dialog("Help — Keys & Commands", 100, 32);
             var tabs = new TabView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             dlg.Add(tabs);
+            #endregion
 
-            // ==== KEYS TAB ====
+            #region keys tab ui
             var keysHost   = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
             var keyList    = new ListView {
@@ -32,12 +35,12 @@ namespace StuiPodcast.App.UI
             keysHost.Add(new Label("Search:"){ X=1, Y=0 }, keySearch, keyList, keyDetails);
             var keysTab = new TabView.Tab("Keys", keysHost);
             tabs.AddTab(keysTab, true);
+            #endregion
 
-            // ==== COMMANDS TAB ====  (mit Kategorien links)
+            #region commands tab ui 
             var cmdHost    = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
             var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
 
-            // Kategorie-Liste links
             var catLabels = new List<string> { "All", "Most used" };
             try { catLabels.AddRange(Enum.GetNames(typeof(HelpCategory))); } catch { /* optional */ }
 
@@ -48,14 +51,12 @@ namespace StuiPodcast.App.UI
             };
             catList.SetSource(catLabels);
 
-            // Command-Liste (Mitte)
             var cmdList = new ListView {
                 X = Pos.Right(catList) + 1, Y = 2,
                 Width  = Dim.Percent(35) - 19,
                 Height = Dim.Fill(1)
             };
 
-            // Details (rechts)
             var cmdDetails = new TextView {
                 X = Pos.Right(cmdList) + 2, Y = 2,
                 Width = Dim.Fill(1), Height = Dim.Fill(1),
@@ -72,15 +73,17 @@ namespace StuiPodcast.App.UI
             );
             var cmdsTab = new TabView.Tab("Commands", cmdHost);
             tabs.AddTab(cmdsTab, false);
+            #endregion
 
-            // ==== Scrollbars ====
+            #region scrollbars
             WireListScrollbar(keyList);
             WireListScrollbar(catList);
             WireListScrollbar(cmdList);
             WireTextViewScrollbar(keyDetails);
             WireTextViewScrollbar(cmdDetails);
+            #endregion
 
-            // ==== Daten/Filter ====
+            #region data + filter state
             List<KeyHelp> keyData = HelpCatalog.Keys.ToList();
             List<KeyHelp> keyFiltered = keyData.ToList();
 
@@ -103,8 +106,9 @@ namespace StuiPodcast.App.UI
 
                 lv.SetNeedsDisplay();
             }
+            #endregion
 
-            // ---------- Keys ----------
+            #region keys filtering + details
             void RefreshKeyList()
             {
                 var q = keySearch.Text?.ToString() ?? "";
@@ -121,13 +125,14 @@ namespace StuiPodcast.App.UI
                 keyList.TopItem = 0;
                 EnsureSelectionVisible(keyList);
             }
+            #endregion
 
-            // ---------- Commands (Kategorie + Suche) ----------
+            #region commands filtering + details
             HelpCategory? CurrentCategory()
             {
                 var idx = Clamp(catList.SelectedItem, 0, catLabels.Count - 1);
-                if (idx == 0) return null; // All
-                if (idx == 1) return (HelpCategory)(-1); // Most used sentinel
+                if (idx == 0) return null; // all
+                if (idx == 1) return (HelpCategory)(-1); // most used sentinel
                 var name = catLabels[idx];
                 try { if (Enum.TryParse<HelpCategory>(name, out var cat)) return cat; } catch { }
                 return null;
@@ -179,14 +184,14 @@ namespace StuiPodcast.App.UI
 
                 if (cmdFiltered.Count == 0) cmdDetails.Text = "";
             }
+            #endregion
 
-            // Suche tippen -> filtern
+            #region search wiring
             keySearch.KeyPress += (View.KeyEventEventArgs _) =>
                 Application.MainLoop.AddIdle(() => { RefreshKeyList(); return false; });
             cmdSearch.KeyPress += (View.KeyEventEventArgs _) =>
                 Application.MainLoop.AddIdle(() => { RefreshCmdList(); return false; });
 
-            // Esc löscht, Enter fokussiert Liste
             keySearch.KeyPress += e => {
                 if (e.KeyEvent.Key == Key.Esc) { keySearch.Text = ""; RefreshKeyList(); e.Handled = true; }
                 else if (e.KeyEvent.Key == Key.Enter) { keyList.SetFocus(); e.Handled = true; }
@@ -195,8 +200,9 @@ namespace StuiPodcast.App.UI
                 if (e.KeyEvent.Key == Key.Esc) { cmdSearch.Text = ""; RefreshCmdList(); e.Handled = true; }
                 else if (e.KeyEvent.Key == Key.Enter) { cmdList.SetFocus(); e.Handled = true; }
             };
+            #endregion
 
-            // Detail-Update (Keys)
+            #region list selection -> details
             keyList.SelectedItemChanged += _ =>
             {
                 if (keyFiltered.Count == 0) { keyDetails.Text = ""; return; }
@@ -207,7 +213,6 @@ namespace StuiPodcast.App.UI
                 EnsureSelectionVisible(keyList);
             };
 
-            // Detail-Update (Commands)
             cmdList.SelectedItemChanged += _ =>
             {
                 if (cmdFiltered.Count == 0) { cmdDetails.Text = ""; return; }
@@ -224,8 +229,9 @@ namespace StuiPodcast.App.UI
                 cmdDetails.Text = $"{item.Command}\n\n{item.Description}\n\n{catLine}{aliases}{args}{examples}".TrimEnd();
                 EnsureSelectionVisible(cmdList);
             };
+            #endregion
 
-            // ===== Fokus-Ring und Navigation =====
+            #region focus ring + nav
             var focusOrder = new View[] { catList, cmdList, cmdDetails, cmdSearch };
             int IndexOf(View v) => Array.IndexOf(focusOrder, v);
             void FocusByIndex(int i)
@@ -238,7 +244,6 @@ namespace StuiPodcast.App.UI
             void FocusNext(View from) => FocusByIndex(IndexOf(from) + 1);
             void FocusPrev(View from) => FocusByIndex(IndexOf(from) - 1);
 
-            // catList Keys
             catList.KeyPress += e =>
             {
                 var key = e.KeyEvent.Key; var ch = e.KeyEvent.KeyValue;
@@ -252,7 +257,6 @@ namespace StuiPodcast.App.UI
                 if (key == Key.BackTab) { FocusPrev(catList); e.Handled = true; return; }
             };
 
-            // cmdList Keys
             cmdList.KeyPress += e =>
             {
                 if (cmdSearch.HasFocus) return;
@@ -268,7 +272,6 @@ namespace StuiPodcast.App.UI
                 if (key == Key.BackTab) { FocusPrev(cmdList); e.Handled = true; return; }
             };
 
-            // cmdDetails Keys
             cmdDetails.KeyPress += e =>
             {
                 var key = e.KeyEvent.Key; var ch = e.KeyEvent.KeyValue;
@@ -279,14 +282,12 @@ namespace StuiPodcast.App.UI
                 if (key == Key.BackTab) { FocusPrev(cmdDetails); e.Handled = true; return; }
             };
 
-            // Suche Keys (nur Fokus-Ring)
             cmdSearch.KeyPress += e =>
             {
                 if (e.KeyEvent.Key == Key.Tab) { FocusNext(cmdSearch); e.Handled = true; return; }
                 if (e.KeyEvent.Key == Key.BackTab) { FocusPrev(cmdSearch); e.Handled = true; return; }
             };
 
-            // Globale Helpers
             void MoveList(ListView lv, int d)
             {
                 var c = lv.Source?.Count ?? 0;
@@ -298,15 +299,15 @@ namespace StuiPodcast.App.UI
             void GoBottom(ListView lv) { var c = lv.Source?.Count ?? 0; if (c > 0) { lv.SelectedItem = c - 1; EnsureSelectionVisible(lv); } }
             void FocusKeysTab() { tabs.SelectedTab = keysTab; keyList.SetFocus(); EnsureSelectionVisible(keyList); }
             void FocusCmdsTab() { tabs.SelectedTab = cmdsTab; cmdList.SetFocus(); EnsureSelectionVisible(cmdList); }
+            #endregion
 
-            // Kategorie-Wechsel → filtern
+            #region events + init
             catList.SelectedItemChanged += _ =>
             {
                 RefreshCmdList();
                 EnsureSelectionVisible(catList);
             };
 
-            // Global close / tab-nav
             dlg.KeyPress += e =>
             {
                 var ch = e.KeyEvent.KeyValue;
@@ -319,14 +320,15 @@ namespace StuiPodcast.App.UI
                 }
             };
 
-            // initial
             RefreshKeyList();
-            catList.SelectedItem = 0;   // „All“
+            catList.SelectedItem = 0;
             RefreshCmdList();
             Application.Run(dlg);
+            #endregion
         }
+        #endregion
 
-        // ---------- Scrollbar-Helfer ----------
+        #region scrollbar helpers
         private static void WireListScrollbar(ListView lv)
         {
             try
@@ -386,5 +388,6 @@ namespace StuiPodcast.App.UI
             }
             catch { /* best effort */ }
         }
+        #endregion
     }
 }
