@@ -1,10 +1,15 @@
 # Roadmap
 
 ## Now (v0.1.0)
-- [X] Branding-theme (+ as default)
 - [ ] Fix play-button visual
-- [ ] Update macos-installer
-- [ ] Update readme (download-section)
+- [ ] Fix arrow-keys support
+- [ ] Fix VLC recogn on Mac. MPV seems to work
+- [X] Rework default theme(+ as default)
+- [ ] Add more logging to engine recogn.
+- [ ] Add more commands to menubar
+- [ ] Rethink first-letter-highlighting
+- [X] Update macos-installer
+- [X] Update readme (download-section)
 
 
 ## Refactor 
