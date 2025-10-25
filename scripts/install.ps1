@@ -20,10 +20,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Ensure TLS 1.2 for GitHub on older Windows/PS
+try {
+  [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+} catch { }
+
 function Get-LatestVersion {
   try {
-    $resp = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/timkicker/podliner/releases/latest"
-    # tag_name like v0.0.1
+    $headers = @{ 'User-Agent' = 'podliner-installer' }
+    $resp = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "https://api.github.com/repos/timkicker/podliner/releases/latest"
+    # tag_name like v0.0.2
     return ($resp.tag_name -replace '^v','')
   } catch {
     throw "Could not determine latest version from GitHub API."
@@ -40,7 +46,6 @@ $LocalApp = $env:LOCALAPPDATA
 if (-not $LocalApp) { throw "LOCALAPPDATA not set." }
 
 $Root    = Join-Path $LocalApp "podliner"
-$BinDir  = Join-Path $Root "bin"                         # optional user bin (unused by default)
 $BaseOpt = $Root                                         # store versions beneath here
 $WinApps = Join-Path $LocalApp "Microsoft\WindowsApps"   # usually in PATH
 $Shim    = Join-Path $WinApps "podliner.cmd"
@@ -53,7 +58,7 @@ if ($Uninstall) {
   }
   if ($Prune -and (Test-Path -LiteralPath $BaseOpt)) {
     Write-Host "Removing all installed versions under $BaseOpt"
-    Remove-Item -LiteralPath $BaseOpt -Recurse -Force
+    Remove-Item -LiteralPath $BaseOpt -Recurse -Force -ErrorAction SilentlyContinue
   } else {
     Write-Host "Keeping installed versions under $BaseOpt (use -Prune to remove)."
   }
@@ -64,10 +69,13 @@ if ($Uninstall) {
 # Resolve version
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $Version = Get-LatestVersion  # Note: latest = stable only (RC/beta are not 'latest')
+} else {
+  # allow passing tags with or without leading 'v'
+  $Version = ($Version -replace '^v','')
 }
 $Tag = "v$Version"
 
-$Rid = "win-x64"  # single RID for now
+$Rid = "win-x64"
 $AssetName = "podliner-$Rid.zip"
 $BaseUrl = "https://github.com/timkicker/podliner/releases/download/$Tag"
 
@@ -76,6 +84,26 @@ $Dest  = Join-Path $BaseOpt $Version
 $Stage = Join-Path $env:TEMP ("podliner_" + [Guid]::NewGuid().ToString("N"))
 Ensure-Dir $Stage
 Ensure-Dir $BaseOpt
+
+# Helpers
+function Find-PodlinerExe([string]$root) {
+  # If there's exactly one subfolder and no files, flatten it for convenience
+  $topFiles   = Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue
+  $topFolders = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue
+  if (-not $topFiles -and $topFolders.Count -eq 1) {
+    $inner = $topFolders[0].FullName
+    Write-Host "Flattening inner folder: $inner"
+    Get-ChildItem -LiteralPath $inner -Force | ForEach-Object {
+      Move-Item -LiteralPath $_.FullName -Destination $root -Force
+    }
+    Remove-Item -LiteralPath $inner -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
+  # Now search recursively for podliner.exe
+  $exeItem = Get-ChildItem -LiteralPath $root -Recurse -File -Filter "podliner.exe" -ErrorAction SilentlyContinue |
+             Select-Object -First 1
+  return $exeItem
+}
 
 try {
   Write-Host "Installing podliner $Version for $Rid -> $Dest" -ForegroundColor Cyan
@@ -90,7 +118,7 @@ try {
   if (-not (Test-Path -LiteralPath $zipPath)) { throw "Download failed: $AssetName not found." }
   if (-not (Test-Path -LiteralPath $sumPath)) { throw "Download failed: SHA256SUMS not found." }
 
-  # Verify SHA256 (robust for PS 5.1 and 7+)
+  # Verify SHA256
   $expected = (Get-Content -LiteralPath $sumPath |
     Where-Object { $_ -match ('\b' + [regex]::Escape($AssetName) + '$') } |
     Select-Object -First 1 |
@@ -104,10 +132,10 @@ try {
   }
   Write-Host "Checksum OK." -ForegroundColor Green
 
-  # Unpack
+  # Unpack fresh
   if (Test-Path -LiteralPath $Dest) {
     Write-Host "Removing existing version folder: $Dest"
-    Remove-Item -LiteralPath $Dest -Recurse -Force
+    Remove-Item -LiteralPath $Dest -Recurse -Force -ErrorAction SilentlyContinue
   }
   Ensure-Dir $Dest
 
@@ -115,11 +143,17 @@ try {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $Dest)
 
-  # Expected layout: $Dest\podliner\podliner.exe
-  $Exe = Join-Path $Dest "podliner\podliner.exe"
-  if (-not (Test-Path -LiteralPath $Exe)) {
-    throw "Unexpected archive layout. Not found: $Exe"
+  # Robustly locate the executable (supports flat ZIPs and one-folder ZIPs)
+  $exeItem = Find-PodlinerExe -root $Dest
+  if (-not $exeItem) {
+    # Show a short tree to help debug unexpected archives
+    $sample = (Get-ChildItem -LiteralPath $Dest -Recurse -ErrorAction SilentlyContinue |
+               Select-Object -First 30 | ForEach-Object { $_.FullName }) -join "`n"
+    throw "Unexpected archive layout. podliner.exe not found under $Dest.`nSample:`n$sample"
   }
+
+  $Exe = $exeItem.FullName
+  Write-Host "Found executable: $Exe" -ForegroundColor Green
 
   # Create shim in WindowsApps
   Ensure-Dir $WinApps
@@ -131,7 +165,7 @@ try {
   $pathParts = ($env:PATH -split ';') | Where-Object { $_ -and $_.Trim() -ne "" }
   $inPath = $pathParts | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -eq $WinApps.ToLowerInvariant() } | Measure-Object | Select-Object -ExpandProperty Count
   if ($inPath -eq 0) {
-    Write-Warning "$WinApps is not in PATH. Add it or call the full path to podliner.exe."
+    Write-Warning "$WinApps is not in PATH. Add it or call the full path to podliner.cmd."
   }
 
   Write-Host "Done. Try:  podliner --version" -ForegroundColor Cyan
@@ -144,15 +178,22 @@ finally {
 
 # Optional prune after install
 if ($Prune -and (Test-Path -LiteralPath $BaseOpt)) {
-  Write-Host "Pruning old versions..." -ForegroundColor DarkCyan
-  # Determine current target (exe we just installed)
-  $current = $Exe
-  Get-ChildItem -LiteralPath $BaseOpt -Directory | ForEach-Object {
-    $vdir = $_.FullName
-    $candidate = Join-Path $vdir "podliner\podliner.exe"
-    if ($candidate -and (Test-Path -LiteralPath $candidate) -and ($candidate -ne $current)) {
-      Write-Host "Removing $vdir"
-      Remove-Item -LiteralPath $vdir -Recurse -Force -ErrorAction SilentlyContinue
+  if (-not (Get-Variable -Name Exe -Scope Script -ErrorAction SilentlyContinue) -or -not $Exe -or -not (Test-Path -LiteralPath $Exe)) {
+    Write-Host "Skip prune: no current executable resolved." -ForegroundColor Yellow
+  } else {
+    Write-Host "Pruning old versions..." -ForegroundColor DarkCyan
+    $current = $Exe
+    Get-ChildItem -LiteralPath $BaseOpt -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+      $vdir = $_.FullName
+      # Try to find any podliner.exe in that version directory
+      $candidateItem = Get-ChildItem -LiteralPath $vdir -Recurse -File -Filter "podliner.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($candidateItem) {
+        $candidate = $candidateItem.FullName
+        if ($candidate -ne $current) {
+          Write-Host "Removing $vdir"
+          Remove-Item -LiteralPath $vdir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+      }
     }
   }
 }
