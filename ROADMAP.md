@@ -17,7 +17,8 @@
 
 ### Refactor 
 - [ ] Refactor Shell: split into subclasses
-- [ ] Refactor CmdParser: Replace if-hell. Map?
+- [ ] Refactor CmdParser: Replace if-hell yanderedev-style. This is rediculous and was just meant for testing... Map?
 
 ### UX
 - [ ] Rethink first-letter-highlighting
+ 
