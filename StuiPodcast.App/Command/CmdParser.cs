@@ -2,135 +2,173 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace StuiPodcast.App.Command;
-
-internal static class CmdParser
+namespace StuiPodcast.App.Command
 {
-    #region api
-    // parse raw command to structured result
-    public static CmdParsed Parse(string raw)
+    internal static class CmdParser
     {
-        var tokens = Tokenize(raw.Trim());
-        if (tokens.Length == 0) return new CmdParsed(raw, "", Array.Empty<string>(), TopCommand.Unknown);
-        var (cmd, args) = SplitCmd(tokens);
-        return new CmdParsed(raw, cmd, args, MapTop(cmd));
-    }
-    #endregion
+        private static readonly StringComparer Ci = StringComparer.OrdinalIgnoreCase;
 
-    #region tokenize
-    // split input into tokens (quotes + escapes)
-    private static string[] Tokenize(string raw)
-    {
-        var list = new List<string>();
-        var cur = new System.Text.StringBuilder();
-        bool inQuotes = false;
-        char quoteChar = '\0';
-
-        for (int i = 0; i < raw.Length; i++)
+        // Aliases → kanonische Form
+        private static readonly Dictionary<string, string> Canon = new(Ci)
         {
-            char ch = raw[i];
+            [":h"] = ":help",
+            [":q"] = ":quit",
+            [":q!"] = ":quit!",
+            [":w"] = ":write",
+            [":wq"] = ":wq", // Falls du mal eine eigene Langform willst, hier mappen.
+            [":x"] = ":wq",
+            [":a"] = ":add",
+            [":r"] = ":refresh",
+            [":rm-feed"] = ":remove-feed",
+        };
 
-            if (ch == '\\' && i + 1 < raw.Length) { i++; cur.Append(raw[i]); continue; }
+        // Exakte Matches (nach Canonicalize)
+        private static readonly Dictionary<string, TopCommand> Exact = new(Ci)
+        {
+            [":help"] = TopCommand.Help,
+            [":quit"] = TopCommand.Quit,
+            [":quit!"] = TopCommand.QuitBang,
 
-            if (!inQuotes && (ch == '"' || ch == '\''))
-            { inQuotes = true; quoteChar = ch; continue; }
+            [":write"] = TopCommand.Write,
+            [":wq"]    = TopCommand.WriteQuit,
 
-            if (inQuotes && ch == quoteChar)
-            { inQuotes = false; quoteChar = '\0'; continue; }
+            [":toggle"]    = TopCommand.Toggle,
+            [":next"]      = TopCommand.Next,
+            [":prev"]      = TopCommand.Prev,
+            [":play-next"] = TopCommand.PlayNext,
+            [":play-prev"] = TopCommand.PlayPrev,
+            [":now"]       = TopCommand.Now,
 
-            if (!inQuotes && char.IsWhiteSpace(ch))
-            { if (cur.Length > 0) { list.Add(cur.ToString()); cur.Clear(); } continue; }
+            [":zt"] = TopCommand.VimTop,    [":H"] = TopCommand.VimTop,
+            [":zz"] = TopCommand.VimMiddle, [":M"] = TopCommand.VimMiddle,
+            [":zb"] = TopCommand.VimBottom, [":L"] = TopCommand.VimBottom,
 
-            cur.Append(ch);
+            [":add"]         = TopCommand.AddFeed,
+            [":refresh"]     = TopCommand.Refresh,
+            [":remove-feed"] = TopCommand.RemoveFeed,
+        };
+
+        // Prefix-Regeln (nach Canonicalize, Reihenfolge wichtig)
+        private static readonly (string Prefix, TopCommand Cmd)[] Prefixes = new (string, TopCommand)[]
+        {
+            (":engine",       TopCommand.Engine),
+            (":opml",         TopCommand.Opml),
+            (":open",         TopCommand.Open),
+            (":copy",         TopCommand.Copy),
+
+            (":search",       TopCommand.Search),
+            (":jump",         TopCommand.Jump),
+            (":theme",        TopCommand.Theme),
+            (":logs",         TopCommand.Logs),
+            (":osd",          TopCommand.Osd),
+
+            (":seek",         TopCommand.Seek),
+            (":vol",          TopCommand.Volume),
+            (":speed",        TopCommand.Speed),
+            (":replay",       TopCommand.Replay),
+
+            (":goto",         TopCommand.Goto),
+            (":next-unplayed",TopCommand.NextUnplayed),
+            (":prev-unplayed",TopCommand.PrevUnplayed),
+
+            (":save",         TopCommand.Save),
+            (":sort",         TopCommand.Sort),
+            (":filter",       TopCommand.Filter),
+            (":audioplayer",  TopCommand.PlayerBar), // deckt :audioPlayer / :audioplayer ab
+
+            (":net",          TopCommand.Net),
+            (":play-source",  TopCommand.PlaySource),
+
+            (":feed",         TopCommand.Feed),
+            (":history",      TopCommand.History),
+            (":update",       TopCommand.Refresh),
+        };
+
+        #region Public API
+
+        public static CmdParsed Parse(string raw)
+        {
+            var tokens = Tokenize(raw.Trim());
+            if (tokens.Length == 0)
+                return new CmdParsed(raw, "", Array.Empty<string>(), TopCommand.Unknown);
+
+            var (cmd0, args) = SplitCmd(tokens);
+
+            // 1) Kanonisieren (macht z. B. ":h" → ":help")
+            var cmd = Canonicalize(cmd0);
+
+            // 2) TopCommand anhand der kanonischen Form bestimmen
+            var top = MapTop(cmd);
+
+            return new CmdParsed(raw, cmd, args, top);
         }
-        if (cur.Length > 0) list.Add(cur.ToString());
-        return list.ToArray();
+
+        #endregion
+
+        #region Tokenize/Split
+
+        private static string[] Tokenize(string raw)
+        {
+            var list = new List<string>();
+            var cur = new System.Text.StringBuilder();
+            bool inQuotes = false;
+            char quoteChar = '\0';
+
+            for (int i = 0; i < raw.Length; i++)
+            {
+                char ch = raw[i];
+
+                if (ch == '\\' && i + 1 < raw.Length) { i++; cur.Append(raw[i]); continue; }
+
+                if (!inQuotes && (ch == '"' || ch == '\''))
+                { inQuotes = true; quoteChar = ch; continue; }
+
+                if (inQuotes && ch == quoteChar)
+                { inQuotes = false; quoteChar = '\0'; continue; }
+
+                if (!inQuotes && char.IsWhiteSpace(ch))
+                { if (cur.Length > 0) { list.Add(cur.ToString()); cur.Clear(); } continue; }
+
+                cur.Append(ch);
+            }
+            if (cur.Length > 0) list.Add(cur.ToString());
+            return list.ToArray();
+        }
+
+        private static (string cmd, string[] args) SplitCmd(string[] tokens)
+        {
+            if (tokens.Length == 0) return ("", Array.Empty<string>());
+            var cmd = tokens[0];
+            var args = tokens.Skip(1).ToArray();
+            return (cmd, args);
+        }
+
+        #endregion
+
+        #region Mapping / Helpers
+
+        private static string Canonicalize(string cmd)
+        {
+            if (string.IsNullOrWhiteSpace(cmd)) return "";
+            // Normalize leading colon; tolerate missing colon (user typed "h")
+            if (cmd[0] != ':') cmd = ":" + cmd;
+            return Canon.TryGetValue(cmd, out var longForm) ? longForm : cmd;
+        }
+
+        private static TopCommand MapTop(string cmd)
+        {
+            if (cmd.Length == 0) return TopCommand.Unknown;
+
+            if (Exact.TryGetValue(cmd, out var mapped))
+                return mapped;
+
+            foreach (var (pref, top) in Prefixes)
+                if (cmd.StartsWith(pref, StringComparison.OrdinalIgnoreCase))
+                    return top;
+
+            return TopCommand.Unknown;
+        }
+
+        #endregion
     }
-
-    // split into command + args
-    private static (string cmd, string[] args) SplitCmd(string[] tokens)
-    {
-        if (tokens.Length == 0) return ("", Array.Empty<string>());
-        var cmd = tokens[0];
-        var args = tokens.Skip(1).ToArray();
-        return (cmd, args);
-    }
-    #endregion
-
-    #region mapping
-    // map top-level command
-    private static TopCommand MapTop(string cmd)
-    {
-        if (cmd.StartsWith(":engine", StringComparison.OrdinalIgnoreCase)) return TopCommand.Engine;
-        if (cmd.StartsWith(":opml", StringComparison.OrdinalIgnoreCase)) return TopCommand.Opml;
-
-        // aliases
-        if (cmd.Equals(":a", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
-        if (cmd.Equals(":r", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
-
-        // new commands
-        if (cmd.StartsWith(":open", StringComparison.OrdinalIgnoreCase)) return TopCommand.Open;
-        if (cmd.StartsWith(":copy", StringComparison.OrdinalIgnoreCase)) return TopCommand.Copy;
-
-        cmd = cmd?.Trim() ?? "";
-        if (cmd.Equals(":h", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":help", StringComparison.OrdinalIgnoreCase)) return TopCommand.Help;
-        if (cmd.Equals(":q", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit", StringComparison.OrdinalIgnoreCase)) return TopCommand.Quit;
-        if (cmd.Equals(":q!", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":quit!", StringComparison.OrdinalIgnoreCase)) return TopCommand.QuitBang;
-
-        // vim writes
-        if (cmd.Equals(":w", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":write", StringComparison.OrdinalIgnoreCase)) return TopCommand.Write;
-        if (cmd.Equals(":wq", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":x", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuit;
-        if (cmd.Equals(":wq!", StringComparison.OrdinalIgnoreCase)) return TopCommand.WriteQuitBang;
-
-        // search/nav/theme
-        if (cmd.StartsWith(":search", StringComparison.OrdinalIgnoreCase)) return TopCommand.Search;
-        if (cmd.Equals(":now", StringComparison.OrdinalIgnoreCase)) return TopCommand.Now;
-        if (cmd.StartsWith(":jump", StringComparison.OrdinalIgnoreCase)) return TopCommand.Jump;
-        if (cmd.StartsWith(":theme", StringComparison.OrdinalIgnoreCase)) return TopCommand.Theme;
-
-        if (cmd.StartsWith(":logs", StringComparison.OrdinalIgnoreCase)) return TopCommand.Logs;
-        if (cmd.StartsWith(":osd", StringComparison.OrdinalIgnoreCase)) return TopCommand.Osd;
-
-        // playback
-        if (cmd.Equals(":toggle", StringComparison.OrdinalIgnoreCase)) return TopCommand.Toggle;
-        if (cmd.StartsWith(":seek", StringComparison.OrdinalIgnoreCase)) return TopCommand.Seek;
-        if (cmd.StartsWith(":vol", StringComparison.OrdinalIgnoreCase)) return TopCommand.Volume;
-        if (cmd.StartsWith(":speed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Speed;
-        if (cmd.StartsWith(":replay", StringComparison.OrdinalIgnoreCase)) return TopCommand.Replay;
-
-        // navigation
-        if (cmd.Equals(":next", StringComparison.OrdinalIgnoreCase)) return TopCommand.Next;
-        if (cmd.Equals(":prev", StringComparison.OrdinalIgnoreCase)) return TopCommand.Prev;
-        if (cmd.Equals(":play-next", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayNext;
-        if (cmd.Equals(":play-prev", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayPrev;
-
-        if (cmd.StartsWith(":goto", StringComparison.OrdinalIgnoreCase)) return TopCommand.Goto;
-        if (cmd.Equals(":zt", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":H", StringComparison.OrdinalIgnoreCase)) return TopCommand.VimTop;
-        if (cmd.Equals(":zz", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":M", StringComparison.OrdinalIgnoreCase)) return TopCommand.VimMiddle;
-        if (cmd.Equals(":zb", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":L", StringComparison.OrdinalIgnoreCase)) return TopCommand.VimBottom;
-        if (cmd.Equals(":next-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.NextUnplayed;
-        if (cmd.Equals(":prev-unplayed", StringComparison.OrdinalIgnoreCase)) return TopCommand.PrevUnplayed;
-
-        // flags/sort/filter/ui
-        if (cmd.StartsWith(":save", StringComparison.OrdinalIgnoreCase)) return TopCommand.Save;
-        if (cmd.StartsWith(":sort", StringComparison.OrdinalIgnoreCase)) return TopCommand.Sort;
-        if (cmd.StartsWith(":filter", StringComparison.OrdinalIgnoreCase)) return TopCommand.Filter;
-        if (cmd.StartsWith(":audioPlayer", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlayerBar;
-
-        // network/source
-        if (cmd.StartsWith(":net", StringComparison.OrdinalIgnoreCase)) return TopCommand.Net;
-        if (cmd.StartsWith(":play-source", StringComparison.OrdinalIgnoreCase)) return TopCommand.PlaySource;
-
-        // feeds
-        if (cmd.StartsWith(":add", StringComparison.OrdinalIgnoreCase)) return TopCommand.AddFeed;
-        if (cmd.StartsWith(":refresh", StringComparison.OrdinalIgnoreCase) || cmd.StartsWith(":update", StringComparison.OrdinalIgnoreCase)) return TopCommand.Refresh;
-        if (cmd.Equals(":rm-feed", StringComparison.OrdinalIgnoreCase) || cmd.Equals(":remove-feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.RemoveFeed;
-        if (cmd.StartsWith(":feed", StringComparison.OrdinalIgnoreCase)) return TopCommand.Feed;
-
-        // history
-        if (cmd.StartsWith(":history", StringComparison.OrdinalIgnoreCase)) return TopCommand.History;
-
-        return TopCommand.Unknown;
-    }
-    #endregion
 }
