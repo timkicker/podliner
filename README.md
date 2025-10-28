@@ -60,11 +60,11 @@
 
 ## Screenshots
 <p align="center">
-  <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="48%"/>
   <img src="assets/screens/02-details.png"  alt="Episode-details with shownotes" width="48%"/>
+  <img src="assets/screens/03-help.png" alt="Help - Commands and Shortcuts" width="48%"/>
 </p>
 <p align="center">
-  <img src="assets/screens/03-help.png" alt="Help / Shortcuts" width="70%"/>
+  <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="70%"/>
 </p>
 
 

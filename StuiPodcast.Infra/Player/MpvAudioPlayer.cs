@@ -7,7 +7,7 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Player;
 
-public sealed class MpvAudioAudioPlayer : IAudioPlayer
+public sealed class MpvAudioPlayer : IAudioPlayer
 {
     #region fields and ctor
 
@@ -32,7 +32,7 @@ public sealed class MpvAudioAudioPlayer : IAudioPlayer
     // ready gate: set isplaying to true only after first valid time or duration update
     private bool _ready;
 
-    public MpvAudioAudioPlayer()
+    public MpvAudioPlayer()
     {
         // mpv ipc needs unix domain sockets on linux and macos
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&

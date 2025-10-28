@@ -4,9 +4,8 @@ using VLC = LibVLCSharp.Shared;
 
 namespace StuiPodcast.Infra.Player
 {
-    // libvlc based audioPlayer loading runtimes from nuget
-    // no external vlc install needed and no path resolver
-    public sealed class LibVlcAudioAudioPlayer : IAudioPlayer
+    // libvlc based audio player loading runtimes from nuget / system (via resolver)
+    public sealed class LibVlcAudioPlayer : IAudioPlayer
     {
         #region fields and ctor
 
@@ -29,17 +28,16 @@ namespace StuiPodcast.Infra.Player
         public PlayerState State { get; } = new();
         public event Action<PlayerState>? StateChanged;
 
-        public LibVlcAudioAudioPlayer()
+        public LibVlcAudioPlayer()
         {
-            // load libvlc from nuget runtime assets
+            // 1) Pfade/Plugin-Dir ermitteln (macOS Brew-/App-Bundle, Windows, Linux)
+            var res = VlcPathResolver.Apply();
+
+            // 2) LibVLC natives laden (NuGet/runtime packs)
             VLC.Core.Initialize();
 
-            // optional log file for support cases
-            var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
-            try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
-
-            // runtime options for quiet start and robust network buffering
-            var opts = new[]
+            // 3) Optionen: deine Defaults + vom Resolver (z. B. --plugin-path=…)
+            var opts = new List<string>
             {
                 "--no-video",
                 "--no-video-title-show",
@@ -49,11 +47,20 @@ namespace StuiPodcast.Infra.Player
                 "--file-caching=1000",
                 "--network-caching=2000",
                 "--tcp-caching=1200",
-                "--http-reconnect",
-                "--file-logging", $"--logfile={logPath}"
+                "--http-reconnect"
             };
 
-            _lib = new VLC.LibVLC(opts);
+            var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
+            try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
+            opts.Add("--file-logging");
+            opts.Add($"--logfile={logPath}");
+
+            if (res.LibVlcOptions is { Length: > 0 })
+                opts.AddRange(res.LibVlcOptions);
+
+            _lib = new VLC.LibVLC(opts.ToArray());
+            Log.Information("LibVLC initialized ({Diag})", res.Diagnose);
+
             _mp = new VLC.MediaPlayer(_lib);
 
             // wire events
@@ -68,8 +75,6 @@ namespace StuiPodcast.Infra.Player
             try { _mp.Volume = Math.Clamp(State.Volume0_100, 0, 100); } catch { }
             try { _mp.SetRate((float)Math.Clamp(State.Speed, 0.25, 3.0)); } catch { }
             State.Capabilities = Capabilities;
-
-            Log.Information("LibVLC initialized (nuget runtimes)");
         }
 
         #endregion
@@ -233,7 +238,6 @@ namespace StuiPodcast.Infra.Player
             {
                 try
                 {
-                    // apply pending seek once after playing event
                     var want = _pendingSeekMs;
                     _pendingSeekMs = null;
                     if (want is long ms && ms > 0)
@@ -346,15 +350,12 @@ namespace StuiPodcast.Infra.Player
 
         private static VLC.Media CreateMedia(VLC.LibVLC lib, string input)
         {
-            // absolute url
             if (Uri.TryCreate(input, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Scheme))
                 return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
 
-            // local path
             if (File.Exists(input))
                 return new VLC.Media(lib, input, VLC.FromType.FromPath);
 
-            // fallback treat as location
             return new VLC.Media(lib, input, VLC.FromType.FromLocation);
         }
 

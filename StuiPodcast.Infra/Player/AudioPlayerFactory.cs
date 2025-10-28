@@ -1,4 +1,3 @@
-
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -18,7 +17,7 @@ public static class AudioPlayerFactory
         {
             try
             {
-                p = new LibVlcAudioAudioPlayer();
+                p = new LibVlcAudioPlayer();
                 reason = "ok";
                 return true;
             }
@@ -40,7 +39,7 @@ public static class AudioPlayerFactory
             }
             try
             {
-                p = new MpvAudioAudioPlayer();
+                p = new MpvAudioPlayer();
                 reason = "ok";
                 return true;
             }

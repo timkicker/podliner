@@ -6,6 +6,9 @@ using StuiPodcast.Infra;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
 using Terminal.Gui;
+using System.Collections.Generic;
+using System.Linq;
+
 
 namespace StuiPodcast.App.UI;
 
@@ -137,39 +140,77 @@ static class UiComposer
     #endregion
 
     #region downloader ui wiring
+
     public static void AttachDownloaderUi(DownloadManager downloader, UiShell ui, AppData data)
+{
+    // id → letzter zustand (session-zähler für x/y + %)
+    var byId = new Dictionary<Guid, DownloadState>();
+    DateTime lastPulse = DateTime.MinValue;
+
+    void updateBadge()
     {
-        DateTime _dlLastUiPulse = DateTime.MinValue;
+        // total = done + queued + running + verifying
+        int done  = byId.Values.Count(s => s == DownloadState.Done);
+        int active= byId.Values.Count(s => s == DownloadState.Queued || s == DownloadState.Running || s == DownloadState.Verifying);
+        int total = done + active;
 
-        downloader.StatusChanged += (id, st) =>
+        if (total <= 0)
         {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
-                UpdateWindowTitleWithDownloads(ui, data);
-                if (ui != null)
-                {
-                    switch (st.State)
-                    {
-                        case DownloadState.Queued:     ui.ShowOsd("⌵", 300); break;
-                        case DownloadState.Running:    ui.ShowOsd("⇣", 300); break;
-                        case DownloadState.Verifying:  ui.ShowOsd("≈", 300); break;
-                        case DownloadState.Done:       ui.ShowOsd("⬇", 500); break;
-                        case DownloadState.Failed:     ui.ShowOsd("!", 900);  break;
-                        case DownloadState.Canceled:   ui.ShowOsd("×", 400);  break;
-                    }
-                }
-            });
+            ui.SetDownloadBadge(null);
+            return;
+        }
 
-            if (st.State == DownloadState.Running && DateTime.UtcNow - _dlLastUiPulse > TimeSpan.FromMilliseconds(500))
-            {
-                _dlLastUiPulse = DateTime.UtcNow;
-                Application.MainLoop?.Invoke(() => ui?.RefreshEpisodesForSelectedFeed(data.Episodes));
-            }
-        };
+        int pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
+        ui.SetDownloadBadge($"{done}/{total} • {pct}%");
 
-        downloader.EnsureRunning();
+        // wenn nichts mehr aktiv → badge kurz stehen lassen, beim nächsten event wird es ausgeblendet
+        if (active == 0 && done > 0)
+        {
+            // optional: leises osd am ende eines batches
+            ui.ShowOsd($"downloads {done}/{total} • {pct}%");
+        }
     }
+
+    downloader.StatusChanged += (id, st) =>
+    {
+        // zustandspflege
+        byId[id] = st.State;
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
+            UpdateWindowTitleWithDownloads(ui, data);
+
+            // kleines status-osd
+            if (ui != null)
+            {
+                switch (st.State)
+                {
+                    case DownloadState.Queued:     ui.ShowOsd("dl queued", 300); break;
+                    case DownloadState.Running:    ui.ShowOsd("dl ⇣", 300); break;
+                    case DownloadState.Verifying:  ui.ShowOsd("dl ≈", 300); break;
+                    case DownloadState.Done:       ui.ShowOsd("dl ✓", 500); break;
+                    case DownloadState.Failed:     ui.ShowOsd("dl !", 900); break;
+                    case DownloadState.Canceled:   ui.ShowOsd("dl ×", 400); break;
+                }
+            }
+
+            // badge mit x/y und %
+            updateBadge();
+        });
+
+        // leichte ui-pulse während running
+        if (st.State == DownloadState.Running && DateTime.UtcNow - lastPulse > TimeSpan.FromMilliseconds(500))
+        {
+            lastPulse = DateTime.UtcNow;
+            Application.MainLoop?.Invoke(() => ui?.RefreshEpisodesForSelectedFeed(data.Episodes));
+        }
+    };
+
+    downloader.EnsureRunning();
+}
+
+    
     #endregion
 
     #region main ui wiring

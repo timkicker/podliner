@@ -245,8 +245,8 @@ public sealed class UiShell
         _dlBadge = new Terminal.Gui.Label("")
         {
             Y = 0,
-            X = Terminal.Gui.Pos.AnchorEnd(28),
-            Width = Terminal.Gui.Dim.Sized(28),
+            X = Terminal.Gui.Pos.AnchorEnd(32),
+            Width = Terminal.Gui.Dim.Sized(32),
             TextAlignment = Terminal.Gui.TextAlignment.Right,
             Visible = false
         };
