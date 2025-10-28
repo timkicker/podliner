@@ -235,11 +235,12 @@ public sealed class UiShell
             },
             JumpNextUnplayed: () => JumpToUnplayed(+1),
             JumpPrevUnplayed: () => JumpToUnplayed(-1),
-            ShowCommand: () => ShowCommandBox(":"),
-            ShowSearch:  () => ShowSearchBox("/"),
+            ShowCommand: () => ShowCommandBox(":"),                 // plain ':'
+            ShowCommandSeeded: seed => ShowCommandBox(seed),        // e.g. ":seek ", ":opml import "
             ToggleTheme: () => ToggleThemeRequested?.Invoke()
         ));
         Application.Top.Add(_menu);
+
 
         // compact download badge
         _dlBadge = new Terminal.Gui.Label("")
