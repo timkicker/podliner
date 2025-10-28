@@ -955,7 +955,13 @@ public sealed class UiShell
             return true;
         }
 
-        if (key == Key.Space) { Command?.Invoke(":toggle"); return true; }
+        if (key == Key.Space)
+        {
+            _player?.OptimisticToggle();  
+            Command?.Invoke(":toggle");  
+            return true;
+        }
+
         if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
         if (key == Key.CursorRight|| key == (Key)('L')) { Command?.Invoke(":seek +10"); return true; }
         if (kv == 'H') { Command?.Invoke(":seek -60"); return true; }

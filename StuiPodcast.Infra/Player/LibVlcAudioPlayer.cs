@@ -111,13 +111,13 @@ namespace StuiPodcast.Infra.Player
                 }
 
                 var ok = _mp.Play(_media);
-
-                // expose loading until real signals arrive
-                State.IsPlaying = false;
-                State.Position = TimeSpan.Zero;
-                State.Length = null;
+                
+                State.IsPlaying = ok || State.IsPlaying; // if ok==true, we intend to play
+                State.Position  = TimeSpan.Zero;
+                State.Length    = null;
                 State.Capabilities = Capabilities;
-                SafeFire();
+                SafeFire();  // **immediate** UI update
+                
 
                 if (!ok)
                     Log.Debug("[#{sid}] _mp.Play returned false");
@@ -130,16 +130,33 @@ namespace StuiPodcast.Infra.Player
             {
                 try
                 {
-                    if (_mp.CanPause) _mp.Pause();
-                    else _mp.Play();
+                    bool willPlay;
 
-                    State.IsPlaying = _mp.IsPlaying;
+                    if (_mp.IsPlaying && _mp.CanPause)
+                    {
+                        _mp.Pause();
+                        willPlay = false;
+                    }
+                    else
+                    {
+                        // If already playing but CanPause == false, calling Play() is fine; LibVLC treats as resume.
+                        _mp.Play();
+                        willPlay = true;
+                    }
+
+                    // **Immediate UI sync**
+                    State.IsPlaying = willPlay;
                 }
-                catch { }
+                catch
+                {
+                    // If anything goes wrong, be conservative and reflect LibVLC's observable state.
+                    try { State.IsPlaying = _mp.IsPlaying; } catch { }
+                }
 
-                SafeFire();
+                SafeFire(); // fire NOW so UiShell renders button + icon right away
             }
         }
+
 
         public void SeekRelative(TimeSpan delta)
         {

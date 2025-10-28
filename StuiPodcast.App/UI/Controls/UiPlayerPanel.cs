@@ -84,6 +84,28 @@ internal sealed class UiPlayerPanel : FrameView
             UpdateLoadingVisuals();
         }
     }
+    
+    public void OptimisticToggle()
+    {
+        var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
+
+        // Buttontext toggeln
+        var isCurrentlyPlay = BtnPlayPause.Text?.ToString().StartsWith("Play") ?? true;
+        BtnPlayPause.Text = isCurrentlyPlay
+            ? (isUnicode ? "Pause ⏸" : "Pause ||")
+            : (isUnicode ? "Play ⏵"  : "Play >");
+
+        // Icon links in der Time-Label toggeln (erstes Zeichen ersetzen)
+        var t = TimeLabel.Text?.ToString() ?? "";
+        if (t.Length > 0)
+        {
+            TimeLabel.Text = (isCurrentlyPlay ? (isUnicode ? "▶" : ">") : (isUnicode ? "⏸" : "||")) +
+                             (t.Length > 1 ? t.Substring(1) : "");
+        }
+
+        try { SetNeedsDisplay(); Application.Top?.SetNeedsDisplay(); } catch { }
+    }
+
 
     private void UpdateLoadingVisuals()
     {
@@ -163,7 +185,12 @@ internal sealed class UiPlayerPanel : FrameView
         // Clicks → Command
         BtnBack10.Clicked    += () => Command?.Invoke(":seek -10");
         BtnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
-        BtnPlayPause.Clicked += () => Command?.Invoke(":toggle");
+        BtnPlayPause.Clicked += () =>
+        {
+            OptimisticToggle();            // sofortiges Feedback
+            Command?.Invoke(":toggle");    // eigentlicher Toggle
+        };
+
         BtnVolDown.Clicked   += () => Command?.Invoke(":vol -5");
         BtnVolUp.Clicked     += () => Command?.Invoke(":vol +5");
         BtnSpeedDown.Clicked += () => Command?.Invoke(":speed -0.1");

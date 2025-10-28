@@ -1,6 +1,7 @@
 
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
+using Terminal.Gui;
 
 namespace StuiPodcast.App
 {
@@ -121,10 +122,20 @@ namespace StuiPodcast.App
                 _inner.StateChanged += ForwardState;
             }
 
+            // Direkt nach dem Swap UI synchronisieren (aktuellen State pushen)
+            try
+            {
+                var loop = Application.MainLoop;
+                if (loop != null) loop.Invoke(() => ForwardState(_inner.State));
+                else ForwardState(_inner.State);
+            }
+            catch { }
+
             try { onBeforeDispose?.Invoke(old); } catch { }
             await Task.Yield();
             try { old.Dispose(); } catch { }
         }
+
 
         #endregion
 
@@ -132,8 +143,27 @@ namespace StuiPodcast.App
 
         private void ForwardState(PlayerState s)
         {
-            try { StateChanged?.Invoke(s); } catch { }
+            try
+            {
+                var handler = StateChanged;
+                if (handler == null) return;
+
+                var loop = Application.MainLoop;
+                if (loop != null)
+                {
+                    loop.Invoke(() =>
+                    {
+                        try { handler(s); } catch { }
+                    });
+                }
+                else
+                {
+                    handler(s);
+                }
+            }
+            catch { }
         }
+
 
         #endregion
     }
