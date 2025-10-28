@@ -140,11 +140,10 @@ static class UiComposer
     }
     #endregion
 
-    #region downloader ui wiring
-
+    #region downloader
     public static void AttachDownloaderUi(DownloadManager downloader, UiShell ui, AppData data)
 {
-    // id → letzter zustand (session-zähler für x/y + %)
+    // per-download state cache
     var byId = new Dictionary<Guid, DownloadState>();
     var progress = new Dictionary<Guid, (long bytes, long? total, DownloadState state)>();
 
@@ -152,7 +151,7 @@ static class UiComposer
 
     void updateBadge()
     {
-        // X/Y: wie bisher
+        // badge: done/active/total and overall percent
         int done   = byId.Values.Count(s => s == DownloadState.Done);
         int active = byId.Values.Count(s => s == DownloadState.Queued
                                             || s == DownloadState.Running
@@ -165,7 +164,7 @@ static class UiComposer
             return;
         }
 
-        // Bytes-gewichtete Prozent über alle Items mit bekannter TotalBytes
+        // bytes-weighted percent across items with known totals
         long sumBytes = 0;
         long sumTotal = 0;
 
@@ -173,7 +172,7 @@ static class UiComposer
         {
             if (totalBytes is long T && T > 0)
             {
-                // Done zählt voll (100%), Running/Verifying nach aktuellem Stand
+                // done counts as 100%, running/verifying contribute current bytes
                 if (st == DownloadState.Done)
                 {
                     sumBytes += T;
@@ -195,13 +194,13 @@ static class UiComposer
         }
         else
         {
-            // Fallback: wenn kein einziger TotalBytes bekannt ist → alte Zähl-Logik
+            // fallback: no total bytes known → simple done/total percent
             pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
         }
 
         ui.SetDownloadBadge($"{done}/{total} • {pct}%");
 
-        // Optional: am Ende eines Batches OSD
+        // optional: show osd when batch ends
         if (active == 0 && done > 0)
             ui.ShowOsd($"downloads {done}/{total} • {pct}%");
     }
@@ -209,19 +208,19 @@ static class UiComposer
 
     downloader.StatusChanged += (id, st) =>
     {
-        // zustandspflege
+        // update state cache
         byId[id] = st.State;
         
-        // Progress pflegen (auch während Running/Verifying/Done)
+        // maintain progress entries
         progress[id] = (st.BytesReceived, st.TotalBytes, st.State);
 
-// Speicher sauber halten: bei Failed/Canceled rauswerfen
+        // prune progress on failed/canceled
         if (st.State == DownloadState.Failed || st.State == DownloadState.Canceled)
         {
             progress.Remove(id);
         }
 
-// Bei Done sicherheitshalber auf 100% setzen, falls Bytes < Total
+        // ensure done reports 100% if bytes < total
         if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is long T)
         {
             progress[id] = (T, T, DownloadState.Done);
@@ -233,7 +232,7 @@ static class UiComposer
             ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
             UpdateWindowTitleWithDownloads(ui, data);
 
-            // kleines status-osd
+            // small status osd
             if (ui != null)
             {
                 switch (st.State)
@@ -247,11 +246,11 @@ static class UiComposer
                 }
             }
 
-            // badge mit x/y und %
+            // update badge
             updateBadge();
         });
 
-        // leichte ui-pulse während running
+        // light ui pulse while running
         if (st.State == DownloadState.Running && DateTime.UtcNow - lastPulse > TimeSpan.FromMilliseconds(500))
         {
             lastPulse = DateTime.UtcNow;
@@ -265,7 +264,7 @@ static class UiComposer
     
     #endregion
 
-    #region main ui wiring
+    #region ui wiring
     public static void WireUi(
         UiShell ui,
         AppData data,
@@ -325,9 +324,9 @@ static class UiComposer
 
             try
             {
-                await feeds.RemoveFeedAsync(fid.Value);   // ← persistiert + AppData spiegeln + SaveNow
+                await feeds.RemoveFeedAsync(fid.Value);   // ← persist + update app data + save
 
-                // UI neu setzen
+                // reset ui
                 var next = data.Feeds.FirstOrDefault()?.Id;
                 ui.SetFeeds(data.Feeds, next);
                 if (next != null) { ui.SetEpisodesForFeed(next.Value, data.Episodes); ui.SelectEpisodeIndex(0); }
@@ -548,7 +547,7 @@ static class UiComposer
     }
     #endregion
 
-    #region initial list + playback wiring
+    #region initialization
     public static void ShowInitialLists(UiShell ui, AppData data)
     {
         ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
@@ -652,7 +651,7 @@ static class UiComposer
     }
     #endregion
 
-    #region quit
+    #region shutdown
     static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
     {
         if (Program.MarkExiting()) return;

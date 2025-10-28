@@ -5,14 +5,28 @@ namespace StuiPodcast.App.UI.Controls;
 
 internal sealed class UiFeedsPane
 {
+    #region ui elements
+
     public FrameView Frame { get; }
     public ListView  List  { get; }
+
+    #endregion
+
+    #region state
 
     private List<Feed> _feeds = new();
     private List<string> _rows = new();
 
+    #endregion
+
+    #region events
+
     public event Action? SelectedChanged;
     public event Action? OpenRequested;
+
+    #endregion
+
+    #region lifecycle
 
     public UiFeedsPane()
     {
@@ -28,9 +42,13 @@ internal sealed class UiFeedsPane
         Frame.Add(List);
     }
 
+    #endregion
+
+    #region public api
+
     public void SetFeeds(IEnumerable<Feed> feeds)
     {
-        // keep selection/scroll
+        // preserve selection and scroll when rebuilding rows
         var keepTop = List.TopItem;
         var keepSel = List.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
@@ -63,7 +81,9 @@ internal sealed class UiFeedsPane
 
     public IReadOnlyList<Feed> RawFeeds => _feeds;
 
-    // internals
+    #endregion
+
+    #region internals
 
     private void RebuildRowsAndRefresh(bool preserveScroll)
     {
@@ -117,4 +137,6 @@ internal sealed class UiFeedsPane
         }
         catch { }
     }
+
+    #endregion
 }

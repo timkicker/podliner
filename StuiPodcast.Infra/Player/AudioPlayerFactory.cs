@@ -8,10 +8,10 @@ namespace StuiPodcast.Infra.Player;
 
 public static class AudioPlayerFactory
 {
-    // engine choice prefers vlc with os specific fallbacks
+    // engine selection with os-aware fallbacks
     public static IAudioPlayer Create(AppData data, out string infoOsd)
 {
-    // 1) Präferenz einlesen + normalisieren
+    // read and normalize preferred engine
     var rawPref = (data.PreferredEngine ?? "auto").Trim();
     var pref = rawPref.ToLowerInvariant() switch
     {
@@ -20,14 +20,14 @@ public static class AudioPlayerFactory
         var s    => s
     };
 
-    // 2) OS-Info loggen
+    // log os info
     bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
     bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
     bool isLin = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
     Log.Information("[engine-detect] requested='{Raw}' normalized='{Norm}' os={{win:{Win}, mac:{Mac}, lin:{Lin}}}",
         rawPref, pref, isWin, isMac, isLin);
 
-    // --- lokale Probe-Helper loggen jetzt auch vor/nach ---
+    // probe helpers (attempt engine creation, log success/failure)
     bool TryVlc(out IAudioPlayer p, out string reason)
     {
         Log.Information("[engine-detect] probe start: vlc");
@@ -97,12 +97,12 @@ public static class AudioPlayerFactory
     IAudioPlayer? chosen = null;
     string why = "";
 
-    // 3) Explizite Präferenz zuerst – mit Logs beim Fallback
+    // honor explicit preference; on failure switch to auto
     if (pref is "vlc"    && !TryVlc(out chosen!, out why))    pref = "auto";
     if (pref is "mpv"    && !TryMpv(out chosen!, out why))    pref = "auto";
     if (pref is "ffplay" && !TryFfp(out chosen!, out why))    pref = "auto";
 
-    // 4) Auto-Chain mit OS-abhängiger Reihenfolge – jeden Versuch loggen (ok/fail bereits in TryX)
+    // try engines in os-preferred order until one succeeds
     if (chosen == null)
     {
         Log.Information("[engine-detect] auto chain start (os policy)");
@@ -137,7 +137,7 @@ public static class AudioPlayerFactory
         }
     }
 
-    // 5) OSD-Hinweis + Abschluss-Log
+    // set osd text, update state and log final choice
     bool degraded =
         string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase) ||
         isWin && string.Equals(chosen.Name, "mpv", StringComparison.OrdinalIgnoreCase);
@@ -152,8 +152,8 @@ public static class AudioPlayerFactory
 }
 
 
-    // cross platform executable lookup
-    // unix uses which; windows scans path and pathext then last resort start attempt
+    // cross-platform executable lookup
+    // unix: use which; windows: scan PATH+PATHEXT, fallback to start-probe
     private static bool ExecutableExists(string fileName)
 {
     try
@@ -179,7 +179,7 @@ public static class AudioPlayerFactory
                 }
             }
 
-            // last resort: try to start and catch file not found
+            // fallback: try starting the executable and catch file-not-found
             using var p = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -231,6 +231,7 @@ public static class AudioPlayerFactory
 }
 
 
+    // short exception description
     private static string Short(Exception ex)
         => ex.GetType().Name + (string.IsNullOrWhiteSpace(ex.Message) ? "" : $": {ex.Message}");
 }

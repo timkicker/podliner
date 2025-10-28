@@ -1,13 +1,5 @@
 <p align="center">
-  <!-- Dark/Light logo variants optional -->
-  <!--
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/podliner-logo-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="assets/branding/podliner-logo-light.png">
-    <img alt="podliner" src="assets/branding/podliner-logo.png" width="360">
-  </picture>
-  -->
-  <img alt="podliner" src="assets/branding/podliner-logo-alt.png" width="360">
+ <img alt="podliner" src="assets/branding/podliner-logo-alt.png" width="360">
 </p>
 
 <p align="center">
@@ -104,18 +96,33 @@ Most podcast players support **OPML** export/import.
 
 
 ## Commands (essentials)
-> Full help-browser: `:h`
+> Full help browser: `:h`  |  Full list: see [COMMANDS](./COMMANDS.md)
 
-Used most:
-- **Enter** – play selected episode
-- **Space** – pause/resume
-- **d** – download / show download status
-- **f** – toggle unplayed filter
-- **/** – search
-- **t** – toggle theme
-- **q** – quit
+**Playback**
+- Enter: play selected
+- Space: pause/resume
+- Left/Right: seek 10s backward/forward
+- [: slower  | ]: faster
 
-For all commands and keybindings, please see [COMMANDS](./COMMANDS.md)
+**Navigation & filters**
+- j / k: move down / up
+- gg / G: jump to top / bottom
+- / : search in current list
+- f : toggle “unplayed only”
+
+**Downloads & queue**
+- d : download or show status
+- :queue : switch to queue view
+- :play-next / :play-prev : next/previous in queue
+
+**Feeds**
+- :add <url> : add feed
+- :feed all|saved|downloaded|history|queue : switch view
+
+**Misc**
+- t : toggle theme
+- q : quit
+- :w / :wq : save / save & quit
 
 
 ## Configuration & data
@@ -202,6 +209,8 @@ Quit, then move the config directory away (see [Configuration & data](#configura
 ## Contributing
 I welcome all focused PRs.
 
+Please take a look at [ROADMAP.md](./ROADMAP.md)
+
 **Local dev:**
 ```bash
 dotnet build
@@ -224,7 +233,6 @@ When filing an issue, please include:
   Example: `…/podliner/logs/podliner-20250101.log`
 
 Security-sensitive issues: contact tim@kicker.dev.  
-Please take a look at [ROADMAP.md](./ROADMAP.md)
 
 
 ## License & credits

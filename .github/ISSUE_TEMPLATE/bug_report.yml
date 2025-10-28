@@ -1,0 +1,33 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Clear steps to reproduce + actual vs expected behavior
+      placeholder: |
+        1. …
+        2. …
+        Expected: …
+        Actual: …
+    validations: { required: true }
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options: [Windows, macOS, Linux]
+  - type: input
+    id: version
+    attributes:
+      label: Podliner version
+      placeholder: v0.1.0 (or git commit)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Use :logs overlay, or attach console logs
+      render: shell
+

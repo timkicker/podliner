@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an idea for this project
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem would this feature solve?
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Be specific if possible (UI, commands, behavior)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+

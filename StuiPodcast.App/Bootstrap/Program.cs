@@ -13,42 +13,51 @@ using StuiPodcast.App.Command;
 using StuiPodcast.App.Services;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
-
+using System.Threading;
+using System.Threading.Tasks;
+using System;
+using System.IO;
+using System.Linq;
 
 class Program
 {
-    // ===== Runtime Flags =====
+    #region runtime flags
+    // runtime flags
     internal static bool SkipSaveOnExit = false;
+    #endregion
 
-    // ===== Singletons / Runtime state =====
-    static AppFacade?        _app;            // Persistenz-Fassade
-    static ConfigStore?      _configStore;    // appsettings.json
-    static LibraryStore?     _libraryStore;   // library/library.json
-    static AppData           _data = new();   // UI-Laufzeitstate
+    #region singletons and runtime state
+    // primary singletons / runtime state
+    static AppFacade?        _app;
+    static ConfigStore?      _configStore;
+    static LibraryStore?     _libraryStore;
+    static AppData           _data = new();
     static FeedService?      _feeds;
 
     static SwappableAudioPlayer?  _player;
     static PlaybackCoordinator? _playback;
     static MemoryLogSink     _memLog = new(2000);
     static DownloadManager?  _downloader;
-    
-    
 
     static UiShell?            _ui;
+    #endregion
 
-    // Services
+    #region services
+    // service objects
     static SaveScheduler?    _saver;
     static NetworkMonitor?   _net;
     static EngineService?    _engineSvc;
+    #endregion
 
-    // Timers
+    #region timers and guards
+    // timers and exit guard
     static object? _uiTimer;
     static object? _netTimerToken;
-
-    // Exit guard
     static int _exitOnce = 0;
+    #endregion
 
-    // ===== Entry =====
+    #region entry point
+    // application entry
     static async Task Main(string[]? args)
     {
         var cli = CliEntrypoint.Parse(args);
@@ -62,7 +71,7 @@ class Program
         LoggerSetup.Configure(cli.LogLevel, _memLog);
         CmdErrorHandlers.Install();
 
-        // ---- Bootstrap: paths, stores, facade, downloader ----
+        // bootstrap: paths, stores, facade, downloader
         var appConfigDir = ResolveConfigDir();
         _configStore     = new ConfigStore(appConfigDir);
         _libraryStore    = new LibraryStore(appConfigDir, subFolder: "", fileName: "library.json");
@@ -75,7 +84,7 @@ class Program
 
         _app = new AppFacade(_configStore, _libraryStore, downloadLookup);
 
-        // ---- load & bridge to AppData ----
+        // load and bridge to appdata
         var cfg = _app.LoadConfig();
         var lib = _app.LoadLibrary();
         Log.Information("loaded config theme={Theme} playerAtTop={PlayerTop} sort={SortBy}/{SortDir}",
@@ -85,15 +94,15 @@ class Program
 
         AppBridge.SyncFromFacadeToAppData(_app, _data);
 
-        // CLI: Engine-Präferenz vor AudioPlayer-Erzeugung übernehmen
+        // apply cli engine preference before creating audio player
         if (!string.IsNullOrWhiteSpace(cli.Engine))
             _data.PreferredEngine = cli.Engine!.Trim().ToLowerInvariant();
 
-        // ---- AudioPlayer / Engine service ----
+        // audio player / engine service
         _engineSvc = new EngineService(_data, _memLog);
         _player = _engineSvc.Create(out var engineInfo);
 
-        // ---- Coordinator, Feeds, Saver ----
+        // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
         _playback = new PlaybackCoordinator(_data, _player!, _saver.RequestSaveAsync, _memLog);
         _feeds    = new FeedService(_data, _app);
@@ -101,19 +110,19 @@ class Program
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
 
-        // ---- Apply AudioPlayer Prefs ----
+        // apply audio player prefs
         _engineSvc.ApplyPrefsTo(_player);
 
-        // ---- UI init ----
+        // ui init
         Application.Init();
         _ui = new UiShell(_memLog);
         try { _data.LastSelectedFeedId = _ui.AllFeedId; } catch { }
         _ui.Build();
         UiComposer.UpdateWindowTitleWithDownloads(_ui, _data);
-        
+
         UiComposer.ScrollAllToTopOnIdle(_ui, _data);
 
-        // ---- Theme resolve (Default = User) ----
+        // theme resolve (default = user)
         var themeChoice = UiThemeResolver.Resolve(cli.Theme, _data.ThemePref);
         try
         {
@@ -125,31 +134,31 @@ class Program
             }
         } catch { }
 
-        // ---- Network monitor ----
+        // network monitor
         _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync);
         _net.Start(out _netTimerToken);
 
-        // ---- Wire UI behaviors (sorter, lookups, events) ----
+        // wire ui behaviors (sorter, lookups, events)
         _ui.EpisodeSorter = eps => UiComposer.ApplySort(eps, _data);
         _ui.SetUnplayedHint(_data.UnplayedOnly);
         _ui.SetPlayerPlacement(_data.PlayerAtTop);
 
-        // Lookups
+        // lookups
         _ui.SetQueueLookup(id => _data.Queue.Contains(id));
         _ui.SetDownloadStateLookup(id => _app!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);
         _ui.SetOfflineLookup(() => !_data.NetworkOnline);
 
-        // Theme changes
+        // theme change handler
         _ui.ThemeChanged += mode =>
         {
             _data.ThemePref = mode.ToString();
             _ = _saver!.RequestSaveAsync();
         };
 
-        // Downloader → UI
+        // downloader -> ui
         UiComposer.AttachDownloaderUi(_downloader!, _ui, _data);
 
-        // Build remaining UI behaviors
+        // build remaining ui behaviors
         UiComposer.WireUi(
             ui: _ui,
             data: _data,
@@ -163,7 +172,7 @@ class Program
             hasFeedWithUrl: HasFeedWithUrl
         );
 
-        // Progress persistence tick (UI timer)
+        // progress persistence tick (ui timer)
         _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
         {
             try
@@ -183,11 +192,11 @@ class Program
             return true;
         });
 
-        // ---------- APPLY CLI FLAGS (post-UI) ----------
+        // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
             cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader!, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync));
 
-        // Initial lists
+        // initial lists
         UiComposer.ShowInitialLists(_ui, _data);
 
         try { Application.Run(); }
@@ -210,9 +219,10 @@ class Program
             Log.Information("shutdown end");
         }
     }
-    
-    // in class Program (z. B. direkt unter ResolveConfigDir)
-    // --- kleine Helper für andere Klassen ---
+    #endregion
+
+    #region public api / compatibility
+    // helpers exposed for other modules
     internal static bool MarkExiting() => Interlocked.Exchange(ref _exitOnce, 1) == 1;
 
     internal static object? NetTimerToken => _netTimerToken;
@@ -220,7 +230,6 @@ class Program
     internal static DownloadManager? DownloaderInstance => _downloader;
     internal static MemoryLogSink MemLogSinkInstance => _memLog;
 
-// Für Fremdcode, der das alte API erwartet:
     public static bool IsDownloaded(Guid episodeId) => _app?.IsDownloaded(episodeId) ?? false;
     public static bool TryGetLocalPath(Guid episodeId, out string? path)
     {
@@ -228,19 +237,21 @@ class Program
         path = null;
         return false;
     }
+    #endregion
 
-
-
+    #region helpers
+    // resolve configuration directory
     static string ResolveConfigDir()
     {
         var baseConfigDir =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)                 // %APPDATA%
+                ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
                 : (Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
-                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config")); // ~/.config
+                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"));
         return Path.Combine(baseConfigDir, "podliner");
     }
 
+    // check if feed with url already exists
     static bool HasFeedWithUrl(string url)
     {
         return _data.Feeds.Any(f =>
@@ -256,6 +267,7 @@ class Program
         });
     }
 
+    // print version to stdout
     static void PrintVersion()
     {
         var asm  = typeof(Program).Assembly;
@@ -269,6 +281,7 @@ class Program
         Console.WriteLine($"podliner {ver} ({rid})");
     }
 
+    // print simple help
     static void PrintHelp()
     {
         PrintVersion();
@@ -287,7 +300,8 @@ class Program
         Console.WriteLine("  --ascii");
         Console.WriteLine("  --log-level <debug|info|warn|error>");
     }
-    
+
+    // try to restore terminal state on exit
     static void ResetHard()
     {
         try
@@ -305,4 +319,5 @@ class Program
         }
         catch { }
     }
+    #endregion
 }

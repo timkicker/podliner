@@ -4,7 +4,7 @@ using VLC = LibVLCSharp.Shared;
 
 namespace StuiPodcast.Infra.Player
 {
-    // libvlc based audio player loading runtimes from nuget / system (via resolver)
+    // libvlc audio player, loads runtimes via resolver
     public sealed class LibVlcAudioPlayer : IAudioPlayer
     {
         #region fields and ctor
@@ -30,13 +30,13 @@ namespace StuiPodcast.Infra.Player
 
         public LibVlcAudioPlayer()
         {
-            // 1) Pfade/Plugin-Dir ermitteln (macOS Brew-/App-Bundle, Windows, Linux)
+            // resolve libvlc paths and plugin directory
             var res = VlcPathResolver.Apply();
 
-            // 2) LibVLC natives laden (NuGet/runtime packs)
+            // initialize libvlc core
             VLC.Core.Initialize();
 
-            // 3) Optionen: deine Defaults + vom Resolver (z. B. --plugin-path=…)
+            // default options plus resolver-provided options
             var opts = new List<string>
             {
                 "--no-video",
@@ -98,7 +98,7 @@ namespace StuiPodcast.Infra.Player
 
                 _media = CreateMedia(_lib, url);
 
-                // hint for start offset to speed up initial seek for some inputs
+                // provide start-time hint for faster seeks on some inputs
                 if (_pendingSeekMs is long ms && ms >= 1000)
                 {
                     var secs = (int)(ms / 1000);
@@ -116,7 +116,7 @@ namespace StuiPodcast.Infra.Player
                 State.Position  = TimeSpan.Zero;
                 State.Length    = null;
                 State.Capabilities = Capabilities;
-                SafeFire();  // **immediate** UI update
+                SafeFire();  // immediate ui update
                 
 
                 if (!ok)
@@ -139,21 +139,21 @@ namespace StuiPodcast.Infra.Player
                     }
                     else
                     {
-                        // If already playing but CanPause == false, calling Play() is fine; LibVLC treats as resume.
+                        // libvlc: Play() can act as resume
                         _mp.Play();
                         willPlay = true;
                     }
 
-                    // **Immediate UI sync**
+                    // immediate ui sync
                     State.IsPlaying = willPlay;
                 }
                 catch
                 {
-                    // If anything goes wrong, be conservative and reflect LibVLC's observable state.
+                    // fall back to observable state on error
                     try { State.IsPlaying = _mp.IsPlaying; } catch { }
                 }
 
-                SafeFire(); // fire NOW so UiShell renders button + icon right away
+                SafeFire(); // fire now so ui renders button + icon
             }
         }
 
@@ -300,7 +300,7 @@ namespace StuiPodcast.Infra.Player
                         State.IsPlaying = true;
                     }
 
-                    // near end guard
+                    // near-end guard
                     if (len > 0 && !_mp.IsPlaying && e.Time >= Math.Max(0, len - 250))
                         State.IsPlaying = false;
 

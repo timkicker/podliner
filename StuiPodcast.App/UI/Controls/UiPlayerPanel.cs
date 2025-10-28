@@ -22,7 +22,7 @@ internal sealed class UiPlayerPanel : FrameView
     public Button BtnSpeedUp   { get; private set; } = null!;
     public Button BtnDownload  { get; private set; } = null!;
 
-    /// <summary>Router-Hook (z. B. ":seek +10")</summary>
+    // router hook (e.g. ":seek +10")
     public event Action<string>? Command;
 
     private const int SidePad = 1;
@@ -44,20 +44,20 @@ internal sealed class UiPlayerPanel : FrameView
     private const float ProgressDeltaMin = 0.01f;  // min fraction change (~1%) to emit
     private const float VolumeDeltaMin   = 0.02f;  // 2% volume step to emit
     
-    // Loading-Steuerung
+    // loading control
     private bool _isLoading;
     private string _loadingText = "Loading…";
     private TimeSpan _loadingBaseline = TimeSpan.Zero;
     private DateTime _loadingSinceUtc = DateTime.MinValue;
 
-    // Tuning
+    // tuning
     private static readonly TimeSpan LoadingAdvanceThreshold = TimeSpan.FromMilliseconds(400);
     private static readonly TimeSpan LoadingMinVisible       = TimeSpan.FromMilliseconds(300);
 
-    // optional: letzte bekannte Pos für Baseline-Fallback
+    // optional: last known pos for baseline fallback
     private TimeSpan _lastPosSnapshot = TimeSpan.Zero;
 
-    // öffentliches API für Shell/Coordinator
+    // public api for shell/coordinator
     public void SetLoading(bool on, string? text = null, TimeSpan? baseline = null)
     {
         _isLoading = on;
@@ -66,7 +66,7 @@ internal sealed class UiPlayerPanel : FrameView
         if (on)
         {
             _loadingSinceUtc = DateTime.UtcNow;
-            _loadingBaseline = baseline ?? _lastPosSnapshot; // Startpunkt merken
+            _loadingBaseline = baseline ?? _lastPosSnapshot; // record baseline
         }
         UpdateLoadingVisuals();
     }
@@ -89,13 +89,13 @@ internal sealed class UiPlayerPanel : FrameView
     {
         var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
 
-        // Buttontext toggeln
+        // toggle play/pause button text
         var isCurrentlyPlay = BtnPlayPause.Text?.ToString().StartsWith("Play") ?? true;
         BtnPlayPause.Text = isCurrentlyPlay
             ? (isUnicode ? "Pause ⏸" : "Pause ||")
             : (isUnicode ? "Play ⏵"  : "Play >");
 
-        // Icon links in der Time-Label toggeln (erstes Zeichen ersetzen)
+        // toggle icon at start of time label
         var t = TimeLabel.Text?.ToString() ?? "";
         if (t.Length > 0)
         {
@@ -122,10 +122,10 @@ internal sealed class UiPlayerPanel : FrameView
         }
         else
         {
-            BtnPlayPause.Enabled = true; // Text stellt Render() wieder auf Play/Pause um
+            BtnPlayPause.Enabled = true; // text will be set back by render()
         }
 
-        // -> sofort neu zeichnen
+        // force redraw
         try { SetNeedsDisplay(); Application.Top?.SetNeedsDisplay(); } catch { }
     }
 
@@ -161,7 +161,7 @@ internal sealed class UiPlayerPanel : FrameView
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
         var midWidth = 6 + midGap + 6 + midGap + 6;
         var mid = new View { Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false };
-        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp); // links -> rechts
+        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp); // left -> right
 
         const int rightPad = 2;
         const int gap = 2;
@@ -182,13 +182,13 @@ internal sealed class UiPlayerPanel : FrameView
         Progress = new UiSolidProgressBar { X = 2, Y = 4, Width = Dim.Fill(2), Height = 1 };
         if (ProgressSchemeProvider != null) Progress.ColorScheme = ProgressSchemeProvider();
 
-        // Clicks → Command
+        // clicks -> command
         BtnBack10.Clicked    += () => Command?.Invoke(":seek -10");
         BtnFwd10.Clicked     += () => Command?.Invoke(":seek +10");
         BtnPlayPause.Clicked += () =>
         {
-            OptimisticToggle();            // sofortiges Feedback
-            Command?.Invoke(":toggle");    // eigentlicher Toggle
+            OptimisticToggle();            // immediate feedback
+            Command?.Invoke(":toggle");    // actual toggle
         };
 
         BtnVolDown.Clicked   += () => Command?.Invoke(":vol -5");
@@ -202,9 +202,7 @@ internal sealed class UiPlayerPanel : FrameView
             mid, BtnVolDown, BtnVolUp, VolPctLabel, VolBar, Progress);
     }
 
-    /// <summary>
-    /// Verdrahtet Seeks/Volume exakt einmal. Mehrfachaufrufe sind idempotent.
-    /// </summary>
+    // wire seeks/volume once; idempotent on repeated calls
     public void WireSeeks(Action<string> command, Func<TimeSpan> lastEffectiveLength, Action<string> osd)
     {
         if (!_commandAttached)
@@ -257,25 +255,21 @@ internal sealed class UiPlayerPanel : FrameView
             var vol = (int)Math.Round(clamped * 100);
             var v = Math.Clamp(vol, 0, 100);
             command($":vol {v}");
-            VolBar.Fraction  = v / 100f; // visuelles Feedback sofort
+            VolBar.Fraction  = v / 100f; // immediate visual feedback
             VolPctLabel.Text = UIGlyphSet.VolumePercent(v);
         };
     }
 
-    // ----------------------------------------------------------------------
-    // Bevorzugtes Update: EIN atomischer Snapshot = synchrones UI
-    // ----------------------------------------------------------------------
+    // preferred update: atomic snapshot -> sync ui
     public void Update(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
         => RenderFromSnapshot(snap, volume0to100, format);
 
-    // ----------------------------------------------------------------------
-    // ALT: Abwärtskompatibles Update — delegiert intern auf Snapshot
-    // ----------------------------------------------------------------------
+    // legacy update: delegate to snapshot for compatibility
     public void Update(PlayerState s, TimeSpan effLen, Func<TimeSpan, string> format)
     {
         var snap = new PlaybackSnapshot(
-            0,                      // SessionId
-            null,                   // EpisodeId
+            0,                      // session id
+            null,                   // episode id
             s.Position < TimeSpan.Zero ? TimeSpan.Zero : s.Position,
             effLen   < TimeSpan.Zero ? TimeSpan.Zero : effLen,
             s.IsPlaying,
@@ -285,9 +279,7 @@ internal sealed class UiPlayerPanel : FrameView
         RenderFromSnapshot(snap, s.Volume0_100, format);
     }
 
-    // ----------------------------------------------------------------------
-    // Gemeinsame Render-Logik (eine Quelle → synchrones UI)
-    // ----------------------------------------------------------------------
+    // shared render logic (single source -> sync ui)
     private void RenderFromSnapshot(PlaybackSnapshot snap, int volume0to100, Func<TimeSpan, string> format)
     {
         var pos = snap.Position < TimeSpan.Zero ? TimeSpan.Zero : snap.Position;
@@ -297,8 +289,8 @@ internal sealed class UiPlayerPanel : FrameView
         var len = snap.Length < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
         if (pos > len && len > TimeSpan.Zero) pos = len;
 
-        // --- NEU: konsistente Quantisierung auf ganze Sekunden ---
-        int posSec = (int)Math.Floor(pos.TotalSeconds);             // oder Math.Round(...) wenn dir das lieber ist
+        // quantize to whole seconds for consistency
+        int posSec = (int)Math.Floor(pos.TotalSeconds);             // or Math.Round(...) if preferred
         int lenSec = (int)Math.Floor(len.TotalSeconds);
         pos = TimeSpan.FromSeconds(Math.Clamp(posSec, 0, Math.Max(0, lenSec)));
         len = TimeSpan.FromSeconds(Math.Max(0, lenSec));

@@ -16,7 +16,9 @@ internal sealed class UiEpisodesPane
 
     public void SetOfflineLookup(Func<bool> fn) => _isOffline = fn;
 
-    // UI (werden im Ctor initialisiert; non-null)
+    #region ui elements
+
+    // ui elements initialized in ctor; non-null after construction
     public TabView Tabs { get; }
     public TabView.Tab EpisodesTab { get; }
     public TextView Details { get; }
@@ -27,24 +29,34 @@ internal sealed class UiEpisodesPane
     private readonly FrameView _detailsFrame;
     private bool _showFeedColumn;
 
+    #endregion
+
+    #region state and caches
+
     private List<Episode> _episodes = new();
     private List<Feed> _feeds = new();
     private Dictionary<Guid, string> _feedTitleMap = new();
 
     private const int FEED_COL_W = 24;
 
-    private Func<Guid, bool>? _isQueued;             // Badge-Lookup
-    private readonly List<Guid> _queueOrder = new(); // Reihenfolge für Queue-Tab
+    private Func<Guid, bool>? _isQueued;             // badge lookup
+    private readonly List<Guid> _queueOrder = new(); // order for queue tab
 
-    // Snapshot für die *aktive* Episode (synchroner Progress)
+    // snapshot for the active episode (synchronized progress)
     private Guid? _nowPlayingId;
-    private PlaybackSnapshot? _activeSnapshot; // nur für _nowPlayingId relevant
+    private PlaybackSnapshot? _activeSnapshot; // only relevant for _nowPlayingId
+
+    #endregion
+
+    #region configuration
 
     public void SetDownloadStateLookup(Func<Guid, DownloadState> fn)
         => _dlStateLookup = fn ?? (_ => DownloadState.None);
 
     public event Action? SelectionChanged;
     public event Action? OpenSelected;
+
+    #endregion
 
     public UiEpisodesPane()
     {
@@ -75,14 +87,20 @@ internal sealed class UiEpisodesPane
         Tabs.AddTab(new TabView.Tab("Details", _detailsFrame), false);
     }
 
+    #region feeds and metadata
+
     public void SetFeedsMeta(IEnumerable<Feed> feeds)
     {
         _feeds = (feeds ?? Enumerable.Empty<Feed>()).ToList();
-        // Robust gegen doppelte IDs und null-Titel
+        // handle duplicate feed ids and null titles
         _feedTitleMap = _feeds
             .GroupBy(f => f.Id)
             .ToDictionary(g => g.Key, g => g.First().Title ?? string.Empty);
     }
+
+    #endregion
+
+    #region queue helpers
 
     public void SetQueueLookup(Func<Guid, bool> isQueued) => _isQueued = isQueued ?? (_ => false);
 
@@ -94,9 +112,13 @@ internal sealed class UiEpisodesPane
 
     public void ConfigureFeedColumn(Guid feedId, Guid vAll, Guid vSaved, Guid vDown, Guid vHistory, Guid vQueue)
     {
-        // In All/Saved/Downloaded/History/Queue wollen wir die Feed-Spalte zeigen.
+        // show feed column for these overview views
         _showFeedColumn = feedId == vAll || feedId == vSaved || feedId == vDown || feedId == vHistory || feedId == vQueue;
     }
+
+    #endregion
+
+    #region list management
 
     public void SetEpisodes(
         IEnumerable<Episode> baseEpisodes,
@@ -106,7 +128,7 @@ internal sealed class UiEpisodesPane
         string? search,
         Guid? preferSelectId)
     {
-        // Auswahl & Scroll vor Rebuild sichern
+        // save selection & scroll before rebuilding
         var keepTop = List.TopItem;
         var keepSel = List.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
 
@@ -114,26 +136,26 @@ internal sealed class UiEpisodesPane
 
         if (feedId == FEED_HISTORY)
         {
-            // HISTORY: strikt nach LastPlayedAt desc, Sort & Search bewusst ignorieren
+            // history: order by last played desc, ignore sorter/search
             src = src.Where(e => e.Progress.LastPlayedAt != null)
                      .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
                      .Take(_historyLimit);
         }
         else if (feedId == FEED_QUEUE)
         {
-            // QUEUE: FIFO anhand _queueOrder, Suche/Sort bewusst ignoriert
-            _showFeedColumn = true; // Queue listet versch. Feeds → Spalte macht Sinn
+            // queue: fifo based on _queueOrder, ignore search/sort
+            _showFeedColumn = true; // queue lists multiple feeds → enable column
             var map = src.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
             src = _queueOrder.Where(map.ContainsKey).Select(id => map[id]);
         }
         else
         {
-            // 1) Feed-Filter
+            // 1) feed filter
             if (feedId == FEED_SAVED)             src = src.Where(e => e.Saved);
             else if (feedId == FEED_DOWNLOADED)   src = src.Where(e => Program.IsDownloaded(e.Id));
             else if (feedId != FEED_ALL)          src = src.Where(e => e.FeedId == feedId);
 
-            // 2) Suche
+            // 2) search
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var q = search!;
@@ -145,7 +167,7 @@ internal sealed class UiEpisodesPane
                 );
             }
 
-            // 3) Sort – GANZ AM ENDE (falls gesetzt), sonst Default pubdate desc
+            // 3) sort – last by explicit sorter, else default pubdate desc
             src = sorter != null
                 ? sorter(src)
                 : src.OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue);
@@ -153,7 +175,7 @@ internal sealed class UiEpisodesPane
 
         _episodes = src.ToList();
 
-        // Zielauswahl bestimmen
+        // determine target selection
         int sel = 0;
         if (preferSelectId is Guid pid)
         {
@@ -165,12 +187,12 @@ internal sealed class UiEpisodesPane
             sel = Math.Clamp(keepSel, 0, Math.Max(0, _episodes.Count - 1));
         }
 
-        // Items setzen
+        // set items
         var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
         List.SetSource(items);
         List.SelectedItem = items.Count > 0 ? Math.Clamp(sel, 0, items.Count - 1) : 0;
 
-        // Scroll wiederherstellen
+        // restore scroll
         var maxTop = Math.Max(0, items.Count - 1);
         List.TopItem = Math.Clamp(keepTop, 0, maxTop);
 
@@ -260,26 +282,28 @@ internal sealed class UiEpisodesPane
         Tabs.SetNeedsDisplay();
     }
 
-    // --- Rendering ----------------------------------------------------------------
+    #endregion  
 
-    // Fortschritt & Badges aus persistenten Feldern,
-    // aber für die *aktive* Episode (nowId) optional mit Snapshot-Override.
+    #region rendering
+
+    // progress & badges come from persistent fields.
+    // for the active episode, an optional snapshot overrides the progress.
     private string RowFor(Episode e, Guid? nowId, PlaybackSnapshot? snapForActive)
     {
-        // Prefix: neutrales "  " oder "▶ " für aktive Episode
+        // prefix: neutral "  " or "▶ " for active episode
         bool isNow = nowId != null && e.Id == nowId.Value;
         var nowPrefix = UIGlyphSet.NowPrefix(isNow);
 
-        // Länge/Position – Default aus Persistenz
+        // length/position – defaults from persistence
         long lenMs = e.DurationMs;
         long posMs = e.Progress.LastPosMs;
 
-        // Snapshot-Override NUR für aktive Episode anwenden (synchron mit AudioPlayer)
+        // apply snapshot override only for active episode (sync with player)
         if (isNow && snapForActive is PlaybackSnapshot snap)
         {
             var sp = (long)Math.Max(0, snap.Position.TotalMilliseconds);
             var sl = (long)Math.Max(0, snap.Length.TotalMilliseconds);
-            // Eff-> nie kleiner als Pos
+            // effective length should not be smaller than snapshot length
             lenMs = Math.Max(lenMs, sl);
             posMs = Math.Max(0, Math.Min(sp, Math.Max(1, lenMs)));
         }
@@ -292,7 +316,7 @@ internal sealed class UiEpisodesPane
         var date = e.PubDate?.ToString("yyyy-MM-dd") ?? "????-??-??";
         string dur = UIGlyphSet.FormatDuration(lenMs);
 
-        // Download-Zustand / Badges
+        // download state / badges
         var ds = _dlStateLookup?.Invoke(e.Id) ?? DownloadState.None;
 
         bool offline = _isOffline?.Invoke() == true;
@@ -322,6 +346,10 @@ internal sealed class UiEpisodesPane
         return left + paddedTitle + UIGlyphSet.Separator + feedTrunc.PadRight(FEED_COL_W);
     }
 
+    #endregion
+
+    #region helpers
+
     private static string TruncateTo(string? s, int max)
     {
         if (max <= 0 || string.IsNullOrEmpty(s)) return "";
@@ -330,17 +358,19 @@ internal sealed class UiEpisodesPane
         return s.Substring(0, Math.Max(0, max - 1)) + "…";
     }
 
-    // --- API: NowPlaying-Markierung ------------------------------------------------
+    #endregion
 
-    // Bestehende Signatur bleibt (Kompatibilität)
+    #region now playing api
+
+    // existing signature retained for compatibility
     public void InjectNowPlaying(Guid? nowId)
     {
         _nowPlayingId = nowId;
-        _activeSnapshot = null; // kein Snapshot → persistente Werte
+        _activeSnapshot = null; // no snapshot → use persistent values
         RebuildRowsPreservingView();
     }
 
-    // Overload mit Snapshot – synchronisiert Fortschritt der aktiven Episode zur AudioPlayer-Anzeige
+    // overload with snapshot to sync active episode progress with audio player
     public void InjectNowPlaying(Guid? nowId, PlaybackSnapshot snapshot)
     {
         _nowPlayingId = nowId;
@@ -352,7 +382,7 @@ internal sealed class UiEpisodesPane
     {
         var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
 
-        // Auswahl & Scroll beibehalten
+        // preserve selection & scroll
         var keepSel = List.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
         var keepTop = List.TopItem;
 
@@ -363,4 +393,6 @@ internal sealed class UiEpisodesPane
 
         Tabs.SetNeedsDisplay();
     }
+
+    #endregion
 }
