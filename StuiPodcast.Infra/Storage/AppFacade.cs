@@ -125,6 +125,16 @@ namespace StuiPodcast.Infra.Storage
         // history operations
         public void HistoryAdd(Guid episodeId, DateTimeOffset atUtc) => LibraryStore.HistoryAdd(episodeId, atUtc);
         public void HistoryClear() => LibraryStore.HistoryClear();
+        
+        // remove
+        public bool RemoveFeed(Guid feedId) 
+            => LibraryStore.RemoveFeed(feedId);
+
+        public int RemoveEpisodesByFeed(Guid feedId) 
+            => LibraryStore.RemoveEpisodesByFeed(feedId);
+
+        public int QueueRemoveByEpisodeIds(IEnumerable<Guid> episodeIds) 
+            => LibraryStore.QueueRemoveByEpisodeIds(episodeIds);
         #endregion
 
         #region downloads

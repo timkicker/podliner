@@ -2,19 +2,18 @@
 
 ## v0.1.0
 - [ ] Fix play-button visual (doesn't work on mac at all, no first update on linux)
-- [ ] Fix arrow-keys support
 - [ ] Fix VLC recogn on Mac. MPV seems to work. Maybe add `VideoLAN.LibVLC.Mac`
-- [ ] Fix remove-feed on save
-- [ ] Fix download osd (remove or just once)
-- [ ] Fix download percentage top right 
+- [X] Fix remove-feed on save
+- [X] Fix download percentage top right 
 - [X] Rework default theme(+ as default)
-- [ ] Add more logging to engine recogn.
+- [X] Add more logging to engine recogn.
 - [X] Add more commands to menubar
 - [X] Update macos-installer
 - [X] Update readme (download-section)
 
 ## v0.2.0
 - [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
+- [ ] Fix arrow-keys support
 
 ## General (good-first-issue?)
 

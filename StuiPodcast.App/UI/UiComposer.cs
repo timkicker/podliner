@@ -8,6 +8,7 @@ using StuiPodcast.Infra.Storage;
 using Terminal.Gui;
 using System.Collections.Generic;
 using System.Linq;
+using StuiPodcast.App.Services;
 
 
 namespace StuiPodcast.App.UI;
@@ -145,14 +146,18 @@ static class UiComposer
 {
     // id → letzter zustand (session-zähler für x/y + %)
     var byId = new Dictionary<Guid, DownloadState>();
+    var progress = new Dictionary<Guid, (long bytes, long? total, DownloadState state)>();
+
     DateTime lastPulse = DateTime.MinValue;
 
     void updateBadge()
     {
-        // total = done + queued + running + verifying
-        int done  = byId.Values.Count(s => s == DownloadState.Done);
-        int active= byId.Values.Count(s => s == DownloadState.Queued || s == DownloadState.Running || s == DownloadState.Verifying);
-        int total = done + active;
+        // X/Y: wie bisher
+        int done   = byId.Values.Count(s => s == DownloadState.Done);
+        int active = byId.Values.Count(s => s == DownloadState.Queued
+                                            || s == DownloadState.Running
+                                            || s == DownloadState.Verifying);
+        int total  = done + active;
 
         if (total <= 0)
         {
@@ -160,21 +165,68 @@ static class UiComposer
             return;
         }
 
-        int pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
+        // Bytes-gewichtete Prozent über alle Items mit bekannter TotalBytes
+        long sumBytes = 0;
+        long sumTotal = 0;
+
+        foreach (var (id, (bytes, totalBytes, st)) in progress.ToArray())
+        {
+            if (totalBytes is long T && T > 0)
+            {
+                // Done zählt voll (100%), Running/Verifying nach aktuellem Stand
+                if (st == DownloadState.Done)
+                {
+                    sumBytes += T;
+                    sumTotal += T;
+                }
+                else if (st == DownloadState.Running || st == DownloadState.Verifying)
+                {
+                    var b = Math.Clamp(bytes, 0, T);
+                    sumBytes += b;
+                    sumTotal += T;
+                }
+            }
+        }
+
+        int pct;
+        if (sumTotal > 0)
+        {
+            pct = (int)Math.Round(100.0 * sumBytes / sumTotal);
+        }
+        else
+        {
+            // Fallback: wenn kein einziger TotalBytes bekannt ist → alte Zähl-Logik
+            pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
+        }
+
         ui.SetDownloadBadge($"{done}/{total} • {pct}%");
 
-        // wenn nichts mehr aktiv → badge kurz stehen lassen, beim nächsten event wird es ausgeblendet
+        // Optional: am Ende eines Batches OSD
         if (active == 0 && done > 0)
-        {
-            // optional: leises osd am ende eines batches
             ui.ShowOsd($"downloads {done}/{total} • {pct}%");
-        }
     }
+
 
     downloader.StatusChanged += (id, st) =>
     {
         // zustandspflege
         byId[id] = st.State;
+        
+        // Progress pflegen (auch während Running/Verifying/Done)
+        progress[id] = (st.BytesReceived, st.TotalBytes, st.State);
+
+// Speicher sauber halten: bei Failed/Canceled rauswerfen
+        if (st.State == DownloadState.Failed || st.State == DownloadState.Canceled)
+        {
+            progress.Remove(id);
+        }
+
+// Bei Done sicherheitshalber auf 100% setzen, falls Bytes < Total
+        if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is long T)
+        {
+            progress[id] = (T, T, DownloadState.Done);
+        }
+
 
         Application.MainLoop?.Invoke(() =>
         {
@@ -265,6 +317,32 @@ static class UiComposer
                 ui.ShowOsd($"add failed: {ex.Message}", 2200);
             }
         };
+        
+        ui.RemoveFeedRequested += async () =>
+        {
+            var fid = ui.GetSelectedFeedId();
+            if (fid is null) { ui.ShowOsd("no feed selected", 1200); return; }
+
+            try
+            {
+                await feeds.RemoveFeedAsync(fid.Value);   // ← persistiert + AppData spiegeln + SaveNow
+
+                // UI neu setzen
+                var next = data.Feeds.FirstOrDefault()?.Id;
+                ui.SetFeeds(data.Feeds, next);
+                if (next != null) { ui.SetEpisodesForFeed(next.Value, data.Episodes); ui.SelectEpisodeIndex(0); }
+                else              { ui.SetEpisodesForFeed(ui.AllFeedId, data.Episodes); }
+
+                ui.ShowOsd("feed removed ✓", 1200);
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Error(ex, "ui/removefeed failed id={Id}", fid);
+                ui.ShowOsd($"remove failed: {ex.Message}", 2200);
+            }
+        };
+
+
 
         // refresh
         ui.RefreshRequested += async () =>
@@ -310,7 +388,7 @@ static class UiComposer
             ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
             _ = save();
 
-            if (curFeed is Guid fid && fid == ui.QueueFeedId)
+            if (curFeed is Guid fid && fid == VirtualFeedsCatalog.Queue)
             {
                 int ix = data.Queue.FindIndex(id => id == ep.Id);
                 if (ix >= 0)

@@ -41,22 +41,12 @@ internal static class CmdFeedsModule
         var fid = ui.GetSelectedFeedId();
         if (fid is null) { ui.ShowOsd("No feed selected"); return; }
 
-        if (fid == VirtualFeedsCatalog.All || fid == VirtualFeedsCatalog.Saved || fid == VirtualFeedsCatalog.Downloaded || fid == VirtualFeedsCatalog.History)
+        if (fid == VirtualFeedsCatalog.All || fid == VirtualFeedsCatalog.Saved 
+                                           || fid == VirtualFeedsCatalog.Downloaded || fid == VirtualFeedsCatalog.History)
         { ui.ShowOsd("Can't remove virtual feeds"); return; }
 
-        var feed = data.Feeds.FirstOrDefault(f => f.Id == fid);
-        if (feed == null) { ui.ShowOsd("Feed not found"); return; }
-
-        int removedEps = data.Episodes.RemoveAll(e => e.FeedId == fid);
-        data.Feeds.RemoveAll(f => f.Id == fid);
-
-        _ = persist();
-
-        data.LastSelectedFeedId = VirtualFeedsCatalog.All;
-
-        ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
-        CmdViewModule.ApplyList(ui, data);
-
-        ui.ShowOsd($"Removed feed: {feed.Title} ({removedEps} eps)");
+        // Leite an die zentrale Pipeline weiter (persistiert über FeedService)
+        ui.RequestRemoveFeed();
     }
+
 }

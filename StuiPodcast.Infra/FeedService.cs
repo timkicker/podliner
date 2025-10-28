@@ -29,6 +29,38 @@ namespace StuiPodcast.Infra
         #endregion
 
         #region public api
+        // FeedService.cs
+        public async Task RemoveFeedAsync(Guid feedId, bool removeDownloads = false)
+        {
+            // 1) Episoden-IDs des Feeds bestimmen (für Queue-Cleanup & evtl. Downloads)
+            var epIds = _data.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
+
+            // 2) Persistenz: Feed + Episoden aus der Library entfernen
+            var removedFeed    = _app.RemoveFeed(feedId);               // -> LibraryStore
+            var removedEps     = _app.RemoveEpisodesByFeed(feedId);     // -> LibraryStore
+            var removedFromQ   = _app.QueueRemoveByEpisodeIds(epIds);   // -> LibraryStore
+
+            // 3) AppData (UI-Cache) spiegeln
+            _data.Feeds.RemoveAll(f => f.Id == feedId);
+            _data.Episodes.RemoveAll(e => e.FeedId == feedId);
+            _data.Queue.RemoveAll(id => epIds.Contains(id));
+            if (_data.LastSelectedFeedId == feedId) _data.LastSelectedFeedId = null;
+
+            // 4) Optional: lokale Dateien löschen (wenn gewünscht)
+            if (removeDownloads)
+            {
+                foreach (var id in epIds)
+                    if (_app.TryGetLocalPath(id, out var path) && !string.IsNullOrWhiteSpace(path))
+                        try { System.IO.File.Delete(path!); } catch { /* best effort */ }
+            }
+
+            // 5) Sicher speichern
+            _app.SaveNow();
+
+            Serilog.Log.Information("feed/remove persisted id={FeedId} feedRemoved={Feed} episodesRemoved={Eps} queueRemoved={Q}",
+                feedId, removedFeed, removedEps, removedFromQ);
+        }
+
 
         public async Task<CoreFeed> AddFeedAsync(string url)
         {

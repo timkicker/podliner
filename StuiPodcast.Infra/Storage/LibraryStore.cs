@@ -302,6 +302,43 @@ namespace StuiPodcast.Infra.Storage
             Current.History.Clear();
             SaveAsync();
         }
+        
+        // removals
+        public bool RemoveFeed(Guid feedId)
+        {
+            var removed = Current.Feeds.RemoveAll(f => f.Id == feedId) > 0;
+            if (removed)
+            {
+                _feedsById.Remove(feedId);        
+                Changed?.Invoke();
+                SaveAsync();
+            }
+            return removed;
+        }
+
+        public int RemoveEpisodesByFeed(Guid feedId)
+        {
+            var toRemove = Current.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToList();
+            var cnt = Current.Episodes.RemoveAll(e => e.FeedId == feedId);
+            if (cnt > 0)
+            {
+                foreach (var id in toRemove) _episodesById.Remove(id);   
+                Changed?.Invoke();
+                SaveAsync();
+            }
+            return cnt;
+        }
+
+
+        public int QueueRemoveByEpisodeIds(IEnumerable<Guid> episodeIds)
+        {
+            var set = episodeIds is HashSet<Guid> h ? h : new HashSet<Guid>(episodeIds);
+            var before = Current.Queue.Count;
+            Current.Queue.RemoveAll(id => set.Contains(id));
+            var removed = before - Current.Queue.Count;
+            if (removed > 0) { Changed?.Invoke(); SaveAsync(); }
+            return removed;
+        }
 
         #endregion
 

@@ -1,6 +1,7 @@
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.Services;
 using Attribute = Terminal.Gui.Attribute;
 using StuiPodcast.App.UI.Controls;
 
@@ -20,6 +21,9 @@ public sealed class UiShell
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     public event Action? EpisodeSelectionChanged;
     public event Action? QuitRequested;
+    public event Action? RemoveFeedRequested;
+
+
     public event Func<string, System.Threading.Tasks.Task>? AddFeedRequested;
     public event Func<System.Threading.Tasks.Task>? RefreshRequested;
     public event Action? PlaySelected;
@@ -29,17 +33,7 @@ public sealed class UiShell
     public event Action<string>? SearchApplied;
     public event Action? SelectedFeedChanged;
     #endregion
-
-    #region constants (virtual feeds)
-    private static readonly Guid FEED_ALL        = Guid.Parse("00000000-0000-0000-0000-00000000A11A");
-    private static readonly Guid FEED_SAVED      = Guid.Parse("00000000-0000-0000-0000-00000000A55A");
-    private static readonly Guid FEED_DOWNLOADED = Guid.Parse("00000000-0000-0000-0000-00000000D0AD");
-    private static readonly Guid FEED_HISTORY    = Guid.Parse("00000000-0000-0000-0000-00000000B157");
-    private static readonly Guid FEED_QUEUE      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE");
-    private static readonly Guid FEED_SEPARATOR  = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
-    private static bool IsSeparator(Guid? id) => id is Guid g && g == FEED_SEPARATOR;
-    #endregion
-
+    
     #region theme shortcut
     public void SetThemeByNumber(int n)
     {
@@ -135,7 +129,17 @@ public sealed class UiShell
     public void RequestQuit()              => QuitRequested?.Invoke();
 
     public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
-        => UI(() => _player?.SetLoading(on, text, baseline));
+    {
+        try
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                _player?.SetLoading(on, text, baseline); 
+            });
+        }
+        catch { }
+    }
+
 
     public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
     public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "refreshed ✓" : "refreshing…");
@@ -328,17 +332,17 @@ public sealed class UiShell
             bool anyRealFeeds = feeds.Count > 0;
             Guid want = selectId
                         ?? (anyRealFeeds
-                            ? _feeds.FirstOrDefault(f => f.Id != FEED_SEPARATOR)?.Id ?? FEED_ALL
+                            ? _feeds.FirstOrDefault(f => f.Id != VirtualFeedsCatalog.Seperator)?.Id ?? FEED_ALL
                             : FEED_ALL);
 
             int idx = 0;
             var j = _feeds.FindIndex(f => f.Id == want);
             if (j >= 0) idx = j;
 
-            if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
+            if (_feeds.ElementAtOrDefault(idx)?.Id == VirtualFeedsCatalog.Seperator)
             {
                 idx = Math.Clamp(idx + 1, 0, Math.Max(0, _feeds.Count - 1));
-                if (_feeds.ElementAtOrDefault(idx)?.Id == FEED_SEPARATOR)
+                if (_feeds.ElementAtOrDefault(idx)?.Id == VirtualFeedsCatalog.Seperator)
                     idx = 0;
             }
 
@@ -357,7 +361,7 @@ public sealed class UiShell
     public Guid? GetSelectedFeedId()
     {
         var id = _feedsPane?.GetSelectedFeedId();
-        return IsSeparator(id) ? (Guid?)null : id;
+        return (id == VirtualFeedsCatalog.Seperator) ? (Guid?)null : id;
     }
 
     public void SelectFeed(Guid id) => _feedsPane?.SelectFeed(id);
@@ -374,14 +378,14 @@ public sealed class UiShell
         {
             if (_episodesPane == null) return;
 
-            _episodesPane.ConfigureFeedColumn(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE);
+            _episodesPane.ConfigureFeedColumn(feedId, VirtualFeedsCatalog.All, VirtualFeedsCatalog.Saved, VirtualFeedsCatalog.Downloaded, VirtualFeedsCatalog.History, VirtualFeedsCatalog.Queue);
 
             var prevId  = _episodesPane.GetSelected()?.Id;
             var keepTop = _episodesPane.List?.TopItem ?? 0;
 
             _episodesPane.SetEpisodes(
                 episodes, feedId,
-                FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE,
+                VirtualFeedsCatalog.All, VirtualFeedsCatalog.Saved, VirtualFeedsCatalog.Downloaded, VirtualFeedsCatalog.History, VirtualFeedsCatalog.Queue,
                 EpisodeSorter, _lastSearch, prevId
             );
 
@@ -393,6 +397,12 @@ public sealed class UiShell
                 _episodesPane.List.TopItem = Math.Clamp(keepTop, 0, maxTop);
             }
         });
+    }
+    
+    
+    public void RequestRemoveFeed()
+    {
+        try { RemoveFeedRequested?.Invoke(); } catch { }
     }
 
     public Episode? GetSelectedEpisode() => _episodesPane?.GetSelected();
@@ -884,7 +894,7 @@ public sealed class UiShell
             if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
         }
 
-        bool inQueue = GetSelectedFeedId() is Guid fid && fid == QueueFeedId;
+        bool inQueue = GetSelectedFeedId() is Guid fid && fid == VirtualFeedsCatalog.Queue;
         if (kv == 'J')
         {
             if (inQueue) { Command?.Invoke(":queue move down"); return true; }
@@ -1005,7 +1015,6 @@ public sealed class UiShell
     public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
         => _episodesPane?.SetDownloadStateLookup(fn);
 
-    public Guid QueueFeedId => FEED_QUEUE;
     #endregion
 
     #region list nav helpers
@@ -1022,7 +1031,7 @@ public sealed class UiShell
                 while (guard-- > 0)
                 {
                     var feed = _feeds.ElementAtOrDefault(target);
-                    if (feed?.Id == FEED_SEPARATOR)
+                    if (feed?.Id == VirtualFeedsCatalog.Seperator)
                         target = Math.Clamp(target + Math.Sign(delta), 0, lv.Source.Count - 1);
                     else
                         break;
@@ -1122,14 +1131,14 @@ public sealed class UiShell
     {
         var virt = new List<Feed>
         {
-            new Feed { Id = FEED_ALL,        Title = "All Episodes" },
-            new Feed { Id = FEED_SAVED,      Title = "★ Saved" },
-            new Feed { Id = FEED_DOWNLOADED, Title = "⬇ Downloaded" },
-            new Feed { Id = FEED_QUEUE,      Title = "⧉ Queue" },
-            new Feed { Id = FEED_HISTORY,    Title = "⏱ History" },
+            new Feed { Id = VirtualFeedsCatalog.All,        Title = "All Episodes" },
+            new Feed { Id = VirtualFeedsCatalog.Saved,      Title = "★ Saved" },
+            new Feed { Id = VirtualFeedsCatalog.Downloaded, Title = "⬇ Downloaded" },
+            new Feed { Id = VirtualFeedsCatalog.Queue,      Title = "⧉ Queue" },
+            new Feed { Id = VirtualFeedsCatalog.History,    Title = "⏱ History" },
         };
 
-        var barrier = new Feed { Id = FEED_SEPARATOR, Title = "────────" };
+        var barrier = new Feed { Id = VirtualFeedsCatalog.Seperator, Title = "────────" };
 
         var reals = (realFeeds ?? Enumerable.Empty<Feed>()).ToList();
         return virt.Concat(new[] { barrier }).Concat(reals);
@@ -1142,7 +1151,7 @@ public sealed class UiShell
     public void ShowKeysHelp() => UiHelpBrowserDialog.Show();
     public void ShowError(string title, string msg) => MessageBox.ErrorQuery(title, msg, "OK");
 
-    public Guid AllFeedId => FEED_ALL;
+    public Guid AllFeedId => VirtualFeedsCatalog.All;
 
     public void ScrollEpisodesToTopAndFocus()
     {

@@ -24,6 +24,16 @@ sealed class PlaybackCoordinator
     private DateTime _lastUiRefresh    = DateTime.MinValue;
     private DateTime _lastPeriodicSave = DateTime.MinValue;
     private DateTimeOffset _lastAutoAdv = DateTimeOffset.MinValue;
+    
+    private CancellationTokenSource? _loadingCts;
+    private TimeSpan _loadingBaseline = TimeSpan.Zero;
+    private DateTime _loadingSinceUtc = DateTime.MinValue;
+
+    private static readonly TimeSpan LoadingMinVisible    = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan LoadingAdvanceThresh = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan SlowLoadingAfter     = TimeSpan.FromSeconds(2);   // „slow“ ab 2 s
+    private static readonly TimeSpan VerySlowLoadingAfter = TimeSpan.FromSeconds(6);   // optional: „very slow“
+
 
     private bool _endHandledForSession = false;
     private int _sid = 0;
@@ -63,6 +73,12 @@ sealed class PlaybackCoordinator
 
         CancelResume();
         CancelStallWatch();
+        
+        _loadingCts?.Cancel();
+        _loadingCts = new CancellationTokenSource();
+
+        _loadingBaseline = TimeSpan.FromMilliseconds(ep.Progress?.LastPosMs ?? 0);
+        _loadingSinceUtc = DateTime.UtcNow;
 
         long? startMs = ep.Progress.LastPosMs;
         if (startMs is long ms)
@@ -76,7 +92,40 @@ sealed class PlaybackCoordinator
         }
 
         FireStatus(PlaybackStatus.Loading);
-        _audioPlayer.Play(ep.AudioUrl, null);
+        
+        // loading ui 
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(SlowLoadingAfter, _loadingCts.Token);
+                if (_loadingCts.IsCancellationRequested) return;
+                if (sid != _sid) return;
+                if (_progressSeenForSession) return; 
+
+                FireStatus(PlaybackStatus.SlowNetwork);
+
+                await Task.Delay(VerySlowLoadingAfter - SlowLoadingAfter, _loadingCts.Token);
+                if (_loadingCts.IsCancellationRequested) return;
+                if (sid != _sid) return;
+                if (_progressSeenForSession) return;
+
+
+                FireStatus(PlaybackStatus.SlowNetwork);
+            }
+            catch {  }
+        });
+        
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                _audioPlayer.Play(ep.AudioUrl, null);
+            }
+            catch
+            {
+            }
+        });
 
         if (startMs is long want && want > 0)
             StartOneShotResume(want, sid);
@@ -87,12 +136,13 @@ sealed class PlaybackCoordinator
             sid,
             ep.Id,
             TimeSpan.Zero,
-            _audioPlayer.State.Length ?? TimeSpan.Zero,
-            _audioPlayer.State.IsPlaying,
-            _audioPlayer.State.Speed,
-            DateTimeOffset.Now
+            TimeSpan.Zero,
+            isPlaying: false,
+            speed: 1.0,
+            now: DateTimeOffset.Now
         );
         FireSnapshot(_lastSnapshot);
+
     }
 
     public void PersistProgressTick(
@@ -112,6 +162,7 @@ sealed class PlaybackCoordinator
                 _progressSeenForSession = true;
                 FireStatus(PlaybackStatus.Playing);
                 CancelStallWatch();
+                try { _loadingCts?.Cancel(); } catch { } 
             }
         }
 
@@ -152,6 +203,7 @@ sealed class PlaybackCoordinator
         {
             _endHandledForSession = true;
             FireStatus(PlaybackStatus.Ended);
+            try { _loadingCts?.Cancel(); } catch { } 
             CancelStallWatch();
 
             if (_data.AutoAdvance &&

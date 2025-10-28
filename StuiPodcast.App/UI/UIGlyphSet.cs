@@ -4,26 +4,29 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI
 {
-    /// <summary>
-    /// Zentraler Zugriff auf alle TUI-Glyphen (Unicode oder ASCII-Fallback).
-    /// Verwende diese Klasse statt harter Literale in UI-Renderern.
-    /// </summary>
+    // central access to tui glyphs (unicode or ascii fallback)
+    // use this class instead of hard literals in ui renderers
     public static class UIGlyphSet
     {
         public enum Profile { Unicode, Ascii }
 
-        /// <summary>Aktives Profil (Default via AutoDetect()).</summary>
+        // active profile (default via autodetect)
         public static Profile Current { get; private set; } = AutoDetect();
 
-        /// <summary>Manueller Override (z.B. per :theme native → Ascii).</summary>
+        // manual override
         public static void Use(Profile p) => Current = p;
 
-        /// <summary>Automatische Erkennung: Windows nach VT-Enable → Unicode, sonst Unicode; falls TERM sehr alt → ASCII.</summary>
+        #region detection and heuristics
+
+        // auto-detect profile:
+        // - env PODLINER_GLYPHS can force "ascii" or "unicode"
+        // - windows -> unicode
+        // - TERM contains 'dumb' -> ascii
         public static Profile AutoDetect()
         {
             try
             {
-                // Opt-out per Env
+                // opt-out via env
                 var force = Environment.GetEnvironmentVariable("PODLINER_GLYPHS");
                 if (!string.IsNullOrWhiteSpace(force))
                 {
@@ -31,11 +34,11 @@ namespace StuiPodcast.App.UI
                     if (force.Equals("unicode", StringComparison.OrdinalIgnoreCase)) return Profile.Unicode;
                 }
 
-                // Minimalheuristik: Windows → nach unserem VT-Enable i.d.R. Unicode ok.
+                // windows -> unicode by default
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                     return Profile.Unicode;
 
-                // Sehr alte Terminals?
+                // very old/small terminals
                 var term = Environment.GetEnvironmentVariable("TERM") ?? "";
                 if (term.Contains("dumb", StringComparison.OrdinalIgnoreCase))
                     return Profile.Ascii;
@@ -45,20 +48,22 @@ namespace StuiPodcast.App.UI
             catch { return Profile.Unicode; }
         }
 
-        // ---------- AudioPlayer / NowPlaying ----------
+        #endregion
 
-        /// <summary>Prefix für Listenzeile: aktiv vs. normal.</summary>
+        #region nowplaying / list prefix
+
+        // prefix for list line: active vs normal
         public static string NowPrefix(bool isNow) => isNow
             ? (Current == Profile.Unicode ? "▶ " : "> ")
             : "  ";
 
-        // ---------- Progress / Played ----------
+        #endregion
 
-        /// <summary>
-        /// Fortschritts-Marker für Episodenliste:
-        /// played=true → ✔ / 'v'
-        /// sonst je nach ratio (0..1): ○ ◔ ◑ ◕ ●  bzw. o c O 0 @ (ASCII).
-        /// </summary>
+        #region progress / played
+
+        // progress marker for episode list:
+        // - if played -> checkmark or 'v'
+        // - else choose glyph by ratio (0..1)
         public static char ProgressGlyph(double ratio, bool played)
         {
             if (played) return Current == Profile.Unicode ? '✔' : 'v';
@@ -82,11 +87,13 @@ namespace StuiPodcast.App.UI
             }
         }
 
-        // ---------- Badges (Saved / Download / Queue / Offline) ----------
+        #endregion
+
+        #region badges (saved / download / queue / offline)
 
         public static char Saved  => Current == Profile.Unicode ? '★' : '*';
 
-        /// <summary>Download-Status: kleines Symbol für Episodenliste/OSD.</summary>
+        // download state badge (small symbol for list/osd)
         public static string DownloadStateBadge(DownloadState s)
         {
             var uni = Current == Profile.Unicode;
@@ -102,17 +109,17 @@ namespace StuiPodcast.App.UI
             };
         }
 
-        /// <summary>Einfacher "ist heruntergeladen" Badge (Legacy/Fallback).</summary>
+        // simple downloaded marker (legacy/fallback)
         public static char DownloadedMark => Current == Profile.Unicode ? '⬇' : 'v';
 
         public static char Queue  => Current == Profile.Unicode ? '⧉' : '#';
         public static char Offline => Current == Profile.Unicode ? '∅' : 'o';
 
-        // ---------- Composite Helpers ----------
+        #endregion
 
-        /// <summary>
-        /// Baut die 4-Badge-Leiste "saved, dl, queue, offline" als 4 Zeichen (oder Leerzeichen).
-        /// </summary>
+        #region composite helpers
+
+        // build 4-char badge string: saved, dl, queue, offline
         public static string ComposeBadges(bool isSaved, DownloadState dlState, bool isQueued, bool showOffline)
         {
             var s = isSaved ? Saved : ' ';
@@ -132,16 +139,22 @@ namespace StuiPodcast.App.UI
             return $"{s}{d}{q}{o}";
         }
 
-        // ---------- Volume / Misc (optional) ----------
+        #endregion
+
+        #region misc / ui labels
 
         public static string VolumePercent(int v) => $"{v}%";
 
+        // speed label: zero/negative -> disabled symbol
         public static string SpeedLabel(double s) => (s <= 0) ? (Current == Profile.Unicode ? "—×" : "x") : $"{s:0.0}×";
 
         public static string Separator => Current == Profile.Unicode ? "  │  " : " | ";
 
-        // ---------- Durations ----------
+        #endregion
 
+        #region durations
+
+        // format duration in ms to h:mm:ss or mm:ss
         public static string FormatDuration(long ms)
         {
             if (ms <= 0) return "--:--";
@@ -151,5 +164,7 @@ namespace StuiPodcast.App.UI
             long s = total % 60;
             return h > 0 ? $"{h}:{m:00}:{s:00}" : $"{m:00}:{s:00}";
         }
+
+        #endregion
     }
 }

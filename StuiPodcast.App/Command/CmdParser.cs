@@ -8,21 +8,21 @@ namespace StuiPodcast.App.Command
     {
         private static readonly StringComparer Ci = StringComparer.OrdinalIgnoreCase;
 
-        // Aliases → kanonische Form
+        // alias to canonical 
         private static readonly Dictionary<string, string> Canon = new(Ci)
         {
             [":h"] = ":help",
             [":q"] = ":quit",
             [":q!"] = ":quit!",
             [":w"] = ":write",
-            [":wq"] = ":wq", // Falls du mal eine eigene Langform willst, hier mappen.
+            [":wq"] = ":wq", 
             [":x"] = ":wq",
             [":a"] = ":add",
             [":r"] = ":refresh",
             [":rm-feed"] = ":remove-feed",
         };
 
-        // Exakte Matches (nach Canonicalize)
+        // exact matches
         private static readonly Dictionary<string, TopCommand> Exact = new(Ci)
         {
             [":help"] = TopCommand.Help,
@@ -48,7 +48,7 @@ namespace StuiPodcast.App.Command
             [":remove-feed"] = TopCommand.RemoveFeed,
         };
 
-        // Prefix-Regeln (nach Canonicalize, Reihenfolge wichtig)
+        // perfix rules
         private static readonly (string Prefix, TopCommand Cmd)[] Prefixes = new (string, TopCommand)[]
         {
             (":engine",       TopCommand.Engine),
@@ -74,7 +74,7 @@ namespace StuiPodcast.App.Command
             (":save",         TopCommand.Save),
             (":sort",         TopCommand.Sort),
             (":filter",       TopCommand.Filter),
-            (":audioplayer",  TopCommand.PlayerBar), // deckt :audioPlayer / :audioplayer ab
+            (":audioplayer",  TopCommand.PlayerBar), 
 
             (":net",          TopCommand.Net),
             (":play-source",  TopCommand.PlaySource),
@@ -94,10 +94,8 @@ namespace StuiPodcast.App.Command
 
             var (cmd0, args) = SplitCmd(tokens);
 
-            // 1) Kanonisieren (macht z. B. ":h" → ":help")
             var cmd = Canonicalize(cmd0);
 
-            // 2) TopCommand anhand der kanonischen Form bestimmen
             var top = MapTop(cmd);
 
             return new CmdParsed(raw, cmd, args, top);
@@ -150,7 +148,6 @@ namespace StuiPodcast.App.Command
         private static string Canonicalize(string cmd)
         {
             if (string.IsNullOrWhiteSpace(cmd)) return "";
-            // Normalize leading colon; tolerate missing colon (user typed "h")
             if (cmd[0] != ':') cmd = ":" + cmd;
             return Canon.TryGetValue(cmd, out var longForm) ? longForm : cmd;
         }

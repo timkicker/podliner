@@ -7,10 +7,7 @@ using StuiPodcast.App; // for HelpCatalog & enums
 
 namespace StuiPodcast.App.UI
 {
-    /// <summary>
-    /// Builds the top menu bar. Items are generated from HelpCatalog so adding commands
-    /// requires no menu maintenance. Commands with args open the ":" box pre-seeded.
-    /// </summary>
+
     internal static class UiMenuBarFactory
     {
         #region API
@@ -94,7 +91,6 @@ namespace StuiPodcast.App.UI
                 return s.Length <= 72 ? s : s[..72] + "…";
             }
 
-            // ---- Build items from HelpCatalog -------------------------------------------------
 
             MenuItem[] BuildFromCatalog(HelpCategory cat)
             {
