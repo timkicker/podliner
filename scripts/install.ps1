@@ -42,6 +42,77 @@ function Ensure-Dir([string]$path) {
   }
 }
 
+# Minimal HttpClient with progress helper
+function New-HttpClient {
+  $h = New-Object System.Net.Http.HttpClient
+  $h.Timeout = [TimeSpan]::FromMinutes(30)
+  $h.DefaultRequestHeaders.UserAgent.ParseAdd("podliner-installer")
+  return $h
+}
+
+function Download-File {
+  param(
+    [Parameter(Mandatory)][string]$Uri,
+    [Parameter(Mandatory)][string]$OutFile,
+    [string]$Activity = "Downloading",
+    [int]$Retries = 2
+  )
+
+  $attempt = 0
+  do {
+    $attempt++
+    try {
+      $client = New-HttpClient
+      $resp = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+      if (-not $resp.IsSuccessStatusCode) {
+        throw "HTTP $($resp.StatusCode) for $Uri"
+      }
+
+      $total = $resp.Content.Headers.ContentLength
+      $inStream  = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+      $dir = [System.IO.Path]::GetDirectoryName($OutFile)
+      if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+      $outStream = [System.IO.File]::Open($OutFile, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+
+      try {
+        $buffer = New-Object byte[] (1MB)
+        $readTotal = 0L
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        while (($read = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+          $outStream.Write($buffer, 0, $read)
+          $readTotal += $read
+          if ($total) {
+            $pct = [int](100 * $readTotal / $total)
+            $speed = if ($sw.Elapsed.TotalSeconds -gt 0) { "{0:n1} MB/s" -f (($readTotal/1MB)/$sw.Elapsed.TotalSeconds) } else { "" }
+            Write-Progress -Activity $Activity -Status "$pct%  $speed" -PercentComplete $pct
+          } else {
+            Write-Progress -Activity $Activity -Status ("{0:n1} MB" -f ($readTotal/1MB)) -PercentComplete -1
+          }
+        }
+      }
+      finally {
+        $outStream.Dispose()
+        $inStream.Dispose()
+        $client.Dispose()
+        Write-Progress -Activity $Activity -Completed
+      }
+
+      if (-not (Test-Path -LiteralPath $OutFile) -or ((Get-Item -LiteralPath $OutFile).Length -eq 0)) {
+        throw "Empty file after download"
+      }
+      return  # success
+    }
+    catch {
+      if ($attempt -le $Retries) {
+        Write-Host "Download failed (attempt $attempt of $Retries): $($_.Exception.Message). Retrying..." -ForegroundColor Yellow
+        Start-Sleep -Seconds ([math]::Min(5 * $attempt, 15))
+      } else {
+        throw
+      }
+    }
+  } while ($true)
+}
+
 $LocalApp = $env:LOCALAPPDATA
 if (-not $LocalApp) { throw "LOCALAPPDATA not set." }
 
@@ -87,7 +158,7 @@ Ensure-Dir $BaseOpt
 
 # Helpers
 function Find-PodlinerExe([string]$root) {
-  # If there's exactly one subfolder and no files, flatten it for convenience
+  # If there is exactly one subfolder and no files, flatten it for convenience
   $topFiles   = Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue
   $topFolders = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue
   if (-not $topFiles -and $topFolders.Count -eq 1) {
@@ -108,12 +179,12 @@ function Find-PodlinerExe([string]$root) {
 try {
   Write-Host "Installing podliner $Version for $Rid -> $Dest" -ForegroundColor Cyan
 
-  # Download archive + checksums
+  # Download archive + checksums with progress
   $zipPath = Join-Path $Stage $AssetName
   $sumPath = Join-Path $Stage "SHA256SUMS"
 
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$AssetName" -OutFile $zipPath
-  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/SHA256SUMS" -OutFile $sumPath
+  Download-File -Uri "$BaseUrl/$AssetName" -OutFile $zipPath -Activity "Downloading $AssetName"
+  Download-File -Uri "$BaseUrl/SHA256SUMS" -OutFile $sumPath -Activity "Downloading SHA256SUMS"
 
   if (-not (Test-Path -LiteralPath $zipPath)) { throw "Download failed: $AssetName not found." }
   if (-not (Test-Path -LiteralPath $sumPath)) { throw "Download failed: SHA256SUMS not found." }

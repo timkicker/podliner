@@ -82,12 +82,12 @@ fi
 if [[ $UNINSTALL -eq 1 ]]; then
   echo "Uninstalling $TOOL ..."
   $SUDO rm -f "$BIN/$TOOL" || true
-  [[ -n "$ALIAS" ]] && $SUDO rm -f "$BIN/$ALIAS" || true
+  if [[ -n "$ALIAS" ]]; then $SUDO rm -f "$BIN/$ALIAS" || true; fi
   if [[ $PRUNE -eq 1 && -d "$OPT" ]]; then
     echo "Removing all installed versions under $OPT ..."
     $SUDO rm -rf "$OPT"
   else
-    [[ -d "$OPT" ]] && echo "Keeping versions under $OPT (use --prune to remove)."
+    if [[ -d "$OPT" ]]; then echo "Keeping versions under $OPT (use --prune to remove)."; fi
   fi
   echo "Done."
   exit 0
@@ -100,7 +100,10 @@ if [[ -z "$VERSION" ]]; then
   elif have wget; then
     VERSION="$(wget -q -O - "https://api.github.com/repos/$REPO/releases/latest" | sed -nE 's/.*"tag_name": *"v?([^"]+)".*/\1/p' | head -n1 || true)"
   fi
-  [[ -z "$VERSION" ]] && { echo "Could not determine latest version (stable). For RC/beta, pass --version X.Y.Z"; exit 1; }
+  if [[ -z "$VERSION" ]]; then
+    echo "Could not determine latest version (stable). For RC/beta, pass --version X.Y.Z"
+    exit 1
+  fi
 fi
 
 ASSET="podliner-${RID}.tar.gz"
@@ -122,7 +125,7 @@ echo "Verifying checksum..."
 pushd "$TMP" >/dev/null
 if have shasum; then
   SUM="$(grep " $ASSET\$" SHA256SUMS | awk '{print $1}')"
-  [[ -z "$SUM" ]] && { echo "No checksum entry for $ASSET"; exit 1; }
+  if [[ -z "$SUM" ]]; then echo "No checksum entry for $ASSET"; exit 1; fi
   echo "$SUM  $ASSET" | shasum -a 256 -c - >/dev/null
 elif have sha256sum; then
   grep " $ASSET\$" SHA256SUMS | sha256sum -c - >/dev/null

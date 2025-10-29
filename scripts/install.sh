@@ -12,7 +12,7 @@ UNINSTALL=0
 
 usage() {
   cat <<EOF
-$TOOL installer
+$TOOL installer (Linux)
 
 Usage: install.sh [--version X.Y.Z] [--system] [--prefix DIR] [--alias pl] [--prune] [--uninstall]
 
@@ -23,17 +23,18 @@ Options:
   --alias NAME      Also create a symlink NAME -> $TOOL
   --prune           Remove all old versions (keep active)
   --uninstall       Remove symlinks and installed versions
+  -h, --help        Show this help
 EOF
 }
 
 # ---- parse args ----
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version) VERSION="$2"; shift 2;;
+    --version) VERSION="${2:-}"; shift 2;;
     --system) SYSTEM=1; shift;;
-    --prefix) PREFIX="$2"; shift 2;;
-    --alias) ALIAS="$2"; shift 2;;
-    --prune) PRUNE=1; shift;;
+    --prefix) PREFIX="${2:-}"; shift 2;;
+    --alias)  ALIAS="${2:-}"; shift 2;;
+    --prune)  PRUNE=1; shift;;
     --uninstall) UNINSTALL=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
@@ -42,8 +43,26 @@ done
 
 # ---- prereqs ----
 have() { command -v "$1" >/dev/null 2>&1; }
-dl() {  # args: url outpath
-  if have curl; then curl -fsSL "$1" -o "$2"; elif have wget; then wget -q "$1" -O "$2"; else return 1; fi
+
+progress_dl() { # args: url outpath
+  local url="$1" out="$2"
+  if have curl; then
+    curl -fL --progress-bar "$url" -o "$out"
+  elif have wget; then
+    wget --progress=bar:force:noscroll -O "$out" "$url" 2>&1 | \
+      stdbuf -o0 awk '/%/ {printf("\r%s",$0)} END {print ""}'
+  else
+    echo "Need curl or wget to download." >&2
+    return 1
+  fi
+}
+
+json_latest_tag() {
+  if have curl; then
+    curl -fsSL "https://api.github.com/repos/$REPO/releases/latest"
+  else
+    wget -q -O - "https://api.github.com/repos/$REPO/releases/latest"
+  fi
 }
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -77,7 +96,7 @@ mkdir -p "$OPT" "$BIN"
 if [[ $UNINSTALL -eq 1 ]]; then
   echo "Uninstalling $TOOL ..."
   $SUDO rm -f "$BIN/$TOOL"
-  [[ -n "$ALIAS" ]] && $SUDO rm -f "$BIN/$ALIAS"
+  [[ -n "${ALIAS:-}" ]] && $SUDO rm -f "$BIN/$ALIAS"
   if [[ -d "$OPT" ]]; then
     echo "Keeping versions under $OPT (remove manually or use --prune)."
   fi
@@ -87,12 +106,10 @@ fi
 
 # latest version
 if [[ -z "$VERSION" ]]; then
-  if have curl; then
-    VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -nE 's/.*"tag_name": *"v?([^"]+)".*/\1/p' | head -n1)
-  elif have wget; then
-    VERSION=$(wget -q -O - "https://api.github.com/repos/$REPO/releases/latest" | sed -nE 's/.*"tag_name": *"v?([^"]+)".*/\1/p' | head -n1)
-  fi
+  VERSION="$(json_latest_tag | sed -nE 's/.*\"tag_name\": *\"v?([^\"]+)\".*/\1/p' | head -n1)"
   [[ -z "$VERSION" ]] && { echo "Could not determine latest version."; exit 1; }
+else
+  VERSION="${VERSION#v}"
 fi
 
 ASSET="podliner-${RID}.tar.gz"
@@ -100,11 +117,11 @@ BASEURL="https://github.com/$REPO/releases/download/v$VERSION"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Installing $TOOL v$VERSION for $RID → $OPT"
+echo "Installing $TOOL v$VERSION for $RID -> $OPT"
 
 echo "Downloading assets..."
-dl "$BASEURL/$ASSET" "$TMP/$ASSET" || { echo "Download failed: $ASSET"; exit 1; }
-dl "$BASEURL/SHA256SUMS" "$TMP/SHA256SUMS" || { echo "Download failed: SHA256SUMS"; exit 1; }
+progress_dl "$BASEURL/$ASSET" "$TMP/$ASSET" || { echo "Download failed: $ASSET"; exit 1; }
+progress_dl "$BASEURL/SHA256SUMS" "$TMP/SHA256SUMS" || { echo "Download failed: SHA256SUMS"; exit 1; }
 
 # verify checksum
 echo "Verifying checksum..."
@@ -120,17 +137,36 @@ fi
 popd >/dev/null
 
 DST="$OPT/$VERSION"
+rm -rf "$DST"
 mkdir -p "$DST"
 tar -C "$DST" -xzf "$TMP/$ASSET"
 
-# expect DST/podliner/podliner
-if [[ ! -x "$DST/podliner/podliner" ]]; then
-  echo "Unexpected archive layout."; exit 1
+# find executable robustly (supports flat and nested tarballs)
+find_exe() {
+  local root="$1"
+  local exe
+  exe="$(find "$root" -type f -perm -111 -name "$TOOL" -print -quit)"
+  [[ -n "$exe" ]] && echo "$exe"
+}
+
+EXE="$(find_exe "$DST" || true)"
+if [[ -z "$EXE" ]]; then
+  # try common layout: DST/podliner/podliner
+  if [[ -x "$DST/$TOOL/$TOOL" ]]; then
+    EXE="$DST/$TOOL/$TOOL"
+  fi
+fi
+
+if [[ -z "$EXE" ]]; then
+  echo "Unexpected archive layout. $TOOL executable not found under $DST"
+  echo "Tree sample:"
+  find "$DST" -maxdepth 2 -print | sed 's/^/  /' | head -n 50
+  exit 1
 fi
 
 # switch symlinks atomically
-$SUDO ln -sf "$DST/podliner/podliner" "$BIN/$TOOL"
-if [[ -n "$ALIAS" ]]; then
+$SUDO ln -sf "$EXE" "$BIN/$TOOL"
+if [[ -n "${ALIAS:-}" ]]; then
   $SUDO ln -sf "$BIN/$TOOL" "$BIN/$ALIAS"
 fi
 
@@ -144,18 +180,18 @@ fi
 if ! have mpv && ! have vlc; then
   echo
   echo "No audio engine found. Install one of:"
-  if have apt; then echo "  sudo apt install mpv   # or: sudo apt install vlc"; fi
-  if have dnf; then echo "  sudo dnf install mpv   # or: sudo dnf install vlc"; fi
-  if have pacman; then echo "  sudo pacman -S mpv     # or: sudo pacman -S vlc"; fi
+  if have apt;   then echo "  sudo apt install mpv     # or: sudo apt install vlc"; fi
+  if have dnf;   then echo "  sudo dnf install mpv     # or: sudo dnf install vlc"; fi
+  if have pacman;then echo "  sudo pacman -S mpv       # or: sudo pacman -S vlc"; fi
 fi
 
 # prune old versions
 if [[ $PRUNE -eq 1 && -d "$OPT" ]]; then
   echo "Pruning old versions in $OPT ..."
-  CURRENT="$($SUDO readlink -f "$BIN/$TOOL" 2>/dev/null || true)"
+  CURRENT="$(readlink -f "$BIN/$TOOL" 2>/dev/null || true)"
   for vdir in "$OPT"/*; do
     [[ -d "$vdir" ]] || continue
-    if [[ "$CURRENT" == "$vdir/podliner/podliner" ]]; then continue; fi
+    if [[ -n "$CURRENT" && "$CURRENT" == "$vdir"/* ]]; then continue; fi
     echo "Removing $vdir"
     $SUDO rm -rf "$vdir"
   done
