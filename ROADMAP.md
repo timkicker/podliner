@@ -8,6 +8,10 @@
 - [X] Rework default theme(+ as default)
 - [X] Add more logging to engine recogn.
 - [X] Add more commands to menubar
+- [ ] Add NAudio for windows fallback
+    - [ ] Implement
+    - [ ] Test on win/linux/mac
+    - [ ] Update documentation
 - [X] Update macos-installer
 - [X] Update readme (download-section)
 
