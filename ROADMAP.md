@@ -18,12 +18,13 @@
 ## v0.2.0
 - [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
 - [ ] Fix arrow-keys support
+- [ ] Fix playerui update (windows only?)
 
 ## General (good-first-issue?)
 
 ### Refactor 
 - [ ] Refactor Shell: split into subclasses
-- [X] Refactor CmdParser: Replace if-hell yanderedev-style. This is rediculous and was just meant for testing... Map?
+- [X] Refactor CmdParser: Replace if-hell yanderedev-style. This is rediculous and was just meant for testing.
 
 ### UX
 - [ ] Rethink first-letter-highlighting
