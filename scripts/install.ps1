@@ -29,7 +29,6 @@ function Get-LatestVersion {
   try {
     $headers = @{ 'User-Agent' = 'podliner-installer' }
     $resp = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "https://api.github.com/repos/timkicker/podliner/releases/latest"
-    # tag_name like v0.0.2
     return ($resp.tag_name -replace '^v','')
   } catch {
     throw "Could not determine latest version from GitHub API."
@@ -42,15 +41,19 @@ function Ensure-Dir([string]$path) {
   }
 }
 
-# Minimal HttpClient with progress helper
-function New-HttpClient {
-  $h = New-Object System.Net.Http.HttpClient
-  $h.Timeout = [TimeSpan]::FromMinutes(30)
-  $h.DefaultRequestHeaders.UserAgent.ParseAdd("podliner-installer")
-  return $h
+# --- HttpClient capability (PS 5.1 may not auto-load the assembly) ---
+function Test-HttpClientAvailable {
+  try { $null = [System.Net.Http.HttpClient]; return $true } catch {
+    try {
+      Add-Type -AssemblyName System.Net.Http
+      $null = [System.Net.Http.HttpClient]
+      return $true
+    } catch { return $false }
+  }
 }
 
-function Download-File {
+# Minimal HttpClient with progress helper (preferred path if available)
+function Download-FileHttpClient {
   param(
     [Parameter(Mandatory)][string]$Uri,
     [Parameter(Mandatory)][string]$OutFile,
@@ -62,11 +65,11 @@ function Download-File {
   do {
     $attempt++
     try {
-      $client = New-HttpClient
-      $resp = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-      if (-not $resp.IsSuccessStatusCode) {
-        throw "HTTP $($resp.StatusCode) for $Uri"
-      }
+      $h = New-Object System.Net.Http.HttpClient
+      $h.Timeout = [TimeSpan]::FromMinutes(30)
+      $h.DefaultRequestHeaders.UserAgent.ParseAdd("podliner-installer")
+      $resp = $h.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+      if (-not $resp.IsSuccessStatusCode) { throw "HTTP $($resp.StatusCode) for $Uri" }
 
       $total = $resp.Content.Headers.ContentLength
       $inStream  = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
@@ -93,7 +96,7 @@ function Download-File {
       finally {
         $outStream.Dispose()
         $inStream.Dispose()
-        $client.Dispose()
+        $h.Dispose()
         Write-Progress -Activity $Activity -Completed
       }
 
@@ -111,6 +114,34 @@ function Download-File {
       }
     }
   } while ($true)
+}
+
+# Fallback using Invoke-WebRequest (PowerShell shows its own progress bar in interactive sessions)
+function Download-FileIwr {
+  param(
+    [Parameter(Mandatory)][string]$Uri,
+    [Parameter(Mandatory)][string]$OutFile
+  )
+  $dir = [System.IO.Path]::GetDirectoryName($OutFile)
+  if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+  Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile
+  if (-not (Test-Path -LiteralPath $OutFile) -or ((Get-Item -LiteralPath $OutFile).Length -eq 0)) {
+    throw "Empty file after download (IWR)"
+  }
+}
+
+function Download-File {
+  param(
+    [Parameter(Mandatory)][string]$Uri,
+    [Parameter(Mandatory)][string]$OutFile,
+    [string]$Activity = "Downloading"
+  )
+  if (Test-HttpClientAvailable) {
+    Download-FileHttpClient -Uri $Uri -OutFile $OutFile -Activity $Activity
+  } else {
+    Write-Host "HttpClient not available. Falling back to Invoke-WebRequest with built-in progress..." -ForegroundColor DarkYellow
+    Download-FileIwr -Uri $Uri -OutFile $OutFile
+  }
 }
 
 $LocalApp = $env:LOCALAPPDATA
@@ -139,9 +170,8 @@ if ($Uninstall) {
 
 # Resolve version
 if ([string]::IsNullOrWhiteSpace($Version)) {
-  $Version = Get-LatestVersion  # Note: latest = stable only (RC/beta are not 'latest')
+  $Version = Get-LatestVersion  # Note: latest = stable only
 } else {
-  # allow passing tags with or without leading 'v'
   $Version = ($Version -replace '^v','')
 }
 $Tag = "v$Version"
@@ -158,7 +188,6 @@ Ensure-Dir $BaseOpt
 
 # Helpers
 function Find-PodlinerExe([string]$root) {
-  # If there is exactly one subfolder and no files, flatten it for convenience
   $topFiles   = Get-ChildItem -LiteralPath $root -File -ErrorAction SilentlyContinue
   $topFolders = Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue
   if (-not $topFiles -and $topFolders.Count -eq 1) {
@@ -170,7 +199,6 @@ function Find-PodlinerExe([string]$root) {
     Remove-Item -LiteralPath $inner -Recurse -Force -ErrorAction SilentlyContinue
   }
 
-  # Now search recursively for podliner.exe
   $exeItem = Get-ChildItem -LiteralPath $root -Recurse -File -Filter "podliner.exe" -ErrorAction SilentlyContinue |
              Select-Object -First 1
   return $exeItem
@@ -179,7 +207,7 @@ function Find-PodlinerExe([string]$root) {
 try {
   Write-Host "Installing podliner $Version for $Rid -> $Dest" -ForegroundColor Cyan
 
-  # Download archive + checksums with progress
+  # Download archive + checksums (with progress)
   $zipPath = Join-Path $Stage $AssetName
   $sumPath = Join-Path $Stage "SHA256SUMS"
 
@@ -210,14 +238,12 @@ try {
   }
   Ensure-Dir $Dest
 
-  # Use built-in unzip
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $Dest)
 
-  # Robustly locate the executable (supports flat ZIPs and one-folder ZIPs)
+  # Locate exe
   $exeItem = Find-PodlinerExe -root $Dest
   if (-not $exeItem) {
-    # Show a short tree to help debug unexpected archives
     $sample = (Get-ChildItem -LiteralPath $Dest -Recurse -ErrorAction SilentlyContinue |
                Select-Object -First 30 | ForEach-Object { $_.FullName }) -join "`n"
     throw "Unexpected archive layout. podliner.exe not found under $Dest.`nSample:`n$sample"
@@ -232,7 +258,7 @@ try {
   Set-Content -LiteralPath $Shim -Value $shimContent -Encoding ASCII
   Write-Host "Installed shim: $Shim" -ForegroundColor Green
 
-  # PATH info (usually WindowsApps is already in PATH)
+  # PATH hint
   $pathParts = ($env:PATH -split ';') | Where-Object { $_ -and $_.Trim() -ne "" }
   $inPath = $pathParts | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -eq $WinApps.ToLowerInvariant() } | Measure-Object | Select-Object -ExpandProperty Count
   if ($inPath -eq 0) {
@@ -256,7 +282,6 @@ if ($Prune -and (Test-Path -LiteralPath $BaseOpt)) {
     $current = $Exe
     Get-ChildItem -LiteralPath $BaseOpt -Directory -ErrorAction SilentlyContinue | ForEach-Object {
       $vdir = $_.FullName
-      # Try to find any podliner.exe in that version directory
       $candidateItem = Get-ChildItem -LiteralPath $vdir -Recurse -File -Filter "podliner.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
       if ($candidateItem) {
         $candidate = $candidateItem.FullName
