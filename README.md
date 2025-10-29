@@ -236,6 +236,22 @@ When filing an issue, please include:
 Security-sensitive issues: contact tim@kicker.dev.  
 
 
-## License & credits
+## License and credits
+
 - License: [GPLv3](LICENSE)
-- Thanks: [Terminal.Gui](https://github.com/migueldeicaza/gui.cs), [Serilog](https://serilog.net/), [mpv](https://mpv.io/), [ffmpeg](https://ffmpeg.org/), [VLC](https://www.videolan.org/), and contributors.
+
+**Libraries used**
+- [Terminal.Gui](https://github.com/migueldeicaza/gui.cs) - TUI framework
+- [Serilog](https://serilog.net/) and [Serilog.Sinks.File](https://github.com/serilog/serilog-sinks-file) - logging
+- [AngleSharp](https://anglesharp.github.io/)- HTML parsing
+- [CodeHollow.FeedReader](https://github.com/codehollow/FeedReader) - RSS/Atom parsing
+- [Microsoft.Data.Sqlite](https://learn.microsoft.com/dotnet/standard/data/sqlite/) - SQLite provider
+- [LibVLCSharp](https://github.com/videolan/libvlcsharp) - VLC bindings
+- [VideoLAN.LibVLC.Windows](https://www.nuget.org/packages/VideoLAN.LibVLC.Windows)- LibVLC binaries for Windows
+- [NAudio](https://github.com/naudio/NAudio)- Windows audio helpers (Media Foundation)
+
+**Engines and tools**
+- [VLC](https://www.videolan.org/) - media engine (via LibVLC)
+- [mpv](https://mpv.io/) - media engine (optional)
+- [FFmpeg / ffplay](https://ffmpeg.org/) - tools and fallback playback
+
