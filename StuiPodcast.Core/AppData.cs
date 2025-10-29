@@ -13,8 +13,8 @@
         public Dictionary<Guid, StuiPodcast.Core.DownloadStatus> DownloadMap { get; set; } = new();
 
         public int HistorySize { get; set; } = 200;
-        public string SortBy { get; set; } = "pubdate";
-        public string SortDir { get; set; } = "desc";
+        public string? SortBy { get; set; } = "pubdate";
+        public string? SortDir { get; set; } = "desc";
 
         public bool AutoAdvance { get; set; } = true;
         public bool WrapAdvance { get; set; } = true;
@@ -34,7 +34,7 @@
         public List<Feed> Feeds { get; set; } = new();
         public List<Episode> Episodes { get; set; } = new();
 
-        public string PreferredEngine { get; set; } = "auto"; // auto, vlc, mpv, ffplay
+        public string? PreferredEngine { get; set; } = "auto"; // auto, vlc, mpv, ffplay
         public string? LastEngineUsed { get; set; }           // diagnostic, osd
 
         // network profile; affects engine startup params when engines use it

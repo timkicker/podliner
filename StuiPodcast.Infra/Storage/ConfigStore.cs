@@ -1,10 +1,5 @@
-using System;
-using System.IO;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
-using System.Threading.Tasks;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
@@ -244,18 +239,13 @@ namespace StuiPodcast.Infra.Storage
             c.GlyphSet         = NormalizeChoice(c.GlyphSet, "auto", "unicode", "ascii");
 
             // view defaults
-            c.ViewDefaults ??= new AppConfig.ViewDefaultsBlock();
             c.ViewDefaults.SortBy  = NormalizeChoice(c.ViewDefaults.SortBy, "pubdate", "title", "duration", "feed", "progress");
             c.ViewDefaults.SortDir = NormalizeChoice(c.ViewDefaults.SortDir, "asc", "desc");
 
             // last selection
-            c.LastSelection ??= new AppConfig.LastSelectionBlock();
             if (string.IsNullOrWhiteSpace(c.LastSelection.FeedId))
                 c.LastSelection.FeedId = "virtual:all";
-            c.LastSelection.Search ??= string.Empty;
-
-            // ui block
-            c.Ui ??= new AppConfig.UiBlock();
+            
         }
 
         static string NormalizeChoice(string? value, params string[] allowed)

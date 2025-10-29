@@ -1,25 +1,20 @@
-using Serilog;
-using StuiPodcast.App.Debug;
-using StuiPodcast.App.UI;
-using Terminal.Gui;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using StuiPodcast.App;
+using Serilog;
+using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
+using StuiPodcast.App.Debug;
+using StuiPodcast.App.Services;
+using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
-using StuiPodcast.App.Bootstrap;
-using StuiPodcast.App.Command;
-using StuiPodcast.App.Services;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
-using System.Threading;
-using System.Threading.Tasks;
-using System;
-using System.IO;
-using System.Linq;
+using Terminal.Gui;
 
-class Program
+namespace StuiPodcast.App.Bootstrap;
+
+internal class Program
 {
     #region runtime flags
     // runtime flags
@@ -28,37 +23,37 @@ class Program
 
     #region singletons and runtime state
     // primary singletons / runtime state
-    static AppFacade?        _app;
-    static ConfigStore?      _configStore;
-    static LibraryStore?     _libraryStore;
-    static AppData           _data = new();
-    static FeedService?      _feeds;
+    private static AppFacade?        _app;
+    private static ConfigStore?      _configStore;
+    private static LibraryStore?     _libraryStore;
+    private static AppData           _data = new();
+    private static FeedService?      _feeds;
 
-    static SwappableAudioPlayer?  _player;
-    static PlaybackCoordinator? _playback;
-    static MemoryLogSink     _memLog = new(2000);
-    static DownloadManager?  _downloader;
+    private static SwappableAudioPlayer?  _player;
+    private static PlaybackCoordinator? _playback;
+    private static MemoryLogSink     _memLog = new();
+    private static DownloadManager?  _downloader;
 
-    static UiShell?            _ui;
+    private static UiShell?            _ui;
     #endregion
 
     #region services
     // service objects
-    static SaveScheduler?    _saver;
-    static NetworkMonitor?   _net;
-    static EngineService?    _engineSvc;
+    private static SaveScheduler?    _saver;
+    private static NetworkMonitor?   _net;
+    private static EngineService?    _engineSvc;
     #endregion
 
     #region timers and guards
     // timers and exit guard
-    static object? _uiTimer;
-    static object? _netTimerToken;
-    static int _exitOnce = 0;
+    private static object? _uiTimer;
+    private static object? _netTimerToken;
+    private static int _exitOnce;
     #endregion
 
     #region entry point
     // application entry
-    static async Task Main(string[]? args)
+    private static async Task Main(string[]? args)
     {
         var cli = CliEntrypoint.Parse(args);
 
@@ -66,7 +61,12 @@ class Program
         if (cli.ShowHelp)    { PrintHelp();    return; }
 
         WinConsoleUtil.Enable();
-        if (cli.Ascii) { try { UIGlyphSet.Use(UIGlyphSet.Profile.Ascii); } catch { } }
+        if (cli.Ascii) { try { UIGlyphSet.Use(UIGlyphSet.Profile.Ascii); }
+            catch
+            {
+                // ignored
+            }
+        }
 
         LoggerSetup.Configure(cli.LogLevel, _memLog);
         CmdErrorHandlers.Install();
@@ -100,11 +100,11 @@ class Program
 
         // audio player / engine service
         _engineSvc = new EngineService(_data, _memLog);
-        _player = _engineSvc.Create(out var engineInfo);
+        _player = _engineSvc.Create(out _);
 
         // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
-        _playback = new PlaybackCoordinator(_data, _player!, _saver.RequestSaveAsync, _memLog);
+        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog);
         _feeds    = new FeedService(_data, _app);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
@@ -116,7 +116,12 @@ class Program
         // ui init
         Application.Init();
         _ui = new UiShell(_memLog);
-        try { _data.LastSelectedFeedId = _ui.AllFeedId; } catch { }
+        try { _data.LastSelectedFeedId = _ui.AllFeedId; }
+        catch
+        {
+            // ignored
+        }
+
         _ui.Build();
         UiComposer.UpdateWindowTitleWithDownloads(_ui, _data);
 
@@ -132,7 +137,11 @@ class Program
                 _data.ThemePref = themeChoice.ShouldPersistPref;
                 await _saver.RequestSaveAsync();
             }
-        } catch { }
+        }
+        catch
+        {
+            // ignored
+        }
 
         // network monitor
         _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync);
@@ -156,16 +165,16 @@ class Program
         };
 
         // downloader -> ui
-        UiComposer.AttachDownloaderUi(_downloader!, _ui, _data);
+        UiComposer.AttachDownloaderUi(_downloader, _ui, _data);
 
         // build remaining ui behaviors
         UiComposer.WireUi(
             ui: _ui,
             data: _data,
-            app: _app!,
-            feeds: _feeds!,
-            playback: _playback!,
-            audioPlayer: _player!,
+            app: _app,
+            feeds: _feeds,
+            playback: _playback,
+            audioPlayer: _player,
             save: _saver.RequestSaveAsync,
             engineSwitch: pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data),
@@ -194,7 +203,7 @@ class Program
 
         // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
-            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader!, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync));
+            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync));
 
         // initial lists
         UiComposer.ShowInitialLists(_ui, _data);
@@ -203,19 +212,47 @@ class Program
         finally
         {
             Log.Information("shutdown begin");
-            try { Application.MainLoop?.RemoveTimeout(_uiTimer); } catch { }
-            try { if (_netTimerToken is not null) Application.MainLoop.RemoveTimeout(_netTimerToken); } catch {}
+            try { Application.MainLoop?.RemoveTimeout(_uiTimer); }
+            catch
+            {
+                // ignored
+            }
 
-            try { _player?.Stop(); } catch { }
-            (_player as IDisposable)?.Dispose();
+            try { if (_netTimerToken is not null) Application.MainLoop?.RemoveTimeout(_netTimerToken); }
+            catch
+            {
+                // ignored
+            }
 
-            try { _downloader?.Dispose(); } catch { }
+            try { _player?.Stop(); }
+            catch
+            {
+                // ignored
+            }
+
+            _player?.Dispose();
+
+            try { _downloader?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
 
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
-            try { Application.Shutdown(); } catch { }
+            try { Application.Shutdown(); }
+            catch
+            {
+                // ignored
+            }
+
             ResetHard();
-            try { Log.CloseAndFlush(); } catch { }
+            try { Log.CloseAndFlush(); }
+            catch
+            {
+                // ignored
+            }
+
             Log.Information("shutdown end");
         }
     }
@@ -241,7 +278,7 @@ class Program
 
     #region helpers
     // resolve configuration directory
-    static string ResolveConfigDir()
+    private static string ResolveConfigDir()
     {
         var baseConfigDir =
             RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -252,7 +289,7 @@ class Program
     }
 
     // check if feed with url already exists
-    static bool HasFeedWithUrl(string url)
+    private static bool HasFeedWithUrl(string url)
     {
         return _data.Feeds.Any(f =>
         {
@@ -268,7 +305,7 @@ class Program
     }
 
     // print version to stdout
-    static void PrintVersion()
+    private static void PrintVersion()
     {
         var asm  = typeof(Program).Assembly;
         var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -282,7 +319,7 @@ class Program
     }
 
     // print simple help
-    static void PrintHelp()
+    private static void PrintHelp()
     {
         PrintVersion();
         Console.WriteLine();
@@ -302,7 +339,7 @@ class Program
     }
 
     // try to restore terminal state on exit
-    static void ResetHard()
+    private static void ResetHard()
     {
         try
         {

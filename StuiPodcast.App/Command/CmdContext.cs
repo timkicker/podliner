@@ -10,7 +10,7 @@ internal sealed class CmdContext
 {
     public IAudioPlayer AudioPlayer { get; }
     public PlaybackCoordinator Playback { get; }
-    public UiShell UI { get; }
+    public UiShell Ui { get; }
     public MemoryLogSink Mem { get; }
     public AppData Data { get; }
     public Func<Task> Persist { get; }
@@ -20,7 +20,7 @@ internal sealed class CmdContext
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, UiShell ui, MemoryLogSink mem,
         AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine)
     {
-        AudioPlayer = audioPlayer; Playback = playback; UI = ui; Mem = mem;
+        AudioPlayer = audioPlayer; Playback = playback; Ui = ui; Mem = mem;
         Data = data; Persist = persist; Dlm = dlm; SwitchEngine = switchEngine;
     }
 }

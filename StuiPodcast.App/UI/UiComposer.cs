@@ -8,6 +8,7 @@ using StuiPodcast.Infra.Storage;
 using Terminal.Gui;
 using System.Collections.Generic;
 using System.Linq;
+using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
 
 
@@ -141,7 +142,7 @@ static class UiComposer
     #endregion
 
     #region downloader
-    public static void AttachDownloaderUi(DownloadManager downloader, UiShell ui, AppData data)
+    public static void AttachDownloaderUi(DownloadManager downloader, UiShell? ui, AppData data)
 {
     // per-download state cache
     var byId = new Dictionary<Guid, DownloadState>();
@@ -160,7 +161,7 @@ static class UiComposer
 
         if (total <= 0)
         {
-            ui.SetDownloadBadge(null);
+            ui?.SetDownloadBadge(null);
             return;
         }
 
@@ -168,9 +169,9 @@ static class UiComposer
         long sumBytes = 0;
         long sumTotal = 0;
 
-        foreach (var (id, (bytes, totalBytes, st)) in progress.ToArray())
+        foreach (var (_, (bytes, totalBytes, st)) in progress.ToArray())
         {
-            if (totalBytes is long T && T > 0)
+            if (totalBytes is { } T && T > 0)
             {
                 // done counts as 100%, running/verifying contribute current bytes
                 if (st == DownloadState.Done)
@@ -198,11 +199,11 @@ static class UiComposer
             pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
         }
 
-        ui.SetDownloadBadge($"{done}/{total} • {pct}%");
+        ui?.SetDownloadBadge($"{done}/{total} • {pct}%");
 
         // optional: show osd when batch ends
         if (active == 0 && done > 0)
-            ui.ShowOsd($"downloads {done}/{total} • {pct}%");
+            ui?.ShowOsd($"downloads {done}/{total} • {pct}%");
     }
 
 
@@ -221,7 +222,7 @@ static class UiComposer
         }
 
         // ensure done reports 100% if bytes < total
-        if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is long T)
+        if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is { } T)
         {
             progress[id] = (T, T, DownloadState.Done);
         }
@@ -230,19 +231,19 @@ static class UiComposer
         Application.MainLoop?.Invoke(() =>
         {
             ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
-            UpdateWindowTitleWithDownloads(ui, data);
-
-            // small status osd
             if (ui != null)
             {
+                UpdateWindowTitleWithDownloads(ui, data);
+
+                // small status osd
                 switch (st.State)
                 {
-                    case DownloadState.Queued:     ui.ShowOsd("dl queued", 300); break;
-                    case DownloadState.Running:    ui.ShowOsd("dl ⇣", 300); break;
-                    case DownloadState.Verifying:  ui.ShowOsd("dl ≈", 300); break;
-                    case DownloadState.Done:       ui.ShowOsd("dl ✓", 500); break;
-                    case DownloadState.Failed:     ui.ShowOsd("dl !", 900); break;
-                    case DownloadState.Canceled:   ui.ShowOsd("dl ×", 400); break;
+                    case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
+                    case DownloadState.Running: ui.ShowOsd("dl ⇣", 300); break;
+                    case DownloadState.Verifying: ui.ShowOsd("dl ≈", 300); break;
+                    case DownloadState.Done: ui.ShowOsd("dl ✓", 500); break;
+                    case DownloadState.Failed: ui.ShowOsd("dl !", 900); break;
+                    case DownloadState.Canceled: ui.ShowOsd("dl ×", 400); break;
                 }
             }
 
@@ -269,21 +270,24 @@ static class UiComposer
         UiShell ui,
         AppData data,
         AppFacade app,
-        FeedService feeds,
-        PlaybackCoordinator playback,
-        SwappableAudioPlayer audioPlayer,
+        FeedService? feeds,
+        PlaybackCoordinator? playback,
+        SwappableAudioPlayer? audioPlayer,
         Func<Task> save,
         Func<string, Task> engineSwitch,
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
         // quit
-        ui.QuitRequested += () => QuitApp(ui, audioPlayer, feeds, save);
+        ui.QuitRequested += () =>
+        {
+            if (feeds != null) QuitApp(ui, audioPlayer, feeds, save);
+        };
 
         // add feed
         ui.AddFeedRequested += async url =>
         {
-            if (ui == null || feeds == null) return;
+            if (feeds == null) return;
             if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("add feed: url missing", 1500); return; }
 
             Log.Information("ui/addfeed url={Url}", url);
@@ -293,7 +297,10 @@ static class UiComposer
             {
                 if (hasFeedWithUrl(url)) { ui.ShowOsd("already added", 1200); return; }
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
 
             try
             {
@@ -324,7 +331,7 @@ static class UiComposer
 
             try
             {
-                await feeds.RemoveFeedAsync(fid.Value);   // ← persist + update app data + save
+                await feeds?.RemoveFeedAsync(fid.Value)!;   // ← persist + update app data + save
 
                 // reset ui
                 var next = data.Feeds.FirstOrDefault()?.Id;
@@ -336,7 +343,7 @@ static class UiComposer
             }
             catch (Exception ex)
             {
-                Serilog.Log.Error(ex, "ui/removefeed failed id={Id}", fid);
+                Log.Error(ex, "ui/removefeed failed id={Id}", fid);
                 ui.ShowOsd($"remove failed: {ex.Message}", 2200);
             }
         };
@@ -482,7 +489,7 @@ static class UiComposer
         // played toggle
         ui.TogglePlayedRequested += () =>
         {
-            var ep = ui?.GetSelectedEpisode();
+            var ep = ui.GetSelectedEpisode();
             if (ep == null) return;
 
             ep.ManuallyMarkedPlayed = !ep.ManuallyMarkedPlayed;
@@ -508,7 +515,7 @@ static class UiComposer
         ui.Command += cmd =>
         {
             Log.Debug("cmd {Cmd}", cmd);
-            if (ui == null || audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
+            if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
 
             if (CmdRouter.HandleQueue(cmd, ui, data, save))
             {

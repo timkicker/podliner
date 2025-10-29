@@ -1,6 +1,4 @@
-﻿using System;
-using System.IO;
-using NAudio.Wave;
+﻿using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using NAudio.MediaFoundation;
 using StuiPodcast.Core;
@@ -10,7 +8,7 @@ namespace StuiPodcast.Infra.Player
     // windows fallback using media foundation + naudio
     // supports: play, pause, stop, seek, volume
     // speed not supported (state remains 1.0)
-    public sealed class MediaFoundationAudioPlayer : IAudioPlayer, IDisposable
+    public sealed class MediaFoundationAudioPlayer : IAudioPlayer
     {
         #region metadata
         public string Name => "MediaFoundation";
@@ -71,7 +69,7 @@ namespace StuiPodcast.Infra.Player
 
                     _output = new WaveOutEvent { DesiredLatency = 200 };
                     _output.Init(_vol);
-                    _output.PlaybackStopped += (_, __) =>
+                    _output.PlaybackStopped += (_, _) =>
                     {
                         lock (_gate)
                         {
@@ -84,7 +82,7 @@ namespace StuiPodcast.Infra.Player
                     _state.Length = SafeLength(_reader);
                     _state.Position = TimeSpan.Zero;
 
-                    if (startMs is long s && s > 0) SeekCoreLocked(TimeSpan.FromMilliseconds(s));
+                    if (startMs is { } s && s > 0) SeekCoreLocked(TimeSpan.FromMilliseconds(s));
                 }
 
                 _output!.Play();
@@ -142,11 +140,11 @@ namespace StuiPodcast.Infra.Player
             }
         }
 
-        public void SetVolume(int volume0_100)
+        public void SetVolume(int volume0100)
         {
             lock (_gate)
             {
-                _state.Volume0_100 = Math.Clamp(volume0_100, 0, 100);
+                _state.Volume0_100 = Math.Clamp(volume0100, 0, 100);
                 if (_vol != null) _vol.Volume = MapVol(_state.Volume0_100);
                 Raise();
             }
@@ -200,7 +198,10 @@ namespace StuiPodcast.Infra.Player
                     _state.Length = SafeLength(_reader);
                 }
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
         }
 
         static TimeSpan? SafeLength(MediaFoundationReader r)
@@ -212,11 +213,26 @@ namespace StuiPodcast.Infra.Player
 
         void TearDownLocked()
         {
-            try { _output?.Stop(); } catch { }
-            try { _output?.Dispose(); } catch { }
+            try { _output?.Stop(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _output?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
             _output = null;
 
-            try { _reader?.Dispose(); } catch { }
+            try { _reader?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
             _reader = null;
 
             _vol = null;
@@ -234,7 +250,12 @@ namespace StuiPodcast.Infra.Player
         public void Dispose()
         {
             lock (_gate) TearDownLocked();
-            try { MediaFoundationApi.Shutdown(); } catch { }
+            try { MediaFoundationApi.Shutdown(); }
+            catch
+            {
+                // ignored
+            }
+
             GC.SuppressFinalize(this);
         }
         #endregion

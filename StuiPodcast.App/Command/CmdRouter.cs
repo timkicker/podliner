@@ -1,17 +1,10 @@
-using System;
-using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 using StuiPodcast.App;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
-using StuiPodcast.Infra.Opml;
 using StuiPodcast.Infra.Player;
-using ThemeMode = StuiPodcast.App.UI.UiShell.ThemeMode;
 using StuiPodcast.App.Command.Module;
 using StuiPodcast.Infra.Download;
 
@@ -111,7 +104,7 @@ internal sealed class CommandDispatcher
     public void Dispatch(CmdParsed cmd, CmdContext ctx)
     {
         var h = _handlers.FirstOrDefault(x => x.CanHandle(cmd.Kind));
-        if (h == null) { ctx.UI.ShowOsd($"unknown: {cmd.Cmd}"); return; }
+        if (h == null) { ctx.Ui.ShowOsd($"unknown: {cmd.Cmd}"); return; }
         h.Handle(cmd, ctx);
     }
 }

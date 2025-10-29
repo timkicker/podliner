@@ -8,7 +8,7 @@ internal sealed class CmdViewHandler : ICmdHandler
         k is TopCommand.Search or TopCommand.Sort or TopCommand.Filter or TopCommand.PlayerBar or TopCommand.Theme;
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
-        var ui = ctx.UI; var data = ctx.Data;
+        var ui = ctx.Ui; var data = ctx.Data;
         switch (cmd.Kind)
         {
             case TopCommand.Search:    CmdViewModule.ExecSearch(cmd.Args, ui, data); return;

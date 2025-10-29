@@ -1,15 +1,15 @@
 # Roadmap
 
 ## v0.1.0
-- [ ] Fix play-button visual (doesn't work on mac at all, no first update on linux)
-- [ ] Fix VLC recogn on Mac. MPV seems to work. Maybe add `VideoLAN.LibVLC.Mac`
+- [X] Fix play-button visual
+- [X] Fix VLC recogn on Mac. MPV seems to work. Maybe add `VideoLAN.LibVLC.Mac`
 - [X] Fix remove-feed on save
 - [X] Fix download percentage top right 
 - [X] Rework default theme(+ as default)
 - [X] Add more logging to engine recogn.
 - [X] Add more commands to menubar
 - [ ] Add NAudio for windows fallback
-    - [ ] Implement
+    - [X] Implement
     - [ ] Test on win/linux/mac
     - [X] Update documentation
 - [X] Update macos-installer
@@ -17,8 +17,8 @@
 
 ## v0.2.0
 - [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
-- [ ] Fix arrow-keys support
 - [ ] Fix playerui update (windows only?)
+- [ ] Fix play-button visual on mac
 
 ## General (good-first-issue?)
 
@@ -28,4 +28,6 @@
 
 ### UX
 - [ ] Rethink first-letter-highlighting
- 
+
+### Bugs
+- [ ] Refresh/Redraw ui on mac/linux after moving window

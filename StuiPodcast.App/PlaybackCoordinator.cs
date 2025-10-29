@@ -1,7 +1,9 @@
-using Terminal.Gui;
-using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
+using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
+using Terminal.Gui;
+
+namespace StuiPodcast.App;
 
 #region playback coordinator
 
@@ -80,8 +82,8 @@ sealed class PlaybackCoordinator
         _loadingBaseline = TimeSpan.FromMilliseconds(ep.Progress?.LastPosMs ?? 0);
         _loadingSinceUtc = DateTime.UtcNow;
 
-        long? startMs = ep.Progress.LastPosMs;
-        if (startMs is long ms)
+        long? startMs = ep.Progress?.LastPosMs;
+        if (startMs is { } ms)
         {
             long knownLen = ep.DurationMs;
             if ((knownLen > 0 && (ms < 5000 || ms > knownLen - 10000)) ||
@@ -449,12 +451,12 @@ public readonly record struct PlaybackSnapshot(
         bool isPlaying,
         double speed,
         DateTimeOffset now) => new(
-            sessionId, episodeId,
-            position < TimeSpan.Zero ? TimeSpan.Zero : position,
-            length   < TimeSpan.Zero ? TimeSpan.Zero : length,
-            isPlaying,
-            speed <= 0 ? 1.0 : speed,
-            now);
+        sessionId, episodeId,
+        position < TimeSpan.Zero ? TimeSpan.Zero : position,
+        length   < TimeSpan.Zero ? TimeSpan.Zero : length,
+        isPlaying,
+        speed <= 0 ? 1.0 : speed,
+        now);
 }
 
 public enum PlaybackStatus

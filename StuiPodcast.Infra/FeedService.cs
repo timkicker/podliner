@@ -57,7 +57,7 @@ namespace StuiPodcast.Infra
             // 5) Sicher speichern
             _app.SaveNow();
 
-            Serilog.Log.Information("feed/remove persisted id={FeedId} feedRemoved={Feed} episodesRemoved={Eps} queueRemoved={Q}",
+            Log.Information("feed/remove persisted id={FeedId} feedRemoved={Feed} episodesRemoved={Eps} queueRemoved={Q}",
                 feedId, removedFeed, removedEps, removedFromQ);
         }
 
@@ -88,7 +88,11 @@ namespace StuiPodcast.Infra
             UpsertFeedIntoData(saved);
 
             // best effort first refresh
-            try { await RefreshFeedAsync(saved).ConfigureAwait(false); } catch { }
+            try { await RefreshFeedAsync(saved).ConfigureAwait(false); }
+            catch
+            {
+                // ignored
+            }
 
             return saved;
         }
@@ -223,28 +227,29 @@ namespace StuiPodcast.Infra
         {
             // use raw xml to include vendor extensions
             var root = item.SpecificItem?.Element as XElement;
-            if (root is null) return null;
-
-            // enclosure or media content with audio type or audio-looking url
-            foreach (var node in root.Descendants())
+            if (root != null)
             {
-                var ln = node.Name.LocalName.ToLowerInvariant();
-                if (ln is "enclosure" or "content")
+                // enclosure or media content with audio type or audio-looking url
+                foreach (var node in root.Descendants())
                 {
-                    var candidateUrl = node.Attribute("url")?.Value;
-                    var type = node.Attribute("type")?.Value;
-                    if (!string.IsNullOrWhiteSpace(candidateUrl) &&
-                        (string.IsNullOrWhiteSpace(type) ||
-                         type.StartsWith("audio", StringComparison.OrdinalIgnoreCase) ||
-                         IsAudioUrl(candidateUrl)))
-                        return candidateUrl;
+                    var ln = node.Name.LocalName.ToLowerInvariant();
+                    if (ln is "enclosure" or "content")
+                    {
+                        var candidateUrl = node.Attribute("url")?.Value;
+                        var type = node.Attribute("type")?.Value;
+                        if (!string.IsNullOrWhiteSpace(candidateUrl) &&
+                            (string.IsNullOrWhiteSpace(type) ||
+                             type.StartsWith("audio", StringComparison.OrdinalIgnoreCase) ||
+                             IsAudioUrl(candidateUrl)))
+                            return candidateUrl;
+                    }
                 }
-            }
 
-            // fallback: link element with audio-looking url
-            var linkEl = root.Descendants().FirstOrDefault(x => x.Name.LocalName.Equals("link", StringComparison.OrdinalIgnoreCase));
-            var linkUrl = linkEl?.Attribute("href")?.Value ?? linkEl?.Value;
-            if (!string.IsNullOrWhiteSpace(linkUrl) && IsAudioUrl(linkUrl)) return linkUrl;
+                // fallback: link element with audio-looking url
+                var linkEl = root.Descendants().FirstOrDefault(x => x.Name.LocalName.Equals("link", StringComparison.OrdinalIgnoreCase));
+                var linkUrl = linkEl?.Attribute("href")?.Value ?? linkEl?.Value;
+                if (!string.IsNullOrWhiteSpace(linkUrl) && IsAudioUrl(linkUrl)) return linkUrl;
+            }
 
             return null;
         }
@@ -291,7 +296,7 @@ namespace StuiPodcast.Infra
         // itunes:duration, media:content@duration, enclosure@duration
         static long? TryGetDurationMs(FeedItem item)
         {
-            var root = item.SpecificItem?.Element as XElement;
+            var root = item.SpecificItem?.Element;
             if (root is null) return null;
 
             foreach (var node in root.Descendants())

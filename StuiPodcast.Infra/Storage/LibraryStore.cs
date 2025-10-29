@@ -49,7 +49,6 @@ namespace StuiPodcast.Infra.Storage
         volatile bool _savePending;
         volatile bool _isWriting;
         volatile bool _readOnly;
-        volatile string? _readOnlyReason;
 
         #endregion
 
@@ -160,7 +159,6 @@ namespace StuiPodcast.Infra.Storage
             if (feed == null) throw new ArgumentNullException(nameof(feed));
             if (feed.Id == Guid.Empty) feed.Id = Guid.NewGuid();
             if (string.IsNullOrWhiteSpace(feed.Title)) feed.Title = string.Empty;
-            feed.Url ??= string.Empty;
 
             if (_feedsById.TryGetValue(feed.Id, out var existing))
             {
@@ -186,12 +184,8 @@ namespace StuiPodcast.Infra.Storage
             if (!_feedsById.ContainsKey(ep.FeedId))
                 throw new InvalidOperationException("Episode.FeedId muss auf existierenden Feed zeigen.");
             if (ep.DurationMs < 0) ep.DurationMs = 0;
-            ep.AudioUrl ??= string.Empty;
-            ep.Title ??= string.Empty;
-            ep.DescriptionText ??= string.Empty;
             ep.RssGuid = string.IsNullOrWhiteSpace(ep.RssGuid) ? null : ep.RssGuid;
 
-            ep.Progress ??= new EpisodeProgress();
             if (ep.Progress.LastPosMs < 0) ep.Progress.LastPosMs = 0;
             if (ep.Progress.LastPosMs > ep.DurationMs && ep.DurationMs > 0)
                 ep.Progress.LastPosMs = ep.DurationMs;
@@ -237,7 +231,6 @@ namespace StuiPodcast.Infra.Storage
             var effLen = Math.Max(e.DurationMs, 0);
             if (effLen > 0 && lastPosMs > effLen) lastPosMs = effLen;
 
-            e.Progress ??= new EpisodeProgress();
             e.Progress.LastPosMs = lastPosMs;
             e.Progress.LastPlayedAt = lastPlayedAt;
 
@@ -412,7 +405,6 @@ namespace StuiPodcast.Infra.Storage
         void MarkReadOnly(Exception ex)
         {
             _readOnly = true;
-            _readOnlyReason = ex.GetType().Name + ": " + ex.Message;
         }
 
         void RebuildIndices()
@@ -426,7 +418,7 @@ namespace StuiPodcast.Infra.Storage
                 _episodesById[e.Id] = e;
         }
 
-        static void ValidateAndNormalize(Library lib)
+        static void ValidateAndNormalize(Library? lib)
         {
             if (lib == null)
             {
@@ -438,12 +430,9 @@ namespace StuiPodcast.Infra.Storage
 
             // feed cleanup and dedupe
             var feedMap = new Dictionary<Guid, Feed>();
-            foreach (var f in lib.Feeds ?? new List<Feed>())
+            foreach (var f in lib.Feeds)
             {
-                if (f == null) continue;
                 if (f.Id == Guid.Empty) f.Id = Guid.NewGuid();
-                f.Title ??= string.Empty;
-                f.Url ??= string.Empty;
                 if (!feedMap.ContainsKey(f.Id))
                     feedMap.Add(f.Id, f);
             }
@@ -454,20 +443,15 @@ namespace StuiPodcast.Infra.Storage
 
             // episode cleanup and dedupe
             var episodeMap = new Dictionary<Guid, Episode>();
-            foreach (var e in lib.Episodes ?? new List<Episode>())
+            foreach (var e in lib.Episodes)
             {
-                if (e == null) continue;
                 if (e.Id == Guid.Empty) e.Id = Guid.NewGuid();
                 if (!validFeedIds.Contains(e.FeedId)) continue;
 
-                e.Title ??= string.Empty;
-                e.AudioUrl ??= string.Empty;
-                e.DescriptionText ??= string.Empty;
                 e.RssGuid = string.IsNullOrWhiteSpace(e.RssGuid) ? null : e.RssGuid;
 
                 if (e.DurationMs < 0) e.DurationMs = 0;
 
-                e.Progress ??= new EpisodeProgress();
                 if (e.Progress.LastPosMs < 0) e.Progress.LastPosMs = 0;
                 if (e.DurationMs > 0 && e.Progress.LastPosMs > e.DurationMs)
                     e.Progress.LastPosMs = e.DurationMs;
@@ -481,12 +465,10 @@ namespace StuiPodcast.Infra.Storage
             var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
 
             // queue and history cleanup
-            if (lib.Queue == null) lib.Queue = new List<Guid>();
             lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
 
-            if (lib.History == null) lib.History = new List<HistoryItem>();
             lib.History = lib.History
-                .Where(h => h != null && validEpisodeIds.Contains(h.EpisodeId))
+                .Where(h => validEpisodeIds.Contains(h.EpisodeId))
                 .Select(h =>
                 {
                     h.At = h.At == default ? DateTimeOffset.UtcNow : h.At;

@@ -1,3 +1,4 @@
+using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Command.Module;
 
 namespace StuiPodcast.App.Command.Handler;
@@ -11,23 +12,23 @@ internal sealed class CmdSystemHandler : ICmdHandler
     {
         switch (cmd.Kind)
         {
-            case TopCommand.Help: ctx.UI.ShowKeysHelp(); return;
-            case TopCommand.Quit: ctx.UI.RequestQuit(); return;
-            case TopCommand.Logs: CmdSystemModule.ExecLogs(cmd.Args, ctx.UI); return;
-            case TopCommand.Osd:  CmdSystemModule.ExecOsd(cmd.Args, ctx.UI);  return;
+            case TopCommand.Help: ctx.Ui.ShowKeysHelp(); return;
+            case TopCommand.Quit: ctx.Ui.RequestQuit(); return;
+            case TopCommand.Logs: CmdSystemModule.ExecLogs(cmd.Args, ctx.Ui); return;
+            case TopCommand.Osd:  CmdSystemModule.ExecOsd(cmd.Args, ctx.Ui);  return;
 
             case TopCommand.QuitBang:
                 try { Program.SkipSaveOnExit = true; } catch { }
-                ctx.UI.RequestQuit();
+                ctx.Ui.RequestQuit();
                 return;
 
-            case TopCommand.Write:         CmdSystemModule.ExecWrite(ctx.Persist, ctx.UI); return;
-            case TopCommand.WriteQuit:     CmdSystemModule.ExecWriteQuit(ctx.Persist, ctx.UI, bang:false); return;
-            case TopCommand.WriteQuitBang: CmdSystemModule.ExecWriteQuit(ctx.Persist, ctx.UI, bang:true);  return;
+            case TopCommand.Write:         CmdSystemModule.ExecWrite(ctx.Persist, ctx.Ui); return;
+            case TopCommand.WriteQuit:     CmdSystemModule.ExecWriteQuit(ctx.Persist, ctx.Ui, bang:false); return;
+            case TopCommand.WriteQuitBang: CmdSystemModule.ExecWriteQuit(ctx.Persist, ctx.Ui, bang:true);  return;
 
             case TopCommand.Refresh:
-                ctx.UI.ShowOsd("Refreshing…", 600);
-                ctx.UI.RequestRefresh();
+                ctx.Ui.ShowOsd("Refreshing…", 600);
+                ctx.Ui.RequestRefresh();
                 return;
         }
     }

@@ -6,5 +6,5 @@ internal sealed class CmdEngineHandler : ICmdHandler
 {
     public bool CanHandle(TopCommand k) => k == TopCommand.Engine;
     public void Handle(CmdParsed cmd, CmdContext ctx)
-        => CmdEngineModule.ExecEngine(cmd.Args, ctx.AudioPlayer, ctx.UI, ctx.Data, ctx.Persist, ctx.SwitchEngine);
+        => CmdEngineModule.ExecEngine(cmd.Args, ctx.AudioPlayer, ctx.Ui, ctx.Data, ctx.Persist, ctx.SwitchEngine);
 }

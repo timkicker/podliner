@@ -13,13 +13,13 @@ static class  CmdApplier
 {
     public static void ApplyPostUiFlags(
         CliEntrypoint.Options cli,
-        UiShell ui,
+        UiShell? ui,
         AppData data,
-        SwappableAudioPlayer audioPlayer,
-        PlaybackCoordinator playback,
+        SwappableAudioPlayer? audioPlayer,
+        PlaybackCoordinator? playback,
         MemoryLogSink memLog,
         Func<Task> save,
-        DownloadManager downloader,
+        DownloadManager? downloader,
         Func<string, Task> engineSwitch)
     {
         Application.MainLoop?.Invoke(() =>

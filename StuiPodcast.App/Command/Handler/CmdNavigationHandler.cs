@@ -11,7 +11,7 @@ internal sealed class CmdNavigationHandler : ICmdHandler
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
-        var ui = ctx.UI; var data = ctx.Data;
+        var ui = ctx.Ui; var data = ctx.Data;
         switch (cmd.Kind)
         {
             case TopCommand.Next: CmdNavigationModule.SelectRelative(+1, ui, data); return;

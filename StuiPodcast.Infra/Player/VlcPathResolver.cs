@@ -51,10 +51,10 @@ namespace StuiPodcast.Infra.Player
                 if (Directory.Exists(p)) candidates.Add(Normalize(p));
             }
 
-            AddIfExists(Path.Combine(GetEnv("ProgramFiles"), "VideoLAN", "VLC"));
-            AddIfExists(Path.Combine(GetEnv("ProgramFiles(x86)"), "VideoLAN", "VLC"));
-            AddIfExists(Path.Combine(GetEnv("LocalAppData"), "Programs", "VideoLAN", "VLC"));
-            AddIfExists(Path.Combine(GetEnv("LocalAppData"), "Programs", "VLC"));
+            AddIfExists(Path.Combine(GetEnv("ProgramFiles") ?? string.Empty, "VideoLAN", "VLC"));
+            AddIfExists(Path.Combine(GetEnv("ProgramFiles(x86)") ?? string.Empty, "VideoLAN", "VLC"));
+            AddIfExists(Path.Combine(GetEnv("LocalAppData") ?? string.Empty, "Programs", "VideoLAN", "VLC"));
+            AddIfExists(Path.Combine(GetEnv("LocalAppData") ?? string.Empty, "Programs", "VLC"));
 
             foreach (var dir in (GetEnv("PATH") ?? "").Split(Path.PathSeparator))
             {
@@ -69,7 +69,10 @@ namespace StuiPodcast.Infra.Player
                         if (Directory.Exists(baseDir)) candidates.Add(baseDir);
                     }
                 }
-                catch { }
+                catch
+                {
+                    // ignored
+                }
             }
 
             candidates = candidates

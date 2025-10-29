@@ -1,4 +1,5 @@
 using Serilog;
+using Serilog.Events;
 using StuiPodcast.App.Debug;
 
 namespace StuiPodcast.App.Bootstrap;
@@ -10,15 +11,14 @@ static class LoggerSetup
         var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
         Directory.CreateDirectory(logDir);
 
-        var min = Serilog.Events.LogEventLevel.Debug;
+        LogEventLevel min;
         switch ((level ?? "").Trim().ToLowerInvariant())
         {
-            case "info":    min = Serilog.Events.LogEventLevel.Information; break;
+            case "info":    min = LogEventLevel.Information; break;
             case "warn":
-            case "warning": min = Serilog.Events.LogEventLevel.Warning; break;
-            case "error":   min = Serilog.Events.LogEventLevel.Error; break;
-            case "debug":
-            default:        min = Serilog.Events.LogEventLevel.Debug; break;
+            case "warning": min = LogEventLevel.Warning; break;
+            case "error":   min = LogEventLevel.Error; break;
+            default:        min = LogEventLevel.Debug; break;
         }
 
         Log.Logger = new LoggerConfiguration()

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using StuiPodcast.Core;
 
@@ -45,13 +43,13 @@ namespace StuiPodcast.Infra.Storage
         #endregion
 
         #region config properties
-        public string EnginePreference
+        public string? EnginePreference
         {
             get => ConfigStore.Current.EnginePreference;
             set { ConfigStore.Current.EnginePreference = value ?? "auto"; ConfigStore.SaveAsync(); }
         }
 
-        public int Volume0_100
+        public int Volume0100
         {
             get => ConfigStore.Current.Volume0_100;
             set { ConfigStore.Current.Volume0_100 = value; ConfigStore.SaveAsync(); }
@@ -63,7 +61,7 @@ namespace StuiPodcast.Infra.Storage
             set { ConfigStore.Current.Speed = value; ConfigStore.SaveAsync(); }
         }
 
-        public string Theme
+        public string? Theme
         {
             get => ConfigStore.Current.Theme;
             set { ConfigStore.Current.Theme = value ?? "Base"; ConfigStore.SaveAsync(); }
@@ -75,13 +73,13 @@ namespace StuiPodcast.Infra.Storage
             set { ConfigStore.Current.Ui.PlayerAtTop = value; ConfigStore.SaveAsync(); }
         }
 
-        public string SortBy
+        public string? SortBy
         {
             get => ConfigStore.Current.ViewDefaults.SortBy;
             set { ConfigStore.Current.ViewDefaults.SortBy = value ?? "pubdate"; ConfigStore.SaveAsync(); }
         }
 
-        public string SortDir
+        public string? SortDir
         {
             get => ConfigStore.Current.ViewDefaults.SortDir;
             set { ConfigStore.Current.ViewDefaults.SortDir = value ?? "desc"; ConfigStore.SaveAsync(); }

@@ -61,7 +61,11 @@ public sealed class MpvAudioPlayer : IAudioPlayer
             sock = _sockPath = Path.Combine(
                 Path.GetTempPath(), $"podliner-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
 
-            try { if (File.Exists(sock)) File.Delete(sock); } catch { }
+            try { if (File.Exists(sock)) File.Delete(sock); }
+            catch
+            {
+                // ignored
+            }
 
             started = StartMpvProcess(url, sock, startMs);
             _proc = started;
@@ -158,13 +162,13 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         psi.ArgumentList.Add("--keep-open=no");
 
         // optional start offset hint
-        if (startMs is long ms && ms > 0)
+        if (startMs is { } ms && ms > 0)
             psi.ArgumentList.Add($"--start={(ms / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
 
         psi.ArgumentList.Add(url);
 
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        p.Exited += (_, __) =>
+        p.Exited += (_, _) =>
         {
             bool raise = false;
             lock (_gate)

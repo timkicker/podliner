@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace StuiPodcast.App.Command
 {
@@ -49,8 +46,8 @@ namespace StuiPodcast.App.Command
         };
 
         // perfix rules
-        private static readonly (string Prefix, TopCommand Cmd)[] Prefixes = new (string, TopCommand)[]
-        {
+        private static readonly (string Prefix, TopCommand Cmd)[] Prefixes =
+        [
             (":engine",       TopCommand.Engine),
             (":opml",         TopCommand.Opml),
             (":open",         TopCommand.Open),
@@ -81,8 +78,8 @@ namespace StuiPodcast.App.Command
 
             (":feed",         TopCommand.Feed),
             (":history",      TopCommand.History),
-            (":update",       TopCommand.Refresh),
-        };
+            (":update",       TopCommand.Refresh)
+        ];
 
         #region Public API
 

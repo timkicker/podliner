@@ -11,7 +11,7 @@ internal sealed class CmdPlaybackHandler : ICmdHandler
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
-        var p = ctx.AudioPlayer; var ui = ctx.UI; var data = ctx.Data;
+        var p = ctx.AudioPlayer; var ui = ctx.Ui; var data = ctx.Data;
         switch (cmd.Kind)
         {
             case TopCommand.Toggle:

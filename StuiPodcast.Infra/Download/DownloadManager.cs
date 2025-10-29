@@ -101,7 +101,7 @@ namespace StuiPodcast.Infra.Download
                 }) ?? new DownloadIndex();
 
                 int restored = 0;
-                foreach (var it in idx.Items ?? new List<DownloadIndex.Item>())
+                foreach (var it in idx.Items ?? [])
                 {
                     if (it.EpisodeId == Guid.Empty) continue;
                     if (string.IsNullOrWhiteSpace(it.LocalPath)) continue;
@@ -413,8 +413,8 @@ namespace StuiPodcast.Infra.Download
                 {
                     var delay = await ComputeRetryDelayAsync(last, attempt).ConfigureAwait(false);
                     Log.Debug("dl/retry wait {Delay}ms id={Id} cause={Cause}",
-                        delay, ep.Id, last?.GetType().Name ?? "?");
-                    try { await Task.Delay(delay, cancel).ConfigureAwait(false); } catch (OperationCanceledException) { throw; }
+                        delay, ep.Id, last.GetType().Name);
+                    await Task.Delay(delay, cancel).ConfigureAwait(false);
                     SetState(ep.Id, s => s.State = DownloadState.Running);
                 }
             }
@@ -446,7 +446,7 @@ namespace StuiPodcast.Infra.Download
             var targetPathGuess = DownloadPathSanitizer.BuildDownloadPath(
                 baseDir: rootDir,
                 feedTitle: feedTitle,
-                episodeTitle: ep.Title ?? "episode",
+                episodeTitle: ep.Title,
                 urlOrExtHint: extFromUrl
             );
             targetPathGuess = DownloadPathSanitizer.EnsureUniquePath(targetPathGuess);

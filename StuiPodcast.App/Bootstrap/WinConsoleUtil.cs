@@ -25,7 +25,10 @@ static class WinConsoleUtil
                 SetConsoleMode(handle, newMode);
             }
         }
-        catch { }
+        catch
+        {
+            // ignored
+        }
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
