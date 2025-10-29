@@ -145,6 +145,7 @@ podliner can use different players:
 - **mpv** (recommended)
 - **ffplay** (part of ffmpeg)
 - **VLC** (via LibVLC; Windows support included with `VideoLAN.LibVLC.Windows`)
+- **Media Foundation**; built in (Windows only) and used as fallback when VLC or MPV are not available.
 
 Install examples:
 - Debian/Ubuntu: `sudo apt-get install -y mpv ffmpeg`
@@ -155,7 +156,7 @@ Install examples:
 
 Engine selection & fallback:
 - Default is `auto` (prefer local download if available; else remote if online).
-- You can switch engines from via command `:engine vlc|mpv|ffplay `
+- You can switch engines from via command `:engine vlc|mpv|ffplay|mediafoundation `
 
 ## FAQ / Troubleshooting
 

@@ -244,9 +244,10 @@ namespace StuiPodcast.App
                 Category: HelpCategory.NetworkEngine, Rank: 56),
 
             new(":engine", "Select or inspect playback engine.",
-                "[show|help|auto|vlc|mpv|ffplay|diag]",
-                Examples: new[]{ ":engine", ":engine mpv", ":engine help", ":engine diag" },
+                "[show|help|auto|vlc|mpv|ffplay|mediafoundation|mf]",
+                Examples: new[]{ ":engine", ":engine mpv", ":engine mediafoundation", ":engine mf", ":engine help", ":engine diag" },
                 Category: HelpCategory.NetworkEngine, Rank: 48),
+
 
             // history
             new(":history", "History actions (view-only feed).",
@@ -287,6 +288,10 @@ namespace StuiPodcast.App
   - Supports: seek, pause, volume, speed, local files, HTTP
   - Recommended. Mature & feature-complete.
 
+• Media Foundation (Windows)
+  Supports: seek, pause, volume, speed, local files, HTTP
+  Built in on Windows. No extra install needed.
+
 • MPV (mpv, IPC)
   - Supports: seek, pause, volume, speed, local files, HTTP
   - Requires 'mpv' in PATH. Uses IPC socket. Very capable.
@@ -299,8 +304,8 @@ namespace StuiPodcast.App
 Switching engines
   :engine                 → show current engine & capabilities
   :engine help            → show this guide
-  :engine auto            → prefer VLC → MPV → FFplay
-  :engine vlc|mpv|ffplay  → set preference
+  :engine auto            → prefer VLC, Media Foundation (Windows), MPV, FFplay
+  :engine vlc|mpv|ffplay|mediafoundation|mf  → set preference
   :engine diag            → show active engine, caps, preference & last-used
 
 Notes
@@ -308,7 +313,7 @@ Notes
   - If an action isn't supported by the active engine, you'll see a short OSD hint.
   - Linux: install packages 'vlc', 'mpv', 'ffmpeg'.
   - macOS: brew install vlc mpv ffmpeg
-  - Windows: install VLC/MPV/FFmpeg and ensure they are in PATH.";
+  - Windows: install VLC/MPV/FFmpeg and ensure they are in PATH. Media Foundation works out of the box.";
 
         public static readonly string OpmlDoc =
 @"OPML import/export (feed migration)

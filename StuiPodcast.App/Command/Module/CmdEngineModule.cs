@@ -69,9 +69,9 @@ internal static class CmdEngineModule
             return;
         }
 
-        if (arg is "auto" or "vlc" or "mpv" or "ffplay")
+        if (arg is "auto" or "vlc" or "mpv" or "ffplay" or "mediafoundation" or "mf")
         {
-            data.PreferredEngine = arg;
+            data.PreferredEngine = arg switch { "mf" => "mediafoundation", _ => arg };
             _ = persist();
 
             if (switchEngine != null)
@@ -86,6 +86,6 @@ internal static class CmdEngineModule
             return;
         }
 
-        ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay]", 1500);
+        ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay|mediafoundation]", 1500);
     }
 }
