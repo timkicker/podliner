@@ -11,7 +11,7 @@
 - [ ] Add NAudio for windows fallback
     - [ ] Implement
     - [ ] Test on win/linux/mac
-    - [ ] Update documentation
+    - [X] Update documentation
 - [X] Update macos-installer
 - [X] Update readme (download-section)
 
