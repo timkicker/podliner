@@ -8,9 +8,9 @@
 - [X] Rework default theme(+ as default)
 - [X] Add more logging to engine recogn.
 - [X] Add more commands to menubar
-- [ ] Add NAudio for windows fallback
+- [X] Add NAudio for windows fallback
     - [X] Implement
-    - [ ] Test on win/linux/mac
+    - [X] Test on win/linux/mac
     - [X] Update documentation
 - [X] Update macos-installer
 - [X] Update readme (download-section)
@@ -18,9 +18,12 @@
 ## v0.2.0
 - [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
 - [ ] Fix playerui update (windows only?)
-- [ ] Fix play-button visual on mac
+- [X] Fix play-button visual on mac
 
 ## General (good-first-issue?)
+
+### Engine
+- [ ] Add internal mac fallback engine
 
 ### Refactor 
 - [ ] Refactor Shell: split into subclasses
