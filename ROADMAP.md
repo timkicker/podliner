@@ -1,6 +1,6 @@
 # Roadmap
 
-## v0.1.0
+## v1.0.0
 - [X] Fix play-button visual
 - [X] Fix VLC recogn on Mac. MPV seems to work. Maybe add `VideoLAN.LibVLC.Mac`
 - [X] Fix remove-feed on save
@@ -15,10 +15,12 @@
 - [X] Update macos-installer
 - [X] Update readme (download-section)
 
-## v0.2.0
-- [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
+## v1.1.0
 - [ ] Fix playerui update (windows only?)
 - [X] Fix play-button visual on mac
+
+## v1.2.0
+- [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
 
 ## General (good-first-issue?)
 
