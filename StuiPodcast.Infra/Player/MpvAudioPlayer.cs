@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Player;
@@ -61,11 +62,7 @@ public sealed class MpvAudioPlayer : IAudioPlayer
             sock = _sockPath = Path.Combine(
                 Path.GetTempPath(), $"podliner-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
 
-            try { if (File.Exists(sock)) File.Delete(sock); }
-            catch
-            {
-                // ignored
-            }
+            try { if (File.Exists(sock)) File.Delete(sock); } catch { }
 
             started = StartMpvProcess(url, sock, startMs);
             _proc = started;
@@ -80,7 +77,16 @@ public sealed class MpvAudioPlayer : IAudioPlayer
     public void TogglePause()
     {
         lock (_gate)
+        {
+            // Optimistically toggle the playing state immediately for responsive UI
+            if (_ready)
+            {
+                State.IsPlaying = !State.IsPlaying;
+                FireStateChanged();
+            }
+            // Send the command to mpv
             SendIpc(new { command = new object[] { "cycle", "pause" } }, bestEffort: true);
+        }
     }
 
     public void SeekRelative(TimeSpan delta)
@@ -162,13 +168,13 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         psi.ArgumentList.Add("--keep-open=no");
 
         // optional start offset hint
-        if (startMs is { } ms && ms > 0)
+        if (startMs is long ms && ms > 0)
             psi.ArgumentList.Add($"--start={(ms / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
 
         psi.ArgumentList.Add(url);
 
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        p.Exited += (_, _) =>
+        p.Exited += (_, __) =>
         {
             bool raise = false;
             lock (_gate)
@@ -196,12 +202,14 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         if (_disposed) return false;
 
         double? posVal = null, durVal = null;
+        bool? pauseVal = null;
         try
         {
             posVal = GetProperty<double?>("time-pos");
             durVal = GetProperty<double?>("duration");
+            pauseVal = GetProperty<bool?>("pause");
 
-            if (posVal is null && durVal is null)
+            if (posVal is null && durVal is null && pauseVal is null)
                 return false;
 
             bool raise = false;
@@ -221,7 +229,20 @@ public sealed class MpvAudioPlayer : IAudioPlayer
                     if (State.Length != ts) { State.Length = ts; raise = true; }
                 }
 
-                // ready gate now playing
+                // pause state
+                if (pauseVal is bool paused)
+                {
+                    var isPlaying = !paused;
+                    if (_ready && State.IsPlaying != isPlaying) { State.IsPlaying = isPlaying; raise = true; }
+                    // If not ready yet, use pause to determine initial playing state
+                    else if (!_ready && !paused && (posVal is double || durVal is double))
+                    {
+                        _ready = true;
+                        if (!State.IsPlaying) { State.IsPlaying = true; raise = true; }
+                    }
+                }
+
+                // ready gate now playing (fallback if no pause info)
                 if (!_ready && (posVal is double pp && pp > 0 || durVal is double dd && dd > 0))
                 {
                     _ready = true;

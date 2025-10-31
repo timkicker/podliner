@@ -50,6 +50,9 @@ internal sealed class UiPlayerPanel : FrameView
     private TimeSpan _loadingBaseline = TimeSpan.Zero;
     private DateTime _loadingSinceUtc = DateTime.MinValue;
 
+    // current playing state for optimistic toggle
+    private bool _lastKnownPlaying = false;
+
     // tuning
     private static readonly TimeSpan LoadingAdvanceThreshold = TimeSpan.FromMilliseconds(400);
     private static readonly TimeSpan LoadingMinVisible       = TimeSpan.FromMilliseconds(300);
@@ -89,17 +92,17 @@ internal sealed class UiPlayerPanel : FrameView
     {
         var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
 
-        // toggle play/pause button text
-        var isCurrentlyPlay = BtnPlayPause.Text?.ToString().StartsWith("Play") ?? true;
-        BtnPlayPause.Text = isCurrentlyPlay
-            ? (isUnicode ? "Pause ⏸" : "Pause ||")
-            : (isUnicode ? "Play ⏵"  : "Play >");
+        // toggle based on last known state
+        var currentlyPlaying = _lastKnownPlaying;
+        BtnPlayPause.Text = currentlyPlaying
+            ? (isUnicode ? "Play ⏵"  : "Play >")
+            : (isUnicode ? "Pause ⏸" : "Pause ||");
 
         // toggle icon at start of time label
         var t = TimeLabel.Text?.ToString() ?? "";
         if (t.Length > 0)
         {
-            TimeLabel.Text = (isCurrentlyPlay ? (isUnicode ? "▶" : ">") : (isUnicode ? "⏸" : "||")) +
+            TimeLabel.Text = (currentlyPlaying ? (isUnicode ? "⏸" : "||") : (isUnicode ? "▶" : ">")) +
                              (t.Length > 1 ? t.Substring(1) : "");
         }
 
@@ -316,6 +319,8 @@ internal sealed class UiPlayerPanel : FrameView
             BtnPlayPause.Text = snap.IsPlaying
                 ? isUnicode ? "Pause ⏸" : "Pause ||"
                 : isUnicode ? "Play ⏵"  : "Play >";
+
+        _lastKnownPlaying = snap.IsPlaying;
 
         Progress.Fraction = lenSec > 0
             ? Math.Clamp((float)posSec / lenSec, 0f, 1f)

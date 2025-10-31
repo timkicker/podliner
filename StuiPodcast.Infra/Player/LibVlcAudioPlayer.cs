@@ -51,12 +51,7 @@ namespace StuiPodcast.Infra.Player
             };
 
             var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
-            try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); }
-            catch
-            {
-                // ignored
-            }
-
+            try { Directory.CreateDirectory(Path.GetDirectoryName(logPath)!); } catch { }
             opts.Add("--file-logging");
             opts.Add($"--logfile={logPath}");
 
@@ -74,21 +69,11 @@ namespace StuiPodcast.Infra.Player
             _mp.LengthChanged += OnLengthChanged;
             _mp.EndReached += OnEndReached;
             _mp.EncounteredError += OnEncounteredError;
-            _mp.Stopped += (_, _) => { lock (_sync) { State.IsPlaying = false; SafeFire(); } };
+            _mp.Stopped += (_, __) => { lock (_sync) { State.IsPlaying = false; SafeFire(); } };
 
             // initial state
-            try { _mp.Volume = Math.Clamp(State.Volume0_100, 0, 100); }
-            catch
-            {
-                // ignored
-            }
-
-            try { _mp.SetRate((float)Math.Clamp(State.Speed, 0.25, 3.0)); }
-            catch
-            {
-                // ignored
-            }
-
+            try { _mp.Volume = Math.Clamp(State.Volume0_100, 0, 100); } catch { }
+            try { _mp.SetRate((float)Math.Clamp(State.Speed, 0.25, 3.0)); } catch { }
             State.Capabilities = Capabilities;
         }
 
@@ -106,20 +91,15 @@ namespace StuiPodcast.Infra.Player
 
                 _ready = false;
 
-                try { if (_mp.IsPlaying) _mp.Stop(); }
-                catch
-                {
-                    // ignored
-                }
-
-                SafeDisposeMediaLocked();
+                try { if (_mp.IsPlaying) _mp.Stop(); } catch { }
+                SafeDisposeMediaLocked(sid);
 
                 _pendingSeekMs = startMs is > 0 ? startMs : null;
 
                 _media = CreateMedia(_lib, url);
 
                 // provide start-time hint for faster seeks on some inputs
-                if (_pendingSeekMs is { } ms && ms >= 1000)
+                if (_pendingSeekMs is long ms && ms >= 1000)
                 {
                     var secs = (int)(ms / 1000);
                     try
@@ -127,10 +107,7 @@ namespace StuiPodcast.Infra.Player
                         _media.AddOption($":start-time={secs}");
                         _media.AddOption(":input-fast-seek");
                     }
-                    catch
-                    {
-                        // ignored
-                    }
+                    catch { }
                 }
 
                 var ok = _mp.Play(_media);
@@ -173,11 +150,7 @@ namespace StuiPodcast.Infra.Player
                 catch
                 {
                     // fall back to observable state on error
-                    try { State.IsPlaying = _mp.IsPlaying; }
-                    catch
-                    {
-                        // ignored
-                    }
+                    try { State.IsPlaying = _mp.IsPlaying; } catch { }
                 }
 
                 SafeFire(); // fire now so ui renders button + icon
@@ -195,10 +168,7 @@ namespace StuiPodcast.Infra.Player
                     if (target < TimeSpan.Zero) target = TimeSpan.Zero;
                     SeekTo(target);
                 }
-                catch
-                {
-                    // ignored
-                }
+                catch { }
             }
         }
 
@@ -220,27 +190,21 @@ namespace StuiPodcast.Infra.Player
                             _mp.Position = Math.Clamp((float)ms / len, 0f, 1f);
                     }
                 }
-                catch
-                {
-                    // ignored
-                }
+                catch { }
             }
         }
 
-        public void SetVolume(int vol0To100)
+        public void SetVolume(int vol0to100)
         {
             lock (_sync)
             {
                 try
                 {
-                    var v = Math.Clamp(vol0To100, 0, 100);
+                    var v = Math.Clamp(vol0to100, 0, 100);
                     _mp.Volume = v;
                     State.Volume0_100 = v;
                 }
-                catch
-                {
-                    // ignored
-                }
+                catch { }
 
                 SafeFire();
             }
@@ -256,10 +220,7 @@ namespace StuiPodcast.Infra.Player
                     _mp.SetRate((float)s);
                     State.Speed = s;
                 }
-                catch
-                {
-                    // ignored
-                }
+                catch { }
 
                 SafeFire();
             }
@@ -269,13 +230,8 @@ namespace StuiPodcast.Infra.Player
         {
             lock (_sync)
             {
-                try { if (_mp.IsPlaying) _mp.Stop(); }
-                catch
-                {
-                    // ignored
-                }
-
-                SafeDisposeMediaLocked();
+                try { if (_mp.IsPlaying) _mp.Stop(); } catch { }
+                SafeDisposeMediaLocked(_sessionId);
 
                 State.IsPlaying = false;
                 SafeFire();
@@ -284,23 +240,9 @@ namespace StuiPodcast.Infra.Player
 
         public void Dispose()
         {
-            try { Stop(); }
-            catch
-            {
-                // ignored
-            }
-
-            try { _mp.Dispose(); }
-            catch
-            {
-                // ignored
-            }
-
-            try { _lib.Dispose(); }
-            catch
-            {
-                // ignored
-            }
+            try { Stop(); } catch { }
+            try { _mp.Dispose(); } catch { }
+            try { _lib.Dispose(); } catch { }
         }
 
         #endregion
@@ -315,7 +257,7 @@ namespace StuiPodcast.Infra.Player
                 {
                     var want = _pendingSeekMs;
                     _pendingSeekMs = null;
-                    if (want is { } ms && ms > 0)
+                    if (want is long ms && ms > 0)
                     {
                         try
                         {
@@ -429,12 +371,12 @@ namespace StuiPodcast.Infra.Player
                 return new VLC.Media(lib, uri.ToString(), VLC.FromType.FromLocation);
 
             if (File.Exists(input))
-                return new VLC.Media(lib, input);
+                return new VLC.Media(lib, input, VLC.FromType.FromPath);
 
             return new VLC.Media(lib, input, VLC.FromType.FromLocation);
         }
 
-        private void SafeDisposeMediaLocked()
+        private void SafeDisposeMediaLocked(int sid)
         {
             try { _media?.Dispose(); }
             catch (Exception ex) { Log.Debug(ex, "[#{sid}] media.Dispose"); }
@@ -443,11 +385,7 @@ namespace StuiPodcast.Infra.Player
 
         private void SafeFire()
         {
-            try { StateChanged?.Invoke(State); }
-            catch
-            {
-                // ignored
-            }
+            try { StateChanged?.Invoke(State); } catch { }
         }
 
         #endregion
