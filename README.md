@@ -162,7 +162,7 @@ Engine selection & fallback:
 
 ### "No audio engine found”
 
-- Iinstall one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
+- Install one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
 
 ### System-wide install?  
 - Linux/macOS: add `--system` to the install command.  
