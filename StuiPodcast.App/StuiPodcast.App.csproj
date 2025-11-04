@@ -10,15 +10,14 @@
         <PackageReference Include="Serilog" Version="4.3.0" />
         <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
 
-        <!-- Terminal.Gui wieder auf die Version, die bei dir lief -->
+        <!-- Terminal.Gui: match the working version -->
         <PackageReference Include="Terminal.Gui" Version="1.19.0" />
 
-        <!-- LibVLCSharp managed bindings (plattformunabhängig) -->
+        <!-- LibVLCSharp managed bindings (platform-independent) -->
         <PackageReference Include="LibVLCSharp" Version="3.8.4" />
 
-        <!-- Native Runtimes NUR OS-spezifisch:
-             - Windows: NuGet-paketiert
-             - Linux/macOS: KEINE NuGet-Natives; System-Installation verwenden -->
+        <!-- Native runtimes only for Windows via NuGet.
+             On Linux/macOS rely on system-installed libvlc -->
         <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     </ItemGroup>
 
