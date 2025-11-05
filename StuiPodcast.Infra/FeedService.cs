@@ -5,11 +5,12 @@ using CodeHollow.FeedReader;
 using Serilog;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Storage;
-
-// aliases
 using CoreFeed = StuiPodcast.Core.Feed;
 using FeedItem = CodeHollow.FeedReader.FeedItem;
-using RssFeed  = CodeHollow.FeedReader.Feed;
+using RssFeed = CodeHollow.FeedReader.Feed;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 
 namespace StuiPodcast.Infra
 {
@@ -19,34 +20,47 @@ namespace StuiPodcast.Infra
 
         private readonly AppData _data;
         private readonly AppFacade _app;
+        private readonly HttpClient _http;
 
         public FeedService(AppData data, AppFacade app)
         {
             _data = data;
-            _app  = app;
+            _app = app;
+
+            // own http client with decompression and timeouts
+            var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+            };
+            _http = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(30)
+            };
+            _http.DefaultRequestHeaders.UserAgent.Clear();
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0.1 (+https://github.com/yourrepo)");
+            _http.DefaultRequestHeaders.Accept.Clear();
+            _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/rss+xml"));
+            _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/xml", 0.9));
+            _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*", 0.8));
         }
 
         #endregion
 
         #region public api
-        // FeedService.cs
+
         public async Task RemoveFeedAsync(Guid feedId, bool removeDownloads = false)
         {
-            // 1) Episoden-IDs des Feeds bestimmen (für Queue-Cleanup & evtl. Downloads)
             var epIds = _data.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
 
-            // 2) Persistenz: Feed + Episoden aus der Library entfernen
-            var removedFeed    = _app.RemoveFeed(feedId);               // -> LibraryStore
-            var removedEps     = _app.RemoveEpisodesByFeed(feedId);     // -> LibraryStore
-            var removedFromQ   = _app.QueueRemoveByEpisodeIds(epIds);   // -> LibraryStore
+            var removedFeed = _app.RemoveFeed(feedId);
+            var removedEps = _app.RemoveEpisodesByFeed(feedId);
+            var removedFromQ = _app.QueueRemoveByEpisodeIds(epIds);
 
-            // 3) AppData (UI-Cache) spiegeln
             _data.Feeds.RemoveAll(f => f.Id == feedId);
             _data.Episodes.RemoveAll(e => e.FeedId == feedId);
             _data.Queue.RemoveAll(id => epIds.Contains(id));
             if (_data.LastSelectedFeedId == feedId) _data.LastSelectedFeedId = null;
 
-            // 4) Optional: lokale Dateien löschen (wenn gewünscht)
             if (removeDownloads)
             {
                 foreach (var id in epIds)
@@ -54,13 +68,11 @@ namespace StuiPodcast.Infra
                         try { System.IO.File.Delete(path!); } catch { /* best effort */ }
             }
 
-            // 5) Sicher speichern
             _app.SaveNow();
 
             Log.Information("feed/remove persisted id={FeedId} feedRemoved={Feed} episodesRemoved={Eps} queueRemoved={Q}",
                 feedId, removedFeed, removedEps, removedFromQ);
         }
-
 
         public async Task<CoreFeed> AddFeedAsync(string url)
         {
@@ -70,14 +82,23 @@ namespace StuiPodcast.Infra
             var probeFeed = new CoreFeed { Url = url, Title = url, LastChecked = DateTimeOffset.Now };
             try
             {
-                var f = await FeedReader.ReadAsync(url).ConfigureAwait(false);
-                Log.Information("feed/probe ok url={Url} title={Title} items={Count}", url, f.Title, f.Items?.Count ?? 0);
-                probeFeed.Title = string.IsNullOrWhiteSpace(f.Title) ? url : f.Title!;
-                probeFeed.LastChecked = DateTimeOffset.Now;
+                var xml = await FetchFeedXmlAsync(url).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(xml))
+                {
+                    var f = FeedReader.ReadFromString(xml);
+                    Log.Information("feed/probe ok url={Url} title={Title} items={Count}", url, f.Title, f.Items?.Count ?? 0);
+                    probeFeed.Title = string.IsNullOrWhiteSpace(f.Title) ? url : f.Title!;
+                    probeFeed.LastChecked = DateTimeOffset.Now;
+                }
+                else
+                {
+                    Log.Warning("feed/probe empty response url={Url}", url);
+                    probeFeed.LastChecked = DateTimeOffset.Now;
+                }
             }
             catch (Exception ex)
             {
-                Log.Warning(ex, "feed/probe fail url={Url}", url);
+                Log.Warning(ex, "feed/probe parse fail url={Url}", url);
                 probeFeed.LastChecked = DateTimeOffset.Now;
             }
 
@@ -89,10 +110,7 @@ namespace StuiPodcast.Infra
 
             // best effort first refresh
             try { await RefreshFeedAsync(saved).ConfigureAwait(false); }
-            catch
-            {
-                // ignored
-            }
+            catch { /* ignored */ }
 
             return saved;
         }
@@ -110,23 +128,36 @@ namespace StuiPodcast.Infra
         public async Task RefreshFeedAsync(CoreFeed feed)
         {
             RssFeed f;
-            try
+
+            // http fetch with ua
+            var xml = await FetchFeedXmlAsync(feed.Url).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(xml))
             {
-                f = await FeedReader.ReadAsync(feed.Url).ConfigureAwait(false);
-                Log.Information("feed/refresh probe ok id={Id} title={Title} items={Items}",
-                    feed.Id, f.Title ?? feed.Title, f.Items?.Count ?? 0);
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "feed/refresh fail url={Url}", feed.Url);
+                // make it visible that the fetch failed (403/401 etc.)
+                Log.Warning("feed/refresh no content url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
-                // persist last checked even on failure
                 var persistedFail = _app.AddOrUpdateFeed(feed);
                 UpsertFeedIntoData(persistedFail);
                 return;
             }
 
-            // soft update of feed metadata then persist
+            
+            try
+            {
+                f = FeedReader.ReadFromString(xml);
+                Log.Information("feed/refresh ok id={Id} title={Title} items={Items}",
+                    feed.Id, f.Title ?? feed.Title, f.Items?.Count ?? 0);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "feed/refresh parse fail url={Url}", feed.Url);
+                feed.LastChecked = DateTimeOffset.Now;
+                var persistedFail = _app.AddOrUpdateFeed(feed);
+                UpsertFeedIntoData(persistedFail);
+                return;
+            }
+
+            // gently update and persist feed metadata
             if (string.IsNullOrWhiteSpace(feed.Title))
                 feed.Title = f.Title ?? feed.Url;
             feed.LastChecked = DateTimeOffset.Now;
@@ -136,18 +167,17 @@ namespace StuiPodcast.Infra
 
             int added = 0, updated = 0, skippedNoAudio = 0;
 
-            // process items
+            // process items (unchanged from before)
             foreach (var item in f.Items ?? Array.Empty<FeedItem>())
             {
                 var audioUrl = TryGetAudioUrl(item);
                 if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
 
-                var pub   = ParseDate(item);
+                var pub = ParseDate(item);
                 var lenMs = TryGetDurationMs(item) ?? 0;
-                var desc  = HtmlToText(item.Content ?? item.Description ?? "");
+                var desc = HtmlToText(item.Content ?? item.Description ?? "");
                 var title = item.Title ?? "(untitled)";
 
-                // identity: feed id + audio url
                 var existing = _data.Episodes.FirstOrDefault(e =>
                     e.FeedId == persistedFeed.Id &&
                     string.Equals(e.AudioUrl, audioUrl, StringComparison.OrdinalIgnoreCase));
@@ -156,44 +186,40 @@ namespace StuiPodcast.Infra
                 {
                     var ep = new Episode
                     {
-                        FeedId          = persistedFeed.Id,
-                        Title           = title,
-                        PubDate         = pub,
-                        AudioUrl        = audioUrl!,
+                        Id = Guid.NewGuid(),
+                        FeedId = persistedFeed.Id,
+                        Title = title,
+                        AudioUrl = audioUrl,
+                        PubDate = pub,
+                        DurationMs = lenMs,
                         DescriptionText = desc,
-                        DurationMs      = lenMs
+                        Saved = false,
+                        Progress = new EpisodeProgress()
                     };
 
-                    // persistent upsert to get stable id
                     var persistedEp = _app.AddOrUpdateEpisode(ep);
-
-                    // update ui cache with new entry
                     _data.Episodes.Add(persistedEp);
                     added++;
                 }
                 else
                 {
-                    // soft updates on existing object
                     if (string.IsNullOrWhiteSpace(existing.Title) && !string.IsNullOrWhiteSpace(title))
                         existing.Title = title;
-
                     if (!existing.PubDate.HasValue && pub.HasValue)
                         existing.PubDate = pub;
-
                     if (string.IsNullOrWhiteSpace(existing.DescriptionText) && !string.IsNullOrWhiteSpace(desc))
                         existing.DescriptionText = desc;
-
                     if (existing.DurationMs <= 0 && lenMs > 0)
                         existing.DurationMs = lenMs;
 
-                    // persist to refresh library.json
-                    _app.AddOrUpdateEpisode(existing);
+                    var persistedEp = _app.AddOrUpdateEpisode(existing);
+                    // _data holds reference; nothing to add
                     updated++;
                 }
             }
 
-            Log.Information("feed/refresh done id={Id} title={Title} items={Items} added={Added} updated={Updated} skippedNoAudio={Skipped}",
-                feed.Id, feed.Title, f.Items?.Count ?? 0, added, updated, skippedNoAudio);
+            Log.Information("feed/refresh summary id={Id} added={Added} updated={Updated} skippedNoAudio={Skipped}",
+                feed.Id, added, updated, skippedNoAudio);
         }
 
         #endregion
@@ -206,8 +232,8 @@ namespace StuiPodcast.Infra
             if (df == null) _data.Feeds.Add(saved);
             else
             {
-                df.Title       = saved.Title;
-                df.Url         = saved.Url;
+                df.Title = saved.Title;
+                df.Url = saved.Url;
                 df.LastChecked = saved.LastChecked;
             }
         }
@@ -221,6 +247,29 @@ namespace StuiPodcast.Infra
                 return d;
 
             return null;
+        }
+
+        private async Task<string?> FetchFeedXmlAsync(string url)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    Log.Warning("feed/http status={Status} url={Url}", (int)resp.StatusCode, url);
+                    return null;
+                }
+
+                // read string (parser handles encoding in xml)
+                return await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "feed/http fail url={Url}", url);
+                return null;
+            }
         }
 
         static string? TryGetAudioUrl(FeedItem item)
@@ -333,10 +382,10 @@ namespace StuiPodcast.Infra
         }
 
         static bool IsAudioUrl(string s) =>
-            s.EndsWith(".mp3",  true, CultureInfo.InvariantCulture) ||
-            s.EndsWith(".m4a",  true, CultureInfo.InvariantCulture) ||
-            s.EndsWith(".aac",  true, CultureInfo.InvariantCulture) ||
-            s.EndsWith(".ogg",  true, CultureInfo.InvariantCulture) ||
+            s.EndsWith(".mp3", true, CultureInfo.InvariantCulture) ||
+            s.EndsWith(".m4a", true, CultureInfo.InvariantCulture) ||
+            s.EndsWith(".aac", true, CultureInfo.InvariantCulture) ||
+            s.EndsWith(".ogg", true, CultureInfo.InvariantCulture) ||
             s.EndsWith(".opus", true, CultureInfo.InvariantCulture);
 
         static string HtmlToText(string html)
