@@ -1,0 +1,88 @@
+name: Publish AUR (podliner-bin)
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  aur:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+    env:
+      AUR_PACKAGE: podliner-bin
+      AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+      AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install tooling
+        run: |
+          pacman -Sy --noconfirm git base-devel curl jq pacman-contrib
+          git config --global user.name  "$AUR_USERNAME"
+          git config --global user.email "$AUR_EMAIL"
+
+      - name: Setup SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat <<EOF > ~/.ssh/config
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Read release info
+        id: rel
+        run: |
+          TAG="${GITHUB_REF_NAME}"                # e.g. v1.0.2
+          VER="${TAG#v}"                          # 1.0.2
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"
+          X64=$(curl -sL "$API" | jq -r '.assets[] | select(.name=="podliner_linux-x64.tar.gz")   | .browser_download_url')
+          ARM=$(curl -sL "$API" | jq -r '.assets[] | select(.name=="podliner_linux-arm64.tar.gz") | .browser_download_url')
+          echo "ver=$VER"   >> $GITHUB_OUTPUT
+          echo "x64=$X64"   >> $GITHUB_OUTPUT
+          echo "arm=$ARM"   >> $GITHUB_OUTPUT
+
+      - name: Download assets and compute sums
+        id: sums
+        run: |
+          mkdir -p /tmp/artifacts
+          curl -L "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner_linux-x64.tar.gz
+          curl -L "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner_linux-arm64.tar.gz
+          X64_SUM=$(sha256sum /tmp/artifacts/podliner_linux-x64.tar.gz   | awk '{print $1}')
+          ARM_SUM=$(sha256sum /tmp/artifacts/podliner_linux-arm64.tar.gz | awk '{print $1}')
+          echo "x64sum=$X64_SUM" >> $GITHUB_OUTPUT
+          echo "armsum=$ARM_SUM" >> $GITHUB_OUTPUT
+
+      - name: Clone AUR repo
+        run: |
+          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+
+      - name: Update PKGBUILD
+        run: |
+          cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
+          sed -i "s|releases/download/v.*/podliner_linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
+          sed -i "s|releases/download/v.*/podliner_linux-arm64.tar.gz|${{ steps.rel.outputs.arm }}|" /tmp/aur/PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
+
+      - name: Generate .SRCINFO
+        working-directory: /tmp/aur
+        run: |
+          makepkg --printsrcinfo > .SRCINFO
+
+      - name: Commit and push
+        working-directory: /tmp/aur
+        run: |
+          git add PKGBUILD .SRCINFO
+          git commit -m "${{ env.AUR_PACKAGE }} ${{ steps.rel.outputs.ver }} (automated)"
+          git push origin HEAD:master
+
