@@ -305,6 +305,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           if [[ ! "$TAG" =~ ^v[0-9] ]]; then
             TAG=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -331,6 +332,7 @@ jobs:
       - name: Download assets and compute SHA256
         id: sums
         run: |
+          set -euo pipefail
           mkdir -p /tmp/artifacts
           curl -L "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner-linux-x64.tar.gz
           curl -L "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner-linux-arm64.tar.gz
@@ -343,7 +345,6 @@ jobs:
           install -d -m 755 /tmp/aur
           chown -R builder:builder /tmp/aur
 
-      # >>> NEW: give builder its own SSH key+config (no access to /root)
       - name: Prepare SSH for builder
         run: |
           install -d -m 700 /home/builder/.ssh
@@ -358,7 +359,6 @@ jobs:
           chown -R builder:builder /home/builder/.ssh
           chmod 600 /home/builder/.ssh/aur
           chmod 600 /home/builder/.ssh/config
-      # <<<
 
       - name: Configure git as builder (+safe.directory)
         env:
@@ -376,23 +376,53 @@ jobs:
             git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
           '
 
+      # --- SAFE PKGBUILD UPDATE VIA AWK (keine sed-Quotehölle) ---
       - name: Update PKGBUILD with version, URLs, sums (as builder)
         run: |
           runuser -u builder -- bash -lc '
             set -euo pipefail
             PKG=/tmp/aur/PKGBUILD
 
-            # neue Version setzen
-            sed -i -E "s|^pkgver=.*|pkgver=${{ steps.rel.outputs.ver }}|" "$PKG"
+            NEWVER="${{ steps.rel.outputs.ver }}"
+            X64="${{ steps.rel.outputs.x64 }}"
+            ARM="${{ steps.rel.outputs.arm }}"
+            X64SUM="${{ steps.sums.outputs.x64sum }}"
+            ARMSUM="${{ steps.sums.outputs.armsum }}"
 
-            # die source-Zeilen KOMPLETT ersetzen (keine Teil-Ersetzung)
-            # lokale Dateinamen behalten ${pkgver}, URLs aus Release nehmen
-            sed -i -E "s|^source_x86_64=.*|source_x86_64=(\"podliner-\\${pkgver}-linux-x64.tar.gz::${{ steps.rel.outputs.x64 }}\")|" "$PKG"
-            sed -i -E "s|^source_aarch64=.*|source_aarch64=(\"podliner-\\${pkgver}-linux-arm64.tar.gz::${{ steps.rel.outputs.arm }}\")|" "$PKG"
+            # pkgver aktualisieren
+            awk -v ver="$NEWVER" \
+                '\''/^pkgver=/{print "pkgver=" ver; next} {print}'\'' \
+                "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
-            # Checksummen einsetzen
-            sed -i -E "s|^sha256sums_x86_64=.*|sha256sums_x86_64=(\'${{ steps.sums.outputs.x64sum }}\')|" "$PKG"
-            sed -i -E "s|^sha256sums_aarch64=.*|sha256sums_aarch64=(\'${{ steps.sums.outputs.armsum }}\')|" "$PKG"
+            # Falls pkgrel existiert und Version unverändert blieb, pkgrel+=1; sonst auf 1 setzen
+            CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
+            if grep -qE "^pkgrel=" "$PKG"; then
+              if [ "$CURVER" = "$NEWVER" ]; then
+                awk '\''/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+              else
+                awk '\''/^pkgrel=/{print "pkgrel=1"; next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+              fi
+            else
+              echo "pkgrel=1" >> "$PKG"
+            fi
+
+            # Wir brauchen ein LITERALES ${pkgver} in den lokalen Dateinamen
+            LIT_PKGVER="\\${pkgver}"
+
+            # komplette source_* und sha256sums_* Zeilen deterministisch ersetzen
+            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" -v litpv="$LIT_PKGVER" "
+              BEGIN{
+                sx = \"source_x86_64=(\\\"podliner-\" litpv \"-linux-x64.tar.gz::\" x64 \"\\\")\"
+                sa = \"source_aarch64=(\\\"podliner-\" litpv \"-linux-arm64.tar.gz::\" arm \"\\\")\"
+                hx = \"sha256sums_x86_64=(\\'\" x64sum \"\\')\"
+                ha = \"sha256sums_aarch64=(\\'\" armsum \"\\')\"
+              }
+              /^source_x86_64=/      { print sx; next }
+              /^source_aarch64=/     { print sa; next }
+              /^sha256sums_x86_64=/  { print hx; next }
+              /^sha256sums_aarch64=/ { print ha; next }
+                                      { print }
+            " "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
           '
 
       - name: Generate .SRCINFO (as builder)
@@ -402,6 +432,7 @@ jobs:
       - name: Commit and push to AUR (as builder)
         run: |
           runuser -u builder -- bash -lc '
+            set -euo pipefail
             cd /tmp/aur
             git add PKGBUILD .SRCINFO
             git commit -m "${AUR_PACKAGE} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
