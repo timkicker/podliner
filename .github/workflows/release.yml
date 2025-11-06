@@ -379,12 +379,20 @@ jobs:
       - name: Update PKGBUILD with version, URLs, sums (as builder)
         run: |
           runuser -u builder -- bash -lc '
-            cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
-            sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
-            sed -i "s|releases/download/v.*/podliner-linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
-            sed -i "s|releases/download/v.*/podliner-linux-arm64.tar.gz|${{ steps.rel.outputs.arm }}|" /tmp/aur/PKGBUILD
-            sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
-            sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
+            set -euo pipefail
+            PKG=/tmp/aur/PKGBUILD
+
+            # neue Version setzen
+            sed -i -E "s|^pkgver=.*|pkgver=${{ steps.rel.outputs.ver }}|" "$PKG"
+
+            # die source-Zeilen KOMPLETT ersetzen (keine Teil-Ersetzung)
+            # lokale Dateinamen behalten ${pkgver}, URLs aus Release nehmen
+            sed -i -E "s|^source_x86_64=.*|source_x86_64=(\"podliner-\\${pkgver}-linux-x64.tar.gz::${{ steps.rel.outputs.x64 }}\")|" "$PKG"
+            sed -i -E "s|^source_aarch64=.*|source_aarch64=(\"podliner-\\${pkgver}-linux-arm64.tar.gz::${{ steps.rel.outputs.arm }}\")|" "$PKG"
+
+            # Checksummen einsetzen
+            sed -i -E "s|^sha256sums_x86_64=.*|sha256sums_x86_64=(\'${{ steps.sums.outputs.x64sum }}\')|" "$PKG"
+            sed -i -E "s|^sha256sums_aarch64=.*|sha256sums_aarch64=(\'${{ steps.sums.outputs.armsum }}\')|" "$PKG"
           '
 
       - name: Generate .SRCINFO (as builder)
