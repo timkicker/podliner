@@ -377,6 +377,7 @@ jobs:
           '
 
       - name: Update PKGBUILD with version, URLs, sums (as builder)
+        shell: bash
         run: |
           runuser -u builder -- bash -lc '
             set -euo pipefail
@@ -388,39 +389,43 @@ jobs:
             X64SUM="${{ steps.sums.outputs.x64sum }}"
             ARMSUM="${{ steps.sums.outputs.armsum }}"
 
-            # pkgver aktualisieren
-            awk -v ver="$NEWVER" '\''/^pkgver=/{print "pkgver=" ver; next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
-            # pkgrel-Regel
             CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
             if grep -qE "^pkgrel=" "$PKG"; then
               if [ "$CURVER" = "$NEWVER" ]; then
-                awk '\''/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+                awk '"'"'/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
               else
-                awk '\''/^pkgrel=/{print "pkgrel=1"; next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+                awk '"'"'/^pkgrel=/{print "pkgrel=1"; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
               fi
             else
               echo "pkgrel=1" >> "$PKG"
             fi
 
-            # QUOTING-FIX: awk-Programm single-quoten und ${pkgver} erst in awk zusammensetzen
-            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" '
-              BEGIN {
-                # erzeugt den LITERAL "${pkgver}" ohne Shell-Expansion
-                pv = "$""{pkgver}"
+            cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
+            BEGIN {
+              # literal ${pkgver} ohne Shell-Expansion
+              pv = "$" "{pkgver}"
 
-                sx = "source_x86_64=(\\\"podliner-" pv "-linux-x64.tar.gz::" x64 "\\\")"
-                sa = "source_aarch64=(\\\"podliner-" pv "-linux-arm64.tar.gz::" arm "\\\")"
-                hx = "sha256sums_x86_64=(\\\"" x64sum "\\\")"
-                ha = "sha256sums_aarch64=(\\\"" armsum "\\\")"
-              }
-              /^source_x86_64=/      { print sx; next }
-              /^source_aarch64=/     { print sa; next }
-              /^sha256sums_x86_64=/  { print hx; next }
-              /^sha256sums_aarch64=/ { print ha; next }
+              sx = "source_x86_64=(\\\"podliner-" pv "-linux-x64.tar.gz::" x64 "\\\")"
+              sa = "source_aarch64=(\\\"podliner-" pv "-linux-arm64.tar.gz::" arm "\\\")"
+              hx = "sha256sums_x86_64=(\\\"" x64sum "\\\")"
+              ha = "sha256sums_aarch64=(\\\"" armsum "\\\")"
+            }
+            /^source_x86_64=/      { print sx; next }
+            /^source_aarch64=/     { print sa; next }
+            /^sha256sums_x86_64=/  { print hx; next }
+            /^sha256sums_aarch64=/ { print ha; next }
                                      { print }
-            ' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            AWK
+
+            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
+            mv "$PKG.tmp" "$PKG"
+
+            echo "----- PKGBUILD after rewrite -----"
+            sed -n "1,120p" "$PKG"
           '
+
 
       - name: Generate .SRCINFO (as builder)
         run: |
