@@ -230,6 +230,7 @@ jobs:
     name: Publish AUR (podliner-bin)
     needs: publish
     runs-on: ubuntu-latest
+    # Lauf in einem Arch-Container, damit makepkg/pacman vorhanden sind
     container:
       image: archlinux:base
     env:
@@ -240,13 +241,19 @@ jobs:
     steps:
       - name: Install tooling
         run: |
-          pacman -Sy --noconfirm git base-devel curl jq pacman-contrib
-          git config --global user.name  "$AUR_USERNAME"
-          git config --global user.email "$AUR_EMAIL"
+          pacman -Sy --noconfirm git base-devel curl jq pacman-contrib openssh
+          git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
+          git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
+          ssh -V
 
       - name: Setup SSH for AUR
         run: |
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
+            echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2
+            exit 1
+          fi
           echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
           cat <<EOF > ~/.ssh/config
@@ -300,10 +307,15 @@ jobs:
           echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
 
       - name: Clone AUR repo
-        run: git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+        env:
+          GIT_SSH_COMMAND: ssh -F ~/.ssh/config
+        run: |
+          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
 
       - name: Update PKGBUILD with version, URLs, sums
         run: |
+          # Stelle sicher, dass der Template-PKGBUILD im Repo liegt:
+          # packaging/aur/podliner-bin/PKGBUILD
           cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
           sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
           sed -i "s|releases/download/v.*/podliner-linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
@@ -317,7 +329,10 @@ jobs:
 
       - name: Commit and push to AUR
         working-directory: /tmp/aur
+        env:
+          GIT_SSH_COMMAND: ssh -F ~/.ssh/config
         run: |
           git add PKGBUILD .SRCINFO
           git commit -m "${{ env.AUR_PACKAGE }} ${{ steps.rel.outputs.ver }} (automated)"
           git push origin HEAD:master
+
