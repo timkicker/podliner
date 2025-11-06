@@ -354,9 +354,14 @@ jobs:
           sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
           sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
 
-      - name: Generate .SRCINFO
-        working-directory: /tmp/aur
-        run: makepkg --printsrcinfo > .SRCINFO
+      - name: Create unprivileged user for makepkg
+        run: |
+          useradd -m builder
+          chown -R builder:builder /tmp/aur
+
+      - name: Generate .SRCINFO (non-root)
+        run: |
+          runuser -u builder -- bash -lc 'cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO'
 
       - name: Commit and push to AUR
         working-directory: /tmp/aur
