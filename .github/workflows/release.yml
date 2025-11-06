@@ -273,9 +273,8 @@ jobs:
           git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
           ssh -V
 
-      - name: Setup SSH for AUR
+      - name: Setup SSH for AUR (root home)
         run: |
-          # immer ins echte root-Home schreiben, nicht ~ (das ist /github/home im Container)
           install -d -m 700 /root/.ssh
           if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
             echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2
@@ -283,7 +282,6 @@ jobs:
           fi
           printf "%s\n" "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
           chmod 600 /root/.ssh/aur
-
           cat > /root/.ssh/config <<'EOF'
           Host aur.archlinux.org
             User aur
@@ -293,7 +291,7 @@ jobs:
           EOF
           chmod 600 /root/.ssh/config
 
-      - name: Verify SSH setup
+      - name: Verify SSH setup (root)
         run: |
           ls -l /root/.ssh
           ssh -F /root/.ssh/config -o BatchMode=yes -T aur@aur.archlinux.org || true
@@ -339,13 +337,28 @@ jobs:
           echo "x64sum=$(sha256sum /tmp/artifacts/podliner-linux-x64.tar.gz   | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
 
-      - name: Create unprivileged user for AUR work
+      - name: Create unprivileged user for makepkg
         run: |
           useradd -m builder
-          # SSH config & key liegen im root-Home; für git-over-ssh reicht GIT_SSH_COMMAND
-          # Arbeitsverzeichnis gehört dem builder:
           install -d -m 755 /tmp/aur
           chown -R builder:builder /tmp/aur
+
+      # >>> NEW: give builder its own SSH key+config (no access to /root)
+      - name: Prepare SSH for builder
+        run: |
+          install -d -m 700 /home/builder/.ssh
+          cp /root/.ssh/aur /home/builder/.ssh/aur
+          cat > /home/builder/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile /home/builder/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chown -R builder:builder /home/builder/.ssh
+          chmod 600 /home/builder/.ssh/aur
+          chmod 600 /home/builder/.ssh/config
+      # <<<
 
       - name: Configure git as builder (+safe.directory)
         env:
@@ -357,11 +370,10 @@ jobs:
           runuser -u builder -- git config --global --add safe.directory /tmp/aur
 
       - name: Clone AUR repo (as builder)
-        env:
-          GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
           runuser -u builder -- bash -lc '
-            GIT_SSH_COMMAND="'"$GIT_SSH_COMMAND"'" git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+            GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" \
+            git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
           '
 
       - name: Update PKGBUILD with version, URLs, sums (as builder)
@@ -380,12 +392,10 @@ jobs:
           runuser -u builder -- bash -lc 'cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO'
 
       - name: Commit and push to AUR (as builder)
-        env:
-          GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
           runuser -u builder -- bash -lc '
             cd /tmp/aur
             git add PKGBUILD .SRCINFO
             git commit -m "${AUR_PACKAGE} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
-            GIT_SSH_COMMAND="'"$GIT_SSH_COMMAND"'" git push origin HEAD:master
+            GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" git push origin HEAD:master
           '
