@@ -275,22 +275,28 @@ jobs:
 
       - name: Setup SSH for AUR
         run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
+          # immer ins echte root-Home schreiben, nicht ~ (das ist /github/home im Container)
+          install -d -m 700 /root/.ssh
           if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
             echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2
             exit 1
           fi
-          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          cat <<EOF > ~/.ssh/config
+          printf "%s\n" "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
+          chmod 600 /root/.ssh/aur
+
+          cat > /root/.ssh/config <<'EOF'
           Host aur.archlinux.org
             User aur
-            IdentityFile ~/.ssh/aur
+            IdentityFile /root/.ssh/aur
             IdentitiesOnly yes
             StrictHostKeyChecking accept-new
           EOF
-          chmod 600 ~/.ssh/config
+          chmod 600 /root/.ssh/config
+
+      - name: Verify SSH setup
+        run: |
+          ls -l /root/.ssh
+          ssh -F /root/.ssh/config -o BatchMode=yes -T aur@aur.archlinux.org || true
 
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -335,7 +341,7 @@ jobs:
 
       - name: Clone AUR repo
         env:
-          GIT_SSH_COMMAND: ssh -F ~/.ssh/config
+          GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
           git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
 
@@ -355,7 +361,7 @@ jobs:
       - name: Commit and push to AUR
         working-directory: /tmp/aur
         env:
-          GIT_SSH_COMMAND: ssh -F ~/.ssh/config
+          GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
           git add PKGBUILD .SRCINFO
           git commit -m "${{ env.AUR_PACKAGE }} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
