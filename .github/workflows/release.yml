@@ -339,35 +339,53 @@ jobs:
           echo "x64sum=$(sha256sum /tmp/artifacts/podliner-linux-x64.tar.gz   | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
 
-      - name: Clone AUR repo
+      - name: Create unprivileged user for AUR work
+        run: |
+          useradd -m builder
+          # SSH config & key liegen im root-Home; für git-over-ssh reicht GIT_SSH_COMMAND
+          # Arbeitsverzeichnis gehört dem builder:
+          install -d -m 755 /tmp/aur
+          chown -R builder:builder /tmp/aur
+
+      - name: Configure git as builder (+safe.directory)
+        env:
+          AUR_USERNAME: ${{ env.AUR_USERNAME }}
+          AUR_EMAIL: ${{ env.AUR_EMAIL }}
+        run: |
+          runuser -u builder -- git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
+          runuser -u builder -- git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
+          runuser -u builder -- git config --global --add safe.directory /tmp/aur
+
+      - name: Clone AUR repo (as builder)
         env:
           GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
-          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+          runuser -u builder -- bash -lc '
+            GIT_SSH_COMMAND="'"$GIT_SSH_COMMAND"'" git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+          '
 
-      - name: Update PKGBUILD with version, URLs, sums
+      - name: Update PKGBUILD with version, URLs, sums (as builder)
         run: |
-          cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
-          sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
-          sed -i "s|releases/download/v.*/podliner-linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
-          sed -i "s|releases/download/v.*/podliner-linux-arm64.tar.gz|${{ steps.rel.outputs.arm }}|" /tmp/aur/PKGBUILD
-          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
-          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
+          runuser -u builder -- bash -lc '
+            cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
+            sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
+            sed -i "s|releases/download/v.*/podliner-linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
+            sed -i "s|releases/download/v.*/podliner-linux-arm64.tar.gz|${{ steps.rel.outputs.arm }}|" /tmp/aur/PKGBUILD
+            sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
+            sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
+          '
 
-      - name: Create unprivileged user for makepkg
-        run: |
-          useradd -m builder
-          chown -R builder:builder /tmp/aur
-
-      - name: Generate .SRCINFO (non-root)
+      - name: Generate .SRCINFO (as builder)
         run: |
           runuser -u builder -- bash -lc 'cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO'
 
-      - name: Commit and push to AUR
-        working-directory: /tmp/aur
+      - name: Commit and push to AUR (as builder)
         env:
           GIT_SSH_COMMAND: ssh -F /root/.ssh/config
         run: |
-          git add PKGBUILD .SRCINFO
-          git commit -m "${{ env.AUR_PACKAGE }} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
-          git push origin HEAD:master
+          runuser -u builder -- bash -lc '
+            cd /tmp/aur
+            git add PKGBUILD .SRCINFO
+            git commit -m "${AUR_PACKAGE} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
+            GIT_SSH_COMMAND="'"$GIT_SSH_COMMAND"'" git push origin HEAD:master
+          '
