@@ -66,7 +66,7 @@
 ```bash
 bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install.sh)
 ```
-
+Or via the [AUR](https://aur.archlinux.org/packages/podliner-bin): `yay -S podliner-bin`
 
 ### macOS
 ```bash
