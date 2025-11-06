@@ -55,8 +55,8 @@ jobs:
           mkdir -p dist package/podliner
           cp publish/${{ matrix.rid }}/StuiPodcast.App package/podliner/podliner
           chmod +x package/podliner/podliner
-          cp LICENSE package/podliner/ 2>/dev/null || true
-          cp README.md package/podliner/ 2>/dev/null || true
+          { cp LICENSE package/podliner/ 2>/dev/null || true; }
+          { cp README.md package/podliner/ 2>/dev/null || true; }
           tar -C package -czf dist/podliner-${{ matrix.rid }}.tar.gz podliner
 
       - name: Upload artifact
@@ -161,8 +161,8 @@ jobs:
           mkdir -p dist package/podliner
           cp publish/${{ matrix.rid }}/StuiPodcast.App package/podliner/podliner
           chmod +x package/podliner/podliner
-          cp LICENSE package/podliner/ 2>/dev/null || true
-          cp README.md package/podliner/ 2>/dev/null || true
+          { cp LICENSE package/podliner/ 2>/dev/null || true; }
+          { cp README.md package/podliner/ 2>/dev/null || true; }
           tar -C package -czf dist/podliner-${{ matrix.rid }}.tar.gz podliner
 
       - name: Upload artifact
@@ -197,9 +197,9 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find gathered -type f -name 'podliner-*' -exec cp {} dist/ \;
-          cp scripts/install.ps1      dist/install.ps1
-          cp scripts/install.sh       dist/install.sh
-          cp scripts/install-macos.sh dist/install-macos.sh
+          { cp scripts/install.ps1      dist/install.ps1      2>/dev/null || true; }
+          { cp scripts/install.sh       dist/install.sh       2>/dev/null || true; }
+          { cp scripts/install-macos.sh dist/install-macos.sh 2>/dev/null || true; }
 
       - name: Generate SHA256SUMS
         shell: bash
@@ -292,7 +292,6 @@ jobs:
           gh release download "$TAG" -D /tmp/release-verify
           ( cd /tmp/release-verify && sha256sum -c SHA256SUMS )
 
-
   aur_publish:
     name: Publish AUR (podliner-bin)
     needs: publish
@@ -310,15 +309,12 @@ jobs:
           pacman -Sy --noconfirm git base-devel curl jq pacman-contrib openssh
           git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
           git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
-          ssh -V
 
       - name: Setup SSH for AUR (root home)
         run: |
+          set -euo pipefail
           install -d -m 700 /root/.ssh
-          if [ -z "${AUR_SSH_PRIVATE_KEY}" ]; then
-            echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2
-            exit 1
-          fi
+          [ -n "${AUR_SSH_PRIVATE_KEY}" ] || { echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2; exit 1; }
           printf "%s\n" "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
           chmod 600 /root/.ssh/aur
           cat > /root/.ssh/config <<'EOF'
@@ -329,14 +325,7 @@ jobs:
             StrictHostKeyChecking accept-new
           EOF
           chmod 600 /root/.ssh/config
-
-      - name: Verify SSH setup (root)
-        run: |
-          ls -l /root/.ssh
           ssh -F /root/.ssh/config -o BatchMode=yes -T aur@aur.archlinux.org || true
-
-      - name: Checkout repo
-        uses: actions/checkout@v4
 
       - name: Read release info (robust tag detection)
         id: rel
@@ -350,9 +339,7 @@ jobs:
             TAG=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
                    "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
           fi
-          if [[ -z "$TAG" || "$TAG" == "null" ]]; then
-            echo "Could not determine release tag"; exit 1
-          fi
+          [ -n "$TAG" ] && [ "$TAG" != "null" ] || { echo "Could not determine release tag"; exit 1; }
 
           VER="${TAG#v}"
           API="https://api.github.com/repos/${GH_REPO}/releases/tags/${TAG}"
@@ -360,21 +347,19 @@ jobs:
           X64=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-x64.tar.gz")   | .browser_download_url')
           ARM=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-arm64.tar.gz") | .browser_download_url')
 
-          if [[ -z "$X64" || -z "$ARM" ]]; then
-            echo "Required assets not found (podliner-linux-*.tar.gz)"; exit 1
-          fi
+          [ -n "$X64" ] && [ -n "$ARM" ] || { echo "Required assets not found (podliner-linux-*.tar.gz)"; exit 1; }
 
           echo "ver=$VER"  >> $GITHUB_OUTPUT
-          echo "x64=$X64" >> $GITHUB_OUTPUT
-          echo "arm=$ARM" >> $GITHUB_OUTPUT
+          echo "x64=$X64"  >> $GITHUB_OUTPUT
+          echo "arm=$ARM"  >> $GITHUB_OUTPUT
 
       - name: Download assets and compute SHA256
         id: sums
         run: |
           set -euo pipefail
           mkdir -p /tmp/artifacts
-          curl -L "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner-linux-x64.tar.gz
-          curl -L "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner-linux-arm64.tar.gz
+          curl -Lf "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner-linux-x64.tar.gz
+          curl -Lf "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner-linux-arm64.tar.gz
           echo "x64sum=$(sha256sum /tmp/artifacts/podliner-linux-x64.tar.gz   | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
 
@@ -396,13 +381,9 @@ jobs:
             StrictHostKeyChecking accept-new
           EOF
           chown -R builder:builder /home/builder/.ssh
-          chmod 600 /home/builder/.ssh/aur
-          chmod 600 /home/builder/.ssh/config
+          chmod 600 /home/builder/.ssh/aur /home/builder/.ssh/config
 
       - name: Configure git as builder (+safe.directory)
-        env:
-          AUR_USERNAME: ${{ env.AUR_USERNAME }}
-          AUR_EMAIL: ${{ env.AUR_EMAIL }}
         run: |
           runuser -u builder -- git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
           runuser -u builder -- git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
@@ -416,7 +397,6 @@ jobs:
           '
 
       - name: Update PKGBUILD with version, URLs, sums (as builder)
-        shell: bash
         run: |
           runuser -u builder -- bash -lc '
             set -euo pipefail
@@ -428,8 +408,10 @@ jobs:
             X64SUM="${{ steps.sums.outputs.x64sum }}"
             ARMSUM="${{ steps.sums.outputs.armsum }}"
 
+            # set pkgver
             awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
+            # pkgrel: reset on new version or bump if same
             CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
             if grep -qE "^pkgrel=" "$PKG"; then
               if [ "$CURVER" = "$NEWVER" ]; then
@@ -441,19 +423,16 @@ jobs:
               echo "pkgrel=1" >> "$PKG"
             fi
 
+            # rewrite sources + checksums coherently
             cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
-            BEGIN {
-              pv = "$" "{pkgver}"
-            }
+            BEGIN { pv = "$" "{pkgver}" }
             /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
             /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
             /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
             /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
                                      { print }
             AWK
-
-            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
-            mv "$PKG.tmp" "$PKG"
+            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
             echo "----- PKGBUILD after rewrite -----"
             sed -n "1,160p" "$PKG"
