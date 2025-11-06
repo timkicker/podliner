@@ -376,7 +376,6 @@ jobs:
             git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
           '
 
-      # --- SAFE PKGBUILD UPDATE VIA AWK (keine sed-Quotehölle) ---
       - name: Update PKGBUILD with version, URLs, sums (as builder)
         run: |
           runuser -u builder -- bash -lc '
@@ -390,11 +389,9 @@ jobs:
             ARMSUM="${{ steps.sums.outputs.armsum }}"
 
             # pkgver aktualisieren
-            awk -v ver="$NEWVER" \
-                '\''/^pkgver=/{print "pkgver=" ver; next} {print}'\'' \
-                "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            awk -v ver="$NEWVER" '\''/^pkgver=/{print "pkgver=" ver; next} {print}'\'' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
-            # Falls pkgrel existiert und Version unverändert blieb, pkgrel+=1; sonst auf 1 setzen
+            # pkgrel-Regel
             CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
             if grep -qE "^pkgrel=" "$PKG"; then
               if [ "$CURVER" = "$NEWVER" ]; then
@@ -406,23 +403,23 @@ jobs:
               echo "pkgrel=1" >> "$PKG"
             fi
 
-            # Wir brauchen ein LITERALES ${pkgver} in den lokalen Dateinamen
-            LIT_PKGVER="\\${pkgver}"
+            # QUOTING-FIX: awk-Programm single-quoten und ${pkgver} erst in awk zusammensetzen
+            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" '
+              BEGIN {
+                # erzeugt den LITERAL "${pkgver}" ohne Shell-Expansion
+                pv = "$""{pkgver}"
 
-            # komplette source_* und sha256sums_* Zeilen deterministisch ersetzen
-            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" -v litpv="$LIT_PKGVER" "
-              BEGIN{
-                sx = \"source_x86_64=(\\\"podliner-\" litpv \"-linux-x64.tar.gz::\" x64 \"\\\")\"
-                sa = \"source_aarch64=(\\\"podliner-\" litpv \"-linux-arm64.tar.gz::\" arm \"\\\")\"
-                hx = \"sha256sums_x86_64=(\\'\" x64sum \"\\')\"
-                ha = \"sha256sums_aarch64=(\\'\" armsum \"\\')\"
+                sx = "source_x86_64=(\\\"podliner-" pv "-linux-x64.tar.gz::" x64 "\\\")"
+                sa = "source_aarch64=(\\\"podliner-" pv "-linux-arm64.tar.gz::" arm "\\\")"
+                hx = "sha256sums_x86_64=(\\\"" x64sum "\\\")"
+                ha = "sha256sums_aarch64=(\\\"" armsum "\\\")"
               }
               /^source_x86_64=/      { print sx; next }
               /^source_aarch64=/     { print sa; next }
               /^sha256sums_x86_64=/  { print hx; next }
               /^sha256sums_aarch64=/ { print ha; next }
-                                      { print }
-            " "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+                                     { print }
+            ' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
           '
 
       - name: Generate .SRCINFO (as builder)
