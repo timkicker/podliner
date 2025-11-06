@@ -397,6 +397,7 @@ jobs:
           '
 
       - name: Update PKGBUILD with version, URLs, sums (as builder)
+        shell: bash
         run: |
           runuser -u builder -- bash -lc '
             set -euo pipefail
@@ -408,15 +409,13 @@ jobs:
             X64SUM="${{ steps.sums.outputs.x64sum }}"
             ARMSUM="${{ steps.sums.outputs.armsum }}"
 
-            # read old version BEFORE modifying
-            OLDVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
+            export X64 ARM X64SUM ARMSUM
 
-            # set pkgver once
             awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
 
-            # pkgrel: reset to 1 on new version, otherwise bump by 1
+            CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
             if grep -qE "^pkgrel=" "$PKG"; then
-              if [ "$OLDVER" = "$NEWVER" ]; then
+              if [ "$CURVER" = "$NEWVER" ]; then
                 awk '"'"'/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
               else
                 awk '"'"'/^pkgrel=/{print "pkgrel=1"; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
@@ -425,24 +424,22 @@ jobs:
               echo "pkgrel=1" >> "$PKG"
             fi
 
-            # normalize whitespace and rewrite sources/checksums robustly
-            awk '"'"'{gsub(/\r/,""); print}'"'"' "$PKG" > "$PKG.norm" && mv "$PKG.norm" "$PKG"
-
             cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
             BEGIN { pv = "$" "{pkgver}" }
-            # unify by matching key name only, ignore preceding spaces
-            /^[[:space:]]*source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
-            /^[[:space:]]*source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
-            /^[[:space:]]*sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
-            /^[[:space:]]*sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
-                                               { print }
+            /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
+            /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
+            /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
+            /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
+            { print }
             AWK
 
-            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
+            mv "$PKG.tmp" "$PKG"
 
             echo "----- PKGBUILD after rewrite -----"
-            sed -n "1,200p" "$PKG"
+            sed -n "1,160p" "$PKG"
           '
+
 
 
       - name: Generate .SRCINFO (as builder)
