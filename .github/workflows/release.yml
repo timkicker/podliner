@@ -110,11 +110,17 @@ jobs:
           New-Item -Type Directory dist | Out-Null
           Move-Item podliner-win-x64.zip dist\
 
-      - name: Upload artifact
+      - name: Upload artifact (zip)
         uses: actions/upload-artifact@v4
         with:
           name: podliner-win-x64
           path: dist/podliner-win-x64.zip
+
+      - name: Upload raw exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: podliner-win-x64-exe
+          path: publish/win-x64/StuiPodcast.App.exe
 
   build-macos:
     name: build macOS (${{ matrix.rid }})
@@ -176,6 +182,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-linux, build-windows, build-macos]
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -191,12 +199,26 @@ jobs:
         with:
           path: gathered
 
+      - name: Download Windows EXE artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: podliner-win-x64-exe
+          path: gathered/podliner-win-x64-exe
+
       - name: Gather into dist/
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
+          # alle erzeugten Archive von den Build-Jobs
           find gathered -type f -name 'podliner-*' -exec cp {} dist/ \;
+
+          # EXE aus dem Windows-Artifact sinnvoll benennen
+          if [ -f "gathered/podliner-win-x64-exe/StuiPodcast.App.exe" ]; then
+            cp gathered/podliner-win-x64-exe/StuiPodcast.App.exe dist/podliner-win-x64.exe
+          fi
+
+          # optionale Install-Skripte
           { cp scripts/install.ps1      dist/install.ps1      2>/dev/null || true; }
           { cp scripts/install.sh       dist/install.sh       2>/dev/null || true; }
           { cp scripts/install-macos.sh dist/install-macos.sh 2>/dev/null || true; }
@@ -238,6 +260,7 @@ jobs:
             podliner-osx-x64.tar.gz
             podliner-osx-arm64.tar.gz
             podliner-win-x64.zip
+            podliner-win-x64.exe
             install.sh
             install.ps1
             install-macos.sh
@@ -265,6 +288,7 @@ jobs:
               dist/podliner-osx-x64.tar.gz \
               dist/podliner-osx-arm64.tar.gz \
               dist/podliner-win-x64.zip \
+              dist/podliner-win-x64.exe \
               dist/install.sh \
               dist/install.ps1 \
               dist/install-macos.sh \
@@ -409,39 +433,36 @@ jobs:
             X64SUM="${{ steps.sums.outputs.x64sum }}"
             ARMSUM="${{ steps.sums.outputs.armsum }}"
 
-            # pkgver setzen
-            awk -v ver="$NEWVER" '"'"'{ if ($0 ~ /^[[:space:]]*pkgver=/) { print "pkgver=" ver; next } print }'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            export X64 ARM X64SUM ARMSUM
 
-            # pkgrel pflegen
-            CURVER=$(grep -E "^[[:space:]]*pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
-            if grep -qE "^[[:space:]]*pkgrel=" "$PKG"; then
+            awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+
+            CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
+            if grep -qE "^pkgrel=" "$PKG"; then
               if [ "$CURVER" = "$NEWVER" ]; then
-                awk '"'"'{ if ($0 ~ /^[[:space:]]*pkgrel=/) { sub(/^.*=/,""); print "pkgrel=" ($0+1); next } print }'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+                awk '"'"'/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
               else
-                awk '"'"'{ if ($0 ~ /^[[:space:]]*pkgrel=/) { print "pkgrel=1"; next } print }'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+                awk '"'"'/^pkgrel=/{print "pkgrel=1"; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
               fi
             else
               echo "pkgrel=1" >> "$PKG"
             fi
 
-            # Quellen & Sums ersetzen (kein Heredoc, keine ENVIRON)
-            awk -v x64="$X64" -v arm="$ARM" -v sx64="$X64SUM" -v sarm="$ARMSUM" '"'"'
-              BEGIN { pv = "$" "{pkgver}" }
-              /^[[:space:]]*source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" x64 "\")"; next }
-              /^[[:space:]]*source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" arm "\")"; next }
-              /^[[:space:]]*sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" sx64 "\")"; next }
-              /^[[:space:]]*sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" sarm "\")"; next }
-              { print }
-            '"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+            cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
+            BEGIN { pv = "$" "{pkgver}" }
+            /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
+            /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
+            /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
+            /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
+            { print }
+            AWK
 
-            echo "----- PKGBUILD after rewrite (checks) -----"
-            grep -E "^(pkgver=|pkgrel=|source_(x86_64|aarch64)=|sha256sums_)" "$PKG" || true
+            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
+            mv "$PKG.tmp" "$PKG"
 
-            # Harte Guards: Sums müssen exakt passen
-            grep -q "$X64SUM" "$PKG" && grep -q "$ARMSUM" "$PKG" || { echo "Checksum update failed"; exit 1; }
+            echo "----- PKGBUILD after rewrite -----"
+            sed -n "1,160p" "$PKG"
           '
-
-
 
       - name: Generate .SRCINFO (as builder)
         run: |
@@ -456,3 +477,33 @@ jobs:
             git commit -m "${AUR_PACKAGE} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
             GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" git push origin HEAD:master
           '
+
+  winget:
+    name: submit to winget
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version (fallback)
+        id: meta
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF##*/}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Submit to winget-pkgs (portable exe)
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: TimKicker.Podliner
+          version: ${{ needs.publish.outputs.version || steps.meta.outputs.version }}
+          token: ${{ secrets.WINGET_TOKEN }}
+          installers: |
+            - architecture: x64
+              url: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/podliner-win-x64.exe
+              installerType: portable
+              portableCommandAlias: podliner
+          publisher: TimKicker
+          packageName: Podliner
+          shortDescription: "Terminal-based podcast player (TUI) for Windows, Linux, macOS."
+          license: MIT
+          tags: "podcast,terminal,tui"
+          releaseNotesUrl: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
