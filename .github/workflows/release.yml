@@ -209,7 +209,7 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Create/Update GitHub Release (robust w/ retry)
+      - name: Ensure GitHub Release exists
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -221,13 +221,43 @@ jobs:
           if [[ "$TAG" == *-rc* || "$TAG" == *-beta* ]]; then
             PRE="--prerelease"
           fi
-
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --title "podliner ${VER}" \
-              --generate-notes $PRE
+            gh release create "$TAG" --title "podliner ${VER}" --generate-notes $PRE
           fi
 
+      - name: Guard assets must not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          names=(
+            podliner-linux-x64.tar.gz
+            podliner-linux-arm64.tar.gz
+            podliner-osx-x64.tar.gz
+            podliner-osx-arm64.tar.gz
+            podliner-win-x64.zip
+            install.sh
+            install.ps1
+            install-macos.sh
+            SHA256SUMS
+          )
+          existing="$(gh release view "$TAG" --json assets --jq '.assets[].name' || true)"
+          for f in "${names[@]}"; do
+            if grep -qx "$f" <<<"$existing"; then
+              echo "Asset $f exists on release $TAG. Refusing to overwrite." >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload assets to GitHub Release (no clobber, with retry)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
           upload() {
             gh release upload "$TAG" \
               dist/podliner-linux-x64.tar.gz \
@@ -238,10 +268,8 @@ jobs:
               dist/install.sh \
               dist/install.ps1 \
               dist/install-macos.sh \
-              dist/SHA256SUMS \
-              --clobber
+              dist/SHA256SUMS
           }
-
           for i in 1 2 3; do
             if upload; then
               echo "Assets uploaded."
@@ -250,9 +278,23 @@ jobs:
             echo "Release upload failed (attempt $i). Retrying..."
             sleep $((5 * i))
           done
-
           echo "Release upload failed after retries." >&2
           exit 1
+
+      - name: Verify uploaded assets match SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-verify
+          gh release download "$TAG" -D /tmp/release-verify \
+            --pattern "podliner-*.tar.gz" \
+            --pattern "podliner-win-*.zip" \
+            --pattern "install.*" \
+            --pattern "SHA256SUMS"
+          ( cd /tmp/release-verify && sha256sum -c SHA256SUMS )
 
   aur_publish:
     name: Publish AUR (podliner-bin)
@@ -404,28 +446,21 @@ jobs:
 
             cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
             BEGIN {
-              # literal ${pkgver} ohne Shell-Expansion
               pv = "$" "{pkgver}"
-
-              sx = "source_x86_64=(\\\"podliner-" pv "-linux-x64.tar.gz::" x64 "\\\")"
-              sa = "source_aarch64=(\\\"podliner-" pv "-linux-arm64.tar.gz::" arm "\\\")"
-              hx = "sha256sums_x86_64=(\\\"" x64sum "\\\")"
-              ha = "sha256sums_aarch64=(\\\"" armsum "\\\")"
             }
-            /^source_x86_64=/      { print sx; next }
-            /^source_aarch64=/     { print sa; next }
-            /^sha256sums_x86_64=/  { print hx; next }
-            /^sha256sums_aarch64=/ { print ha; next }
+            /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
+            /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
+            /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
+            /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
                                      { print }
             AWK
 
-            awk -v x64="$X64" -v arm="$ARM" -v x64sum="$X64SUM" -v armsum="$ARMSUM" -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
+            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
             mv "$PKG.tmp" "$PKG"
 
             echo "----- PKGBUILD after rewrite -----"
-            sed -n "1,120p" "$PKG"
+            sed -n "1,160p" "$PKG"
           '
-
 
       - name: Generate .SRCINFO (as builder)
         run: |
