@@ -226,3 +226,98 @@ jobs:
             dist/install-macos.sh
             dist/SHA256SUMS
 
+  aur_publish:
+    name: Publish AUR (podliner-bin)
+    needs: publish
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+    env:
+      AUR_PACKAGE: podliner-bin
+      AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+      AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install tooling
+        run: |
+          pacman -Sy --noconfirm git base-devel curl jq pacman-contrib
+          git config --global user.name  "$AUR_USERNAME"
+          git config --global user.email "$AUR_EMAIL"
+
+      - name: Setup SSH for AUR
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          cat <<EOF > ~/.ssh/config
+          Host aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Read release info (robust tag detection)
+        id: rel
+        env:
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            TAG=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                   "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+          fi
+          if [[ -z "$TAG" || "$TAG" == "null" ]]; then
+            echo "Could not determine release tag"; exit 1
+          fi
+
+          VER="${TAG#v}"
+          API="https://api.github.com/repos/${GH_REPO}/releases/tags/${TAG}"
+
+          X64=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-x64.tar.gz")   | .browser_download_url')
+          ARM=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-arm64.tar.gz") | .browser_download_url')
+
+          if [[ -z "$X64" || -z "$ARM" ]]; then
+            echo "Required assets not found (podliner-linux-*.tar.gz)"; exit 1
+          fi
+
+          echo "ver=$VER" >> $GITHUB_OUTPUT
+          echo "x64=$X64" >> $GITHUB_OUTPUT
+          echo "arm=$ARM" >> $GITHUB_OUTPUT
+
+      - name: Download assets and compute SHA256
+        id: sums
+        run: |
+          mkdir -p /tmp/artifacts
+          curl -L "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner-linux-x64.tar.gz
+          curl -L "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner-linux-arm64.tar.gz
+          echo "x64sum=$(sha256sum /tmp/artifacts/podliner-linux-x64.tar.gz   | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Clone AUR repo
+        run: git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+
+      - name: Update PKGBUILD with version, URLs, sums
+        run: |
+          cp packaging/aur/${AUR_PACKAGE}/PKGBUILD /tmp/aur/PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.rel.outputs.ver }}/" /tmp/aur/PKGBUILD
+          sed -i "s|releases/download/v.*/podliner-linux-x64.tar.gz|${{ steps.rel.outputs.x64 }}|" /tmp/aur/PKGBUILD
+          sed -i "s|releases/download/v.*/podliner-linux-arm64.tar.gz|${{ steps.rel.outputs.arm }}|" /tmp/aur/PKGBUILD
+          sed -i "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('${{ steps.sums.outputs.x64sum }}')/" /tmp/aur/PKGBUILD
+          sed -i "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('${{ steps.sums.outputs.armsum }}')/" /tmp/aur/PKGBUILD
+
+      - name: Generate .SRCINFO
+        working-directory: /tmp/aur
+        run: makepkg --printsrcinfo > .SRCINFO
+
+      - name: Commit and push to AUR
+        working-directory: /tmp/aur
+        run: |
+          git add PKGBUILD .SRCINFO
+          git commit -m "${{ env.AUR_PACKAGE }} ${{ steps.rel.outputs.ver }} (automated)"
+          git push origin HEAD:master
