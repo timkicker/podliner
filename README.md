@@ -38,7 +38,7 @@
 
 ---
 
-## Why podliner?
+## Why podliner? 
 
 - **Keyboard-first & mouse-friendly.** Full mouse support (click, select, scroll) with fast TUI feedback.
 - **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `dd` for remove from queue, `/` to search) plus concise colon-commands (`:add <url>`, `:queue`, `:play`, `:export-opml`, `:import-opml`).
