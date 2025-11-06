@@ -478,32 +478,92 @@ jobs:
             GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" git push origin HEAD:master
           '
 
+
   winget:
-    name: submit to winget
+    name: winget submit / update
     needs: publish
     runs-on: ubuntu-latest
+    env:
+      PKG_ID: TimKicker.Podliner
+      EXE_NAME: podliner-win-x64.exe
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VER: ${{ needs.publish.outputs.version }}
     steps:
-      - name: Extract version (fallback)
+      - uses: actions/checkout@v4
+
+      - name: Ensure version fallback
         id: meta
         shell: bash
         run: |
-          TAG="${GITHUB_REF##*/}"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ -z "${VER}" ] || [ "${VER}" = "null" ]; then
+            TAG="${GITHUB_REF##*/}"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Submit to winget-pkgs (portable exe)
+      - name: Check if package exists in winget-pkgs
+        id: exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests"
+          lower="$(echo "${PKG_ID}" | tr '[:upper:]' '[:lower:]')"
+          first="${lower:0:1}"
+          path="${base}/${first}/$(echo "${PKG_ID}" | tr '.' '/')/version"
+          # “version” dir is present only after first submission was merged (any version)
+          if curl -fsI "$path" >/dev/null 2>&1; then
+            echo "present=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute SHA256 of EXE from release
+        id: shasum
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://github.com/${REPO}/releases/download/${TAG}/${EXE_NAME}"
+          curl -fL "$url" -o "/tmp/${EXE_NAME}"
+          sum="$(sha256sum "/tmp/${EXE_NAME}" | awk '{print $1}')"
+          echo "sha256=${sum}" >> "$GITHUB_OUTPUT"
+          echo "url=${url}"     >> "$GITHUB_OUTPUT"
+
+      # --- INITIAL ONBOARDING PATH (first ever submission) ---
+      - name: Submit NEW package via winget-create (portable)
+        if: steps.exists.outputs.present == 'false'
+        uses: microsoft/winget-create@v2
+        with:
+          token: ${{ secrets.WINGET_TOKEN }}
+          submission-type: submit
+          package-identifier: ${{ env.PKG_ID }}
+          package-version: ${{ steps.meta.outputs.version }}
+          installers: |
+            - InstallerUrl: ${{ steps.shasum.outputs.url }}
+              InstallerSha256: ${{ steps.shasum.outputs.sha256 }}
+              InstallerType: portable
+              Architecture: x64
+              Commands:
+                - podliner
+          package-name: Podliner
+          publisher: Tim Kicker
+          short-description: Terminal-based podcast player (TUI) for Windows, Linux, macOS.
+          license: MIT
+          package-url: https://github.com/${{ env.REPO }}
+          release-notes-url: https://github.com/${{ env.REPO }}/releases/tag/${{ env.TAG }}
+
+      # --- UPDATE PATH (after first PR merged) ---
+      - name: Update existing package via winget-releaser
+        if: steps.exists.outputs.present == 'true'
         uses: vedantmgoyal9/winget-releaser@v2
         with:
-          identifier: TimKicker.Podliner
-          version: ${{ needs.publish.outputs.version || steps.meta.outputs.version }}
+          identifier: ${{ env.PKG_ID }}
+          version: ${{ steps.meta.outputs.version }}
           token: ${{ secrets.WINGET_TOKEN }}
-          installers: |
-            - architecture: x64
-              url: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/podliner-win-x64.exe
-              installerType: portable
-              portableCommandAlias: podliner
-          publisher: TimKicker
-          packageName: Podliner
-          shortDescription: "Terminal-based podcast player (TUI) for Windows, Linux, macOS."
-          license: MIT
-          tags: "podcast,terminal,tui"
-          releaseNotesUrl: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+          # look for EXE in the GitHub Release assets
+          release-repository: ${{ env.REPO }}
+          release-tag: ${{ env.TAG }}
+          installers-regex: \.(exe|msi|msix|appx)(bundle){0,1}$
+          fork-user: ${{ github.actor }}
+          max-versions-to-keep: 0
