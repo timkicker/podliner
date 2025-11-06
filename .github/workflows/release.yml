@@ -289,12 +289,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/release-verify
-          gh release download "$TAG" -D /tmp/release-verify \
-            --pattern "podliner-*.tar.gz" \
-            --pattern "podliner-win-*.zip" \
-            --pattern "install.*" \
-            --pattern "SHA256SUMS"
+          gh release download "$TAG" -D /tmp/release-verify
           ( cd /tmp/release-verify && sha256sum -c SHA256SUMS )
+
 
   aur_publish:
     name: Publish AUR (podliner-bin)
