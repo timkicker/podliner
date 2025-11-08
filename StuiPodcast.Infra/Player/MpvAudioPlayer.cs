@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -33,6 +34,16 @@ public sealed class MpvAudioPlayer : IAudioPlayer
     // ready gate: set isplaying to true only after first valid time or duration update
     private bool _ready;
 
+    // simple optional logger; stays silent unless env PODLINER_DEBUG_MPV=1
+    private static bool DebugEnabled =>
+        Environment.GetEnvironmentVariable("PODLINER_DEBUG_MPV") == "1";
+
+    private static void D(string msg)
+    {
+        if (DebugEnabled)
+            try { Trace.WriteLine($"[mpv] {msg}"); } catch { }
+    }
+
     public MpvAudioPlayer()
     {
         // mpv ipc needs unix domain sockets on linux and macos
@@ -61,45 +72,46 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
             sock = _sockPath = Path.Combine(
                 Path.GetTempPath(), $"podliner-mpv-{Environment.ProcessId}-{Environment.TickCount}.sock");
-
-            try { if (File.Exists(sock)) File.Delete(sock); } catch { }
-
-            started = StartMpvProcess(url, sock, startMs);
-            _proc = started;
-
-            StartPolling(); // timer that calls tryupdatefrommpv regularly
         }
 
-        // fire initial state change without isplaying true so ui can show loading
+        TryDeleteFile(sock);
+
+        started = StartMpvProcess(url, sock, startMs);
+        lock (_gate) { _proc = started; }
+
+        if (!WaitForIpcReady(sock, totalMs: 500))
+            D($"IPC not ready in time: {sock}");
+
+        StartPolling();
+
         FireStateChanged();
     }
 
     public void TogglePause()
     {
+        bool shouldFire = false;
         lock (_gate)
         {
-            // Optimistically toggle the playing state immediately for responsive UI
             if (_ready)
             {
                 State.IsPlaying = !State.IsPlaying;
-                FireStateChanged();
+                shouldFire = true;
             }
-            // Send the command to mpv
-            SendIpc(new { command = new object[] { "cycle", "pause" } }, bestEffort: true);
         }
+        if (shouldFire) FireStateChanged();
+
+        SendIpc(new { command = new object[] { "cycle", "pause" } }, waitResponse: false, bestEffort: true);
     }
 
     public void SeekRelative(TimeSpan delta)
     {
-        lock (_gate)
-            SendIpc(new { command = new object[] { "seek", delta.TotalSeconds, "relative" } }, bestEffort: true);
+        SendIpc(new { command = new object[] { "seek", delta.TotalSeconds, "relative" } }, waitResponse: false, bestEffort: true);
     }
 
     public void SeekTo(TimeSpan position)
     {
         var sec = position.TotalSeconds < 0 ? 0 : position.TotalSeconds;
-        lock (_gate)
-            SendIpc(new { command = new object[] { "seek", sec, "absolute" } }, bestEffort: true);
+        SendIpc(new { command = new object[] { "seek", sec, "absolute" } }, waitResponse: false, bestEffort: true);
     }
 
     public void SetVolume(int vol0to100)
@@ -108,9 +120,9 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         bool raise = false;
         lock (_gate)
         {
-            SendIpc(new { command = new object[] { "set_property", "volume", vol0to100 } }, bestEffort: true);
             if (State.Volume0_100 != vol0to100) { State.Volume0_100 = vol0to100; raise = true; }
         }
+        SendIpc(new { command = new object[] { "set_property", "volume", vol0to100 } }, waitResponse: false, bestEffort: true);
         if (raise) FireStateChanged();
     }
 
@@ -120,9 +132,9 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         bool raise = false;
         lock (_gate)
         {
-            SendIpc(new { command = new object[] { "set_property", "speed", speed } }, bestEffort: true);
             if (Math.Abs(State.Speed - speed) > 0.0001) { State.Speed = speed; raise = true; }
         }
+        SendIpc(new { command = new object[] { "set_property", "speed", speed } }, waitResponse: false, bestEffort: true);
         if (raise) FireStateChanged();
     }
 
@@ -133,11 +145,17 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         {
             if (_proc != null || !string.IsNullOrEmpty(_sockPath))
             {
-                StopInternal_NoEvents();
-                if (State.IsPlaying) { State.IsPlaying = false; raise = true; }
+                raise = State.IsPlaying;
             }
         }
-        if (raise) FireStateChanged();
+
+        StopInternal_NoEvents(); 
+
+        if (raise)
+        {
+            lock (_gate) { State.IsPlaying = false; }
+            FireStateChanged();
+        }
     }
 
     public void Dispose()
@@ -148,7 +166,7 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
     #endregion
 
-    #region helpers
+    #region helpers: process / start / stop
 
     private Process StartMpvProcess(string url, string sockPath, long? startMs)
     {
@@ -156,16 +174,25 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         {
             FileName = "mpv",
             UseShellExecute = false,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
+            RedirectStandardError = false,
+            RedirectStandardOutput = false,
+            RedirectStandardInput = false,
+            CreateNoWindow = true
         };
 
-        // base args for quiet deterministic start
+        // deterministic, terminal-safe start (no configs, no terminal, no window)
+        psi.ArgumentList.Add("--no-config");                 // ignore user configs & scripts
         psi.ArgumentList.Add("--no-video");
-        psi.ArgumentList.Add("--really-quiet");
-        psi.ArgumentList.Add("--terminal=no");
-        psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
+        psi.ArgumentList.Add("--no-terminal");               // don't touch TTY
+        psi.ArgumentList.Add("--input-terminal=no");         // never read from terminal
+        psi.ArgumentList.Add("--input-default-bindings=no"); // disable key bindings
+        psi.ArgumentList.Add("--input-conf=/dev/null");      // no input config
+        psi.ArgumentList.Add("--force-window=no");           // no GUI window
+        psi.ArgumentList.Add("--idle=no");
         psi.ArgumentList.Add("--keep-open=no");
+        psi.ArgumentList.Add("--really-quiet");
+        psi.ArgumentList.Add("--msg-level=all=no");          // suppress logs to stdio completely
+        psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
 
         // optional start offset hint
         if (startMs is long ms && ms > 0)
@@ -173,15 +200,17 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
         psi.ArgumentList.Add(url);
 
+        D($"start mpv: {string.Join(" ", psi.ArgumentList)}");
+
         var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
         p.Exited += (_, __) =>
         {
             bool raise = false;
             lock (_gate)
             {
-                // on exit set not playing immediately
                 if (State.IsPlaying) { State.IsPlaying = false; raise = true; }
             }
+            D("mpv exited");
             if (raise) FireStateChanged();
         };
         p.Start();
@@ -190,10 +219,92 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
     private void StartPolling()
     {
-        // light polling period; first tick after short delay so socket exists
         _poll = new Timer(_ => { try { TryUpdateFromMpv(); } catch { } },
                           null, dueTime: 250, period: 500);
     }
+
+    private void StopInternal_NoEvents()
+    {
+        try { _poll?.Dispose(); } catch { }
+        _poll = null;
+
+        Process? proc;
+        string sock;
+        lock (_gate)
+        {
+            proc = _proc;
+            sock = _sockPath;
+        }
+
+        try { SendIpc(new { command = new object[] { "quit" } }, waitResponse: false, bestEffort: true); } catch { }
+
+        try
+        {
+            if (proc is { HasExited: false })
+            {
+                if (!proc.WaitForExit(250))
+                {
+                    D("mpv still running after 250ms, killing...");
+                    try { proc.Kill(true); } catch { }
+                }
+            }
+        }
+        catch { }
+
+        try { proc?.Dispose(); } catch { }
+
+        lock (_gate)
+        {
+            _proc = null;
+            _sockPath = "";
+            _ready = false;
+        }
+
+        TryDeleteFile(sock);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                D($"unlink: {path}");
+            }
+        }
+        catch { }
+    }
+
+    private static bool WaitForIpcReady(string sock, int totalMs)
+    {
+        if (string.IsNullOrEmpty(sock)) return false;
+        var deadline = Environment.TickCount64 + totalMs;
+
+        while (Environment.TickCount64 < deadline)
+        {
+            try
+            {
+                using var s = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+                {
+                    ReceiveTimeout = 100,
+                    SendTimeout = 100
+                };
+                s.Connect(new UnixDomainSocketEndPoint(sock));
+                return true;
+            }
+            catch
+            {
+                Thread.Sleep(50);
+            }
+        }
+        return false;
+    }
+
+    #endregion
+
+    #region helpers: state polling
 
     // read time and duration via ipc and update state
     // on first successful read switch to playing via the ready gate
@@ -273,51 +384,81 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         return default;
     }
 
+    #endregion
+
+    #region helpers: ipc
+
     private string? SendIpc(object payload, bool waitResponse = false, bool bestEffort = false)
     {
         string sock;
         lock (_gate) sock = _sockPath;
         if (string.IsNullOrEmpty(sock)) return null;
 
+        const int connectTimeoutMs = 200;
+        const int retries = 2;
+
+        for (int attempt = 0; attempt < retries; attempt++)
+        {
+            try
+            {
+                using var s = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                s.ReceiveTimeout = 300;
+                s.SendTimeout = 300;
+
+                if (!ConnectWithTimeout(s, new UnixDomainSocketEndPoint(sock), connectTimeoutMs))
+                    throw new SocketException((int)SocketError.TimedOut);
+
+                var json = JsonSerializer.Serialize(payload) + "\n";
+                var bytes = Encoding.UTF8.GetBytes(json);
+                s.Send(bytes);
+
+                if (!waitResponse) return null;
+
+                var buf = new byte[4096];
+                var n = s.Receive(buf);
+                return n > 0 ? Encoding.UTF8.GetString(buf, 0, n) : null;
+            }
+            catch (SocketException se)
+            {
+                D($"ipc connect/send failed ({se.SocketErrorCode}), attempt {attempt + 1}/{retries} sock={sock}");
+                if (attempt + 1 < retries)
+                {
+                    TryDeleteFile(sock);
+                    Thread.Sleep(50);
+                    continue;
+                }
+                if (bestEffort) return null;
+                throw;
+            }
+            catch (Exception ex)
+            {
+                D($"ipc error: {ex.GetType().Name}: {ex.Message}");
+                if (bestEffort) return null;
+                throw;
+            }
+        }
+        return null;
+    }
+
+    private static bool ConnectWithTimeout(Socket s, EndPoint ep, int timeoutMs)
+    {
         try
         {
-            using var s = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            s.Connect(new UnixDomainSocketEndPoint(sock));
-
-            var json = JsonSerializer.Serialize(payload) + "\n";
-            var bytes = Encoding.UTF8.GetBytes(json);
-            s.Send(bytes);
-
-            if (!waitResponse) return null;
-
-            s.ReceiveTimeout = 300;
-            var buf = new byte[4096];
-            var n = s.Receive(buf);
-            return n > 0 ? Encoding.UTF8.GetString(buf, 0, n) : null;
+            var t = s.ConnectAsync(ep);
+            if (t.Wait(timeoutMs)) return true;
+            try { s.Close(); } catch { }
+            return false;
         }
         catch
         {
-            if (bestEffort) return null;
+            try { s.Close(); } catch { }
             throw;
         }
     }
 
-    private void StopInternal_NoEvents()
-    {
-        try { _poll?.Dispose(); } catch { }
-        _poll = null;
+    #endregion
 
-        try { SendIpc(new { command = new object[] { "quit" } }, bestEffort: true); } catch { }
-        try { if (_proc is { HasExited: false }) _proc.Kill(true); } catch { }
-        try { _proc?.Dispose(); } catch { }
-        _proc = null;
-
-        var sock = _sockPath;
-        _sockPath = "";
-        try { if (!string.IsNullOrEmpty(sock) && File.Exists(sock)) File.Delete(sock); } catch { }
-
-        _ready = false;
-    }
+    #region helpers: ui
 
     private void FireStateChanged()
     {
@@ -327,3 +468,4 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
     #endregion
 }
+

@@ -107,7 +107,10 @@ jobs:
       - name: Prepare dist (zip + exe)
         shell: pwsh
         run: |
-          New-Item -Type Directory package\podliner | Out-Null
+          New-Item -Type Directory package\podliner -Force | Out-Null
+          # Raw exe for winget:
+          Copy-Item publish\win-x64\StuiPodcast.App.exe dist\podliner-win-x64.exe
+          # Zip (optional for users):
           Copy-Item publish\win-x64\StuiPodcast.App.exe package\podliner\podliner.exe
           If (Test-Path LICENSE) { Copy-Item LICENSE package\podliner\ }
           If (Test-Path README.md) { Copy-Item README.md package\podliner\ }
