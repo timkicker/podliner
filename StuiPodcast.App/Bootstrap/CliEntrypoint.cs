@@ -14,6 +14,8 @@ sealed class CliEntrypoint
         public bool Offline;
         public bool Ascii;
         public string? LogLevel;
+        public string? LogDir;      
+        public bool NoFileLogs;     
         public bool ShowVersion;
         public bool ShowHelp;
     }
@@ -69,6 +71,14 @@ sealed class CliEntrypoint
 
                 case "--log-level":
                     if (i + 1 < args.Length) o.LogLevel = args[++i].Trim().ToLowerInvariant();
+                    break;
+
+                case "--log-dir":
+                    if (i + 1 < args.Length) o.LogDir = args[++i].Trim();
+                    break;
+
+                case "--no-file-logs":
+                    o.NoFileLogs = true;
                     break;
             }
         }
