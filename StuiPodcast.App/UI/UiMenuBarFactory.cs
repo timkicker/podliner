@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Terminal.Gui;
-using StuiPodcast.App; // for HelpCatalog & enums
+using StuiPodcast.App;
 
 namespace StuiPodcast.App.UI
 {
@@ -23,8 +23,8 @@ namespace StuiPodcast.App.UI
             Action         BackFromDetails,
             Action         JumpNextUnplayed,
             Action         JumpPrevUnplayed,
-            Action         ShowCommand,        // ":" (empty)
-            Action<string> ShowCommandSeeded,  // ":" with seed, e.g. ":seek "
+            Action         ShowCommand,        
+            Action<string> ShowCommandSeeded,  
             Action         ToggleTheme
         );
 

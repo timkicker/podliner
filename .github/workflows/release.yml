@@ -302,6 +302,169 @@ jobs:
           gh release download "$TAG" -D /tmp/release-verify
           ( cd /tmp/release-verify && sha256sum -c SHA256SUMS )
 
+
+  aur_publish:
+    name: submit AUR
+    needs: publish
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+    env:
+      AUR_PACKAGE: podliner-bin
+      AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+      AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Install tooling
+        run: |
+          pacman -Sy --noconfirm git base-devel curl jq pacman-contrib openssh
+          git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
+          git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
+
+      - name: Setup SSH for AUR (root home)
+        run: |
+          set -euo pipefail
+          install -d -m 700 /root/.ssh
+          [ -n "${AUR_SSH_PRIVATE_KEY}" ] || { echo "AUR_SSH_PRIVATE_KEY is empty (missing secret?)" >&2; exit 1; }
+          printf "%s\n" "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
+          chmod 600 /root/.ssh/aur
+          cat > /root/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile /root/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chmod 600 /root/.ssh/config
+          ssh -F /root/.ssh/config -o BatchMode=yes -T aur@aur.archlinux.org || true
+
+      - name: Read release info (robust tag detection)
+        id: rel
+        env:
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
+            TAG=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                   "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+          fi
+          [ -n "$TAG" ] && [ "$TAG" != "null" ] || { echo "Could not determine release tag"; exit 1; }
+
+          VER="${TAG#v}"
+          API="https://api.github.com/repos/${GH_REPO}/releases/tags/${TAG}"
+
+          X64=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-x64.tar.gz")   | .browser_download_url')
+          ARM=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-arm64.tar.gz") | .browser_download_url')
+
+          [ -n "$X64" ] && [ -n "$ARM" ] || { echo "Required assets not found (podliner-linux-*.tar.gz)"; exit 1; }
+
+          echo "ver=$VER"  >> $GITHUB_OUTPUT
+          echo "x64=$X64"  >> $GITHUB_OUTPUT
+          echo "arm=$ARM"  >> $GITHUB_OUTPUT
+
+      - name: Download assets and compute SHA256
+        id: sums
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/artifacts
+          curl -Lf "${{ steps.rel.outputs.x64 }}" -o /tmp/artifacts/podliner-linux-x64.tar.gz
+          curl -Lf "${{ steps.rel.outputs.arm }}" -o /tmp/artifacts/podliner-linux-arm64.tar.gz
+          echo "x64sum=$(sha256sum /tmp/artifacts/podliner-linux-x64.tar.gz   | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "armsum=$(sha256sum /tmp/artifacts/podliner-linux-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Create unprivileged user for makepkg
+        run: |
+          useradd -m builder
+          install -d -m 755 /tmp/aur
+          chown -R builder:builder /tmp/aur
+
+      - name: Prepare SSH for builder
+        run: |
+          install -d -m 700 /home/builder/.ssh
+          cp /root/.ssh/aur /home/builder/.ssh/aur
+          cat > /home/builder/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            User aur
+            IdentityFile /home/builder/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+          EOF
+          chown -R builder:builder /home/builder/.ssh
+          chmod 600 /home/builder/.ssh/aur /home/builder/.ssh/config
+
+      - name: Configure git as builder (+safe.directory)
+        run: |
+          runuser -u builder -- git config --global user.name  "${AUR_USERNAME:-podliner-bot}"
+          runuser -u builder -- git config --global user.email "${AUR_EMAIL:-actions@users.noreply.github.com}"
+          runuser -u builder -- git config --global --add safe.directory /tmp/aur
+
+      - name: Clone AUR repo (as builder)
+        run: |
+          runuser -u builder -- bash -lc '
+            GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" \
+            git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur
+          '
+
+      - name: Update PKGBUILD with version, URLs, sums (as builder)
+        shell: bash
+        run: |
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            PKG=/tmp/aur/PKGBUILD
+
+            NEWVER="${{ steps.rel.outputs.ver }}"
+            X64="${{ steps.rel.outputs.x64 }}"
+            ARM="${{ steps.rel.outputs.arm }}"
+            X64SUM="${{ steps.sums.outputs.x64sum }}"
+            ARMSUM="${{ steps.sums.outputs.armsum }}"
+
+            export X64 ARM X64SUM ARMSUM
+
+            awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+
+            CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
+            if grep -qE "^pkgrel=" "$PKG"; then
+              if [ "$CURVER" = "$NEWVER" ]; then
+                awk '"'"'/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+              else
+                awk '"'"'/^pkgrel=/{print "pkgrel=1"; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+              fi
+            else
+              echo "pkgrel=1" >> "$PKG"
+            fi
+
+            cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
+            BEGIN { pv = "$" "{pkgver}" }
+            /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
+            /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
+            /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
+            /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
+            { print }
+            AWK
+
+            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
+            mv "$PKG.tmp" "$PKG"
+
+            echo "----- PKGBUILD after rewrite -----"
+            sed -n "1,160p" "$PKG"
+          '
+
+      - name: Generate .SRCINFO (as builder)
+        run: |
+          runuser -u builder -- bash -lc 'cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO'
+
+      - name: Commit and push to AUR (as builder)
+        run: |
+          runuser -u builder -- bash -lc '
+            set -euo pipefail
+            cd /tmp/aur
+            git add PKGBUILD .SRCINFO
+            git commit -m "${AUR_PACKAGE} ${{ steps.rel.outputs.ver }} (automated)" || echo "No changes to commit"
+            GIT_SSH_COMMAND="ssh -F /home/builder/.ssh/config" git push origin HEAD:master
+          '
+
   # --------- OPTIONAL: first-time creation of the winget package ----------
   winget-bootstrap:
     name: bootstrap winget (one-time)
@@ -335,7 +498,7 @@ jobs:
           package_name: Podliner
           publisher: TimKicker
           short_description: Terminal-based podcast player (TUI).
-          license: MIT
+          license: GPLv3
 
   # --------- Regular winget update after each release tag ----------
   submit-to-winget:

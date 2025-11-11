@@ -73,7 +73,14 @@ Or via the [AUR](https://aur.archlinux.org/packages/podliner-bin): `yay -S podli
 bash <(curl -fsSL https://github.com/timkicker/podliner/releases/latest/download/install-macos.sh)
 ```
 
-### Windows (PowerShell)
+### Windows (Powershell)
+
+Via [winget](https://winstall.app/apps/TimKicker.Podliner):
+```powershell
+winget install --id=TimKicker.Podliner  -e
+```
+
+Via installer:
 ```powershell
 irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 | iex
 ```

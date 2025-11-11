@@ -2,8 +2,6 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using Terminal.Gui;
-// Falls HelpCatalog im Namespace StuiPodcast.App liegt, ist kein extra using nötig.
-// Wenn dein HelpCatalog-Enum/Typen in Core liegen, lass das using unten stehen.
 using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI
