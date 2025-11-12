@@ -24,7 +24,7 @@ namespace StuiPodcast.Infra.Opml
         // if marked duplicate, points to the existing feed when available
         public Feed? ExistingMatch { get; init; }
 
-        // true if a title update is recommended (only when planner was built with updateTitles=true)
+        // true if a title update is recommended (only when planner was built with updatetitles=true)
         public bool UpdateTitleRecommended { get; init; }
     }
 
@@ -36,7 +36,7 @@ namespace StuiPodcast.Infra.Opml
         public int DuplicateCount { get; init; }
         public int InvalidCount   { get; init; }
 
-        // entries with status new (ready for AddFeedAsync)
+        // entries with status new (ready for addfeedasync)
         public IEnumerable<OpmlImportItem> NewItems() => Items.Where(i => i.Status == OpmlImportStatus.New);
 
         // entries detected as duplicates
@@ -45,7 +45,7 @@ namespace StuiPodcast.Infra.Opml
         // formally invalid entries
         public IEnumerable<OpmlImportItem> InvalidItems() => Items.Where(i => i.Status == OpmlImportStatus.Invalid);
 
-        // title update candidates (only set when updateTitles=true)
+        // title update candidates (only set when updatetitles=true)
         public IEnumerable<OpmlImportItem> TitleUpdateCandidates() => Items.Where(i => i.UpdateTitleRecommended);
     }
 
@@ -56,7 +56,7 @@ namespace StuiPodcast.Infra.Opml
         // - new: xmlurl valid and not in existing list and not seen earlier in the same opml
         // - duplicate: already in library or appears multiple times in the same opml
         // - invalid: xmlurl missing or invalid
-        // when updateTitles=true, plan marks sensible candidates via UpdateTitleRecommended
+        // when updatetitles=true, plan marks sensible candidates via updatetitlerecommended
         public static OpmlImportPlan Plan(OpmlDocument doc, IReadOnlyList<Feed> existingFeeds, bool updateTitles = false)
         {
             if (doc == null) throw new ArgumentNullException(nameof(doc));
@@ -77,7 +77,7 @@ namespace StuiPodcast.Infra.Opml
                     {
                         Entry = entry,
                         Status = OpmlImportStatus.Invalid,
-                        Reason = "invalid xmlUrl"
+                        Reason = "invalid xmlurl"
                     });
                     continue;
                 }
@@ -105,7 +105,7 @@ namespace StuiPodcast.Infra.Opml
                     {
                         Entry = entry,
                         Status = OpmlImportStatus.Duplicate,
-                        Reason = "duplicate in OPML"
+                        Reason = "duplicate in opml"
                     });
                     continue;
                 }
@@ -122,9 +122,9 @@ namespace StuiPodcast.Infra.Opml
             return new OpmlImportPlan
             {
                 Items = items,
-                NewCount       = items.Count(i => i.Status == OpmlImportStatus.New),
+                NewCount = items.Count(i => i.Status == OpmlImportStatus.New),
                 DuplicateCount = items.Count(i => i.Status == OpmlImportStatus.Duplicate),
-                InvalidCount   = items.Count(i => i.Status == OpmlImportStatus.Invalid)
+                InvalidCount = items.Count(i => i.Status == OpmlImportStatus.Invalid)
             };
         }
 
@@ -179,9 +179,9 @@ namespace StuiPodcast.Infra.Opml
             return null;
         }
 
-        // canonicalize url similar to OpmlEntry.CanonicalUrl
+        // canonicalize url similar to opmlentry.canonicalurl
         // trim, absolute uri, lowercase host, remove fragment, keep scheme
-        private static string CanonicalizeUrl(string raw)
+        static string CanonicalizeUrl(string raw)
         {
             raw = raw?.Trim() ?? "";
             if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return raw;
@@ -191,10 +191,10 @@ namespace StuiPodcast.Infra.Opml
                 Host = uri.Host.ToLowerInvariant(),
                 Fragment = string.Empty
             };
-            return ub.Uri.ToString();
+            return ub.Uri.ToString(); // query remains preserved
         }
 
-        // whether a title update would be useful when updateTitles=true
+        // whether a title update would be useful when updatetitles=true
         // entry has a title and existing title is missing or different (trim and case-insensitive)
         private static bool ShouldUpdateTitle(Feed existing, OpmlEntry entry)
         {
