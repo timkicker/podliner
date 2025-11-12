@@ -523,6 +523,6 @@ jobs:
           version: ${{ steps.meta.outputs.version }}
           token: ${{ secrets.WINGET_GITHUB_TOKEN }}
           installers-regex: '\.(exe|msi|msix|appx)(bundle)?$'
-          release-repository: ${{ github.repository }}
+          release-repository: podliner
           release-tag: ${{ github.ref_name }}
           fork-user: timkicker
