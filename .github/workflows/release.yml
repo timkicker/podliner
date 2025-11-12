@@ -107,14 +107,18 @@ jobs:
       - name: Prepare dist (zip + exe)
         shell: pwsh
         run: |
-          New-Item -Type Directory package\podliner -Force | Out-Null
-          # Raw exe for winget:
+          New-Item -Type Directory -Path dist -Force | Out-Null
+          New-Item -Type Directory -Path package\podliner -Force | Out-Null
+
+          # Raw exe for winget + Release-Asset
           Copy-Item publish\win-x64\StuiPodcast.App.exe dist\podliner-win-x64.exe
-          # Zip (optional for users):
+
+          # Optionales Zip (exe + Lizenz/Readme)
           Copy-Item publish\win-x64\StuiPodcast.App.exe package\podliner\podliner.exe
-          If (Test-Path LICENSE) { Copy-Item LICENSE package\podliner\ }
-          If (Test-Path README.md) { Copy-Item README.md package\podliner\ }
-          Compress-Archive -Path package\podliner\* -DestinationPath dist\podliner-win-x64.zip
+          if (Test-Path LICENSE) { Copy-Item LICENSE package\podliner\ }
+          if (Test-Path README.md) { Copy-Item README.md package\podliner\ }
+          Compress-Archive -Path package\podliner\* -DestinationPath dist\podliner-win-x64.zip -Force
+
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
