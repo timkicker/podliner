@@ -68,7 +68,8 @@ internal class Program
             }
         }
 
-        LoggerSetup.Configure(cli.LogLevel, _memLog);
+       
+        LoggerSetup.Configure(cli.LogLevel, cli.LogDir, cli.NoFileLogs, _memLog);
         CmdErrorHandlers.Install();
 
         // bootstrap: paths, stores, facade, downloader
@@ -321,6 +322,7 @@ internal class Program
     // print simple help
     private static void PrintHelp()
     {
+        // keep help short and readable
         PrintVersion();
         Console.WriteLine();
         Console.WriteLine("Usage: podliner [options]");
@@ -336,7 +338,10 @@ internal class Program
         Console.WriteLine("  --offline");
         Console.WriteLine("  --ascii");
         Console.WriteLine("  --log-level <debug|info|warn|error>");
+        Console.WriteLine("  --log-dir <DIR>          write logs to DIR");
+        Console.WriteLine("  --no-file-logs           disable file logging (stdout only)");
     }
+ 
 
     // try to restore terminal state on exit
     private static void ResetHard()
