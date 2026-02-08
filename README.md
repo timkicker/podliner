@@ -134,18 +134,20 @@ Most podcast players support **OPML** export/import.
 
 
 ## Configuration & data
-> Replace with the exact paths from code before publishing.
 
-- **Config**:  
-  - Linux: `~/.config/podliner/`  
-  - macOS: `~/Library/Application Support/podliner/`  
+- **Config**:
+  - Linux: `$XDG_CONFIG_HOME/podliner/` (fallback: `~/.config/podliner/`)
+  - macOS: `$XDG_CONFIG_HOME/podliner/` (fallback: `~/.config/podliner/`)
   - Windows: `%APPDATA%\podliner\`
-- **Logs**: next to the executable under `logs/` (file pattern `podliner-.log`)  
-  Example: `…/podliner/logs/podliner-YYYYMMDD.log`
+- **Logs**:
+  - Linux: `$XDG_STATE_HOME/podliner/logs/` (fallback: `~/.local/state/podliner/logs/`)
+  - Windows: `%LOCALAPPDATA%\podliner\logs\`
+  - File pattern: `podliner-.log` (daily)
+  - Example: `…/podliner/logs/podliner-YYYYMMDD.log`
 - **Downloads**: {{IF APPLICABLE: path or “same as configured in app”}}
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
-> Back up `appdata.json` (or your config filename) to migrate settings to another machine.
+> Back up `appsettings.json` and `library.json` to migrate settings and library to another machine.
 
 
 ## Audio engines

@@ -1,0 +1,144 @@
+.TH PODLINER 1 "2025-11-18" "podliner 1.1.6" "User Commands"
+.SH NAME
+podliner \- terminal podcast player
+.SH SYNOPSIS
+.B podliner
+[\-h|\-\-help] [\-V|\-\-version]
+[\-\-engine ENGINE]
+[\-\-theme THEME]
+[\-\-feed URL]
+[\-\-search QUERY]
+[\-\-opml\-import FILE [\-\-import\-mode MODE]]
+[\-\-opml\-export FILE]
+[\-\-offline]
+[\-\-ascii]
+[\-\-log\-level LEVEL]
+.SH DESCRIPTION
+.B podliner
+is a cross\-platform terminal podcast player. It supports local/remote playback, a download queue, OPML import/export, and a keyboard\-driven TUI.
+
+In the TUI, press
+.B :
+to open the command palette. Type
+.B :help
+to see commands, keys, and engine capabilities.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Show help and exit.
+.TP
+.B \-V, \-\-version
+Show version and exit.
+.TP
+.B \-\-engine ENGINE
+Preferred audio engine. Canonical values:
+.B auto
+|
+.B vlc
+|
+.B mpv
+|
+.B ffplay
+|
+.B mediafoundation
+(Windows only).
+.TP
+.B \-\-theme THEME
+UI theme. Common values:
+.B base
+|
+.B accent
+(menu accent)
+|
+.B native
+|
+.B auto .
+.TP
+.B \-\-feed URL
+Preselect a feed at startup.
+.TP
+.B \-\-search QUERY
+Apply a search filter at startup.
+.TP
+.B \-\-opml\-import FILE
+Import feeds from OPML. Use with
+.B \-\-import\-mode
+.
+.TP
+.B \-\-import\-mode MODE
+OPML import behavior:
+.B add
+(append) or
+.B replace
+(clear and import).
+.TP
+.B \-\-opml\-export FILE
+Export current feeds to OPML.
+.TP
+.B \-\-offline
+Start in offline mode (no network fetches).
+.TP
+.B \-\-ascii
+Force ASCII glyphs (disable Unicode box drawing).
+.TP
+.B \-\-log\-level LEVEL
+Logging level:
+.B debug
+|
+.B info
+|
+.B warn
+|
+.B error .
+.SH COMMANDS (IN TUI)
+Type
+.B :
+then a command. Examples:
+.PP
+.B :refresh
+(update feeds),
+.B :downloads
+(show queue),
+.B :engine mpv
+(switch engine),
+.B :q
+(quit).
+Run
+.B :help
+for the full catalog.
+.SH FILES
+Podliner follows XDG directories.
+.TP
+.B $XDG_CONFIG_HOME/podliner/appsettings.json
+User preferences (theme, layout, UI options).
+.TP
+.B $XDG_DATA_HOME/podliner/library/library.json
+Library (feeds, episodes, queue, history).
+.TP
+.B $XDG_DATA_HOME/podliner/downloads/
+Downloaded audio files (outside the library database).
+.PP
+If variables are unset, defaults are
+.B ~/.config
+and
+.B ~/.local/share
+respectively.
+.SH ENVIRONMENT
+.TP
+.B PODLINER_GLYPHS
+Set to
+.B ascii
+to force ASCII glyphs.
+.TP
+.B http_proxy, https_proxy, no_proxy
+Standard proxy variables honored by HTTP requests.
+.SH EXIT STATUS
+Returns 0 on success; non\-zero on failure.
+.SH BUGS
+Issues and feature requests are welcome on the project’s issue tracker.
+.SH AUTHORS
+Podliner authors and contributors.
+.SH SEE ALSO
+.BR man (1),
+.BR groff (1)
+
