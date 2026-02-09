@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StuiPodcast.Infra", "StuiPo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StuiPodcast.App", "StuiPodcast.App\StuiPodcast.App.csproj", "{D6AD20E7-9400-42BC-B302-918081A3E639}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StuiPodcast.App.Tests", "tests\StuiPodcast.App.Tests\StuiPodcast.App.Tests.csproj", "{D940EFBD-2419-4A38-9008-C7796AD3636D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StuiPodcast.Infra.Tests", "tests\StuiPodcast.Infra.Tests\StuiPodcast.Infra.Tests.csproj", "{78D30B96-59B8-4FB2-9AB8-8F2797FE4CDC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,15 @@ Global
 		{D6AD20E7-9400-42BC-B302-918081A3E639}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D6AD20E7-9400-42BC-B302-918081A3E639}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D6AD20E7-9400-42BC-B302-918081A3E639}.Release|Any CPU.Build.0 = Release|Any CPU
-	EndGlobalSection
+	
+		{D940EFBD-2419-4A38-9008-C7796AD3636D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D940EFBD-2419-4A38-9008-C7796AD3636D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D940EFBD-2419-4A38-9008-C7796AD3636D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D940EFBD-2419-4A38-9008-C7796AD3636D}.Release|Any CPU.Build.0 = Release|Any CPU
+
+		{78D30B96-59B8-4FB2-9AB8-8F2797FE4CDC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78D30B96-59B8-4FB2-9AB8-8F2797FE4CDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78D30B96-59B8-4FB2-9AB8-8F2797FE4CDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78D30B96-59B8-4FB2-9AB8-8F2797FE4CDC}.Release|Any CPU.Build.0 = Release|Any CPU
+EndGlobalSection
 EndGlobal
