@@ -349,25 +349,22 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          if [[ ! "$TAG" =~ ^v[0-9] ]]; then
-            TAG=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-                   "https://api.github.com/repos/${GH_REPO}/releases/latest" | jq -r .tag_name)
+          repo="${GITHUB_REPOSITORY}"
+          tag="${GITHUB_REF_NAME}"
+          
+          # For tag workflows, GITHUB_REF_NAME is the tag. Fallback to git when re-running manually.
+          if [[ "${tag}" != v* ]]; then
+            tag="$(git describe --tags --abbrev=0)"
           fi
-          [ -n "$TAG" ] && [ "$TAG" != "null" ] || { echo "Could not determine release tag"; exit 1; }
-
-          VER="${TAG#v}"
-          API="https://api.github.com/repos/${GH_REPO}/releases/tags/${TAG}"
-
-          X64=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-x64.tar.gz")   | .browser_download_url')
-          ARM=$(curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" "$API" | jq -r '.assets[] | select(.name=="podliner-linux-arm64.tar.gz") | .browser_download_url')
-
-          [ -n "$X64" ] && [ -n "$ARM" ] || { echo "Required assets not found (podliner-linux-*.tar.gz)"; exit 1; }
-
-          echo "ver=$VER"  >> $GITHUB_OUTPUT
-          echo "x64=$X64"  >> $GITHUB_OUTPUT
-          echo "arm=$ARM"  >> $GITHUB_OUTPUT
-
+          
+          ver="${tag#v}"
+          x64_url="https://github.com/${repo}/releases/download/${tag}/podliner-linux-x64.tar.gz"
+          arm_url="https://github.com/${repo}/releases/download/${tag}/podliner-linux-arm64.tar.gz"
+          
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "ver=${ver}" >> "$GITHUB_OUTPUT"
+          echo "x64=${x64_url}" >> "$GITHUB_OUTPUT"
+          echo "arm=${arm_url}" >> "$GITHUB_OUTPUT"
       - name: Download assets and compute SHA256
         id: sums
         run: |
@@ -414,47 +411,61 @@ jobs:
       - name: Update PKGBUILD with version, URLs, sums (as builder)
         shell: bash
         run: |
-          runuser -u builder -- bash -lc '
-            set -euo pipefail
-            PKG=/tmp/aur/PKGBUILD
-
-            NEWVER="${{ steps.rel.outputs.ver }}"
-            X64="${{ steps.rel.outputs.x64 }}"
-            ARM="${{ steps.rel.outputs.arm }}"
-            X64SUM="${{ steps.sums.outputs.x64sum }}"
-            ARMSUM="${{ steps.sums.outputs.armsum }}"
-
-            export X64 ARM X64SUM ARMSUM
-
-            awk -v ver="$NEWVER" '"'"'/^pkgver=/{print "pkgver=" ver; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
-
-            CURVER=$(grep -E "^pkgver=" "$PKG" | head -n1 | cut -d= -f2 || true)
-            if grep -qE "^pkgrel=" "$PKG"; then
-              if [ "$CURVER" = "$NEWVER" ]; then
-                awk '"'"'/^pkgrel=/{sub(/^pkgrel=/,""); print "pkgrel=" ($0+1); next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
-              else
-                awk '"'"'/^pkgrel=/{print "pkgrel=1"; next} {print}'"'"' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
-              fi
-            else
-              echo "pkgrel=1" >> "$PKG"
-            fi
-
-            cat > /tmp/rewrite.awk <<'"'"'AWK'"'"'
-            BEGIN { pv = "$" "{pkgver}" }
-            /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" ENVIRON["X64"] "\")"; next }
-            /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" ENVIRON["ARM"] "\")"; next }
-            /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
-            /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
-            { print }
-            AWK
-
-            awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp"
-            mv "$PKG.tmp" "$PKG"
-
-            echo "----- PKGBUILD after rewrite -----"
-            sed -n "1,160p" "$PKG"
-          '
-
+          cat > /tmp/update-aur-pkgbuild.sh <<'SH'
+          set -euo pipefail
+          
+          PKG=/tmp/aur/PKGBUILD
+          NEWVER="${NEWVER:?}"
+          REPO="${REPO:?}"
+          X64SUM="${X64SUM:?}"
+          ARMSUM="${ARMSUM:?}"
+          
+          # Capture current version/release before editing
+          CURVER="$(grep -E '^pkgver=' "$PKG" | head -n1 | cut -d= -f2 || true)"
+          CURREL="$(grep -E '^pkgrel=' "$PKG" | head -n1 | cut -d= -f2 || true)"
+          CURREL="${CURREL:-0}"
+          
+          # Update pkgver
+          awk -v ver="$NEWVER" '/^pkgver=/{print "pkgver=" ver; next} {print}' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+          
+          # Update pkgrel (bump on rebuild, reset on version change)
+          if grep -qE '^pkgrel=' "$PKG"; then
+            if [ "$CURVER" = "$NEWVER" ]; then NEWREL=$((CURREL+1)); else NEWREL=1; fi
+            awk -v rel="$NEWREL" '/^pkgrel=/{print "pkgrel=" rel; next} {print}' "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+          else
+            echo "pkgrel=1" >> "$PKG"
+          fi
+          
+          # Rewrite sources to be version-dynamic (v${pkgver}) and update sums
+          export REPO X64SUM ARMSUM
+          cat > /tmp/rewrite.awk <<'AWK'
+          BEGIN {
+            pv = "$" "{pkgver}"
+            repo = ENVIRON["REPO"]
+            x64 = "https://github.com/" repo "/releases/download/v" pv "/podliner-linux-x64.tar.gz"
+            arm = "https://github.com/" repo "/releases/download/v" pv "/podliner-linux-arm64.tar.gz"
+          }
+          /^source_x86_64=/      { print "source_x86_64=(\"podliner-" pv "-linux-x64.tar.gz::" x64 "\")"; next }
+          /^source_aarch64=/     { print "source_aarch64=(\"podliner-" pv "-linux-arm64.tar.gz::" arm "\")"; next }
+          /^sha256sums_x86_64=/  { print "sha256sums_x86_64=(\"" ENVIRON["X64SUM"] "\")"; next }
+          /^sha256sums_aarch64=/ { print "sha256sums_aarch64=(\"" ENVIRON["ARMSUM"] "\")"; next }
+          { print }
+          AWK
+          
+          awk -f /tmp/rewrite.awk "$PKG" > "$PKG.tmp" && mv "$PKG.tmp" "$PKG"
+          
+          echo "----- PKGBUILD after rewrite -----"
+          sed -n "1,200p" "$PKG"
+          SH
+          chmod +x /tmp/update-aur-pkgbuild.sh
+          
+          runuser -u builder -- env \
+            NEWVER="${{ steps.rel.outputs.ver }}" \
+            REPO="$GITHUB_REPOSITORY" \
+            X64SUM="${{ steps.sums.outputs.x64sum }}" \
+            ARMSUM="${{ steps.sums.outputs.armsum }}" \
+            bash /tmp/update-aur-pkgbuild.sh
+          
       - name: Generate .SRCINFO (as builder)
         run: |
           runuser -u builder -- bash -lc 'cd /tmp/aur && makepkg --printsrcinfo > .SRCINFO'
