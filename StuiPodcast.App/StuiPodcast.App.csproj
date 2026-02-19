@@ -19,6 +19,9 @@
         <!-- Native runtimes only for Windows via NuGet.
              On Linux/macOS rely on system-installed libvlc -->
         <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+
+        <!-- D-Bus / MPRIS2: compile on all platforms, activated via runtime check -->
+        <PackageReference Include="Tmds.DBus" Version="0.9.0" />
     </ItemGroup>
 
     <PropertyGroup>

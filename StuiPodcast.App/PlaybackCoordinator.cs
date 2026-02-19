@@ -415,6 +415,32 @@ sealed class PlaybackCoordinator
 
     public PlaybackSnapshot GetLastSnapshot() => _lastSnapshot;
 
+    // Advance to the next episode (via queue or same-feed fallback)
+    public bool TryAdvanceToNext(out Episode? next)
+    {
+        if (_current == null) { next = null; return false; }
+        var found = TryFindNext(_current, out var ep);
+        next = ep;
+        return found;
+    }
+
+    // Return the episode published immediately before the current one in the feed
+    public bool TryFindPrev(out Episode? prev)
+    {
+        if (_current == null) { prev = null; return false; }
+
+        var list = _data.Episodes
+            .Where(e => e.FeedId == _current.FeedId)
+            .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
+            .ToList();
+
+        var idx = list.FindIndex(e => e.Id == _current.Id);
+        if (idx <= 0) { prev = null; return false; }
+
+        prev = list[idx - 1];
+        return true;
+    }
+
     private void FireSnapshot(PlaybackSnapshot snap)
     {
         try { SnapshotAvailable?.Invoke(snap); } catch { }

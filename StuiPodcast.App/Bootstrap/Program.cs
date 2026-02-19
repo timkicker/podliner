@@ -4,6 +4,7 @@ using Serilog;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.Mpris;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
@@ -35,6 +36,7 @@ internal class Program
     private static DownloadManager?  _downloader;
 
     private static UiShell?            _ui;
+    private static MprisService?       _mpris;
     #endregion
 
     #region services
@@ -113,6 +115,17 @@ internal class Program
 
         // apply audio player prefs
         _engineSvc.ApplyPrefsTo(_player);
+
+        // mpris2 d-bus service (linux only)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            _mpris = new MprisService(_data, _player, _playback);
+            _ = Task.Run(async () =>
+            {
+                try { await _mpris.StartAsync(); }
+                catch (Exception ex) { Log.Warning(ex, "MPRIS D-Bus unavailable"); }
+            });
+        }
 
         // ui init
         Application.Init();
@@ -238,6 +251,9 @@ internal class Program
             {
                 // ignored
             }
+
+            if (_mpris != null)
+                try { await _mpris.DisposeAsync(); } catch { }
 
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
