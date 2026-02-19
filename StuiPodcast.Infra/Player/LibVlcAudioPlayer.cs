@@ -46,7 +46,6 @@ namespace StuiPodcast.Infra.Player
                 "--input-fast-seek",
                 "--file-caching=1000",
                 "--network-caching=2000",
-                "--tcp-caching=1200",
                 "--http-reconnect"
             };
 
