@@ -1,4 +1,5 @@
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
@@ -16,11 +17,13 @@ internal sealed class CmdContext
     public Func<Task> Persist { get; }
     public DownloadManager Dlm { get; }
     public Func<string, Task>? SwitchEngine { get; }
+    public GpodderSyncService? Sync { get; }
 
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, UiShell ui, MemoryLogSink mem,
-        AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine)
+        AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine,
+        GpodderSyncService? sync = null)
     {
         AudioPlayer = audioPlayer; Playback = playback; Ui = ui; Mem = mem;
-        Data = data; Persist = persist; Dlm = dlm; SwitchEngine = switchEngine;
+        Data = data; Persist = persist; Dlm = dlm; SwitchEngine = switchEngine; Sync = sync;
     }
 }

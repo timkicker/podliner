@@ -51,24 +51,26 @@ sealed class MprisService : IAsyncDisposable
         if (changed.Count > 0)
             _obj?.NotifyPlayerPropertiesChanged(changed);
 
-        // Seeked detection: position jumped more than 2s from expected linear progress
-        if (prev.IsPlaying && snap.EpisodeId == prev.EpisodeId && prev.EpisodeId.HasValue)
-        {
-            var elapsed = snap.Timestamp - prev.Timestamp;
-            if (elapsed.TotalSeconds is > 0 and < 10)
-            {
-                var expected = prev.Position + TimeSpan.FromSeconds(elapsed.TotalSeconds * prev.Speed);
-                if (Math.Abs((snap.Position - expected).TotalSeconds) > 2.0)
-                    _obj?.NotifySeeked((long)snap.Position.TotalMicroseconds);
-            }
-        }
+        if (IsSeekDetected(prev, snap))
+            _obj?.NotifySeeked((long)snap.Position.TotalMicroseconds);
     }
 
-    private static string ToPlaybackStatus(PlaybackSnapshot snap)
+    internal static string ToPlaybackStatus(PlaybackSnapshot snap)
     {
-        if (snap.IsPlaying)         return "Playing";
+        if (snap.IsPlaying)          return "Playing";
         if (snap.EpisodeId.HasValue) return "Paused";
         return "Stopped";
+    }
+
+    internal static bool IsSeekDetected(PlaybackSnapshot prev, PlaybackSnapshot snap)
+    {
+        if (!prev.IsPlaying || snap.EpisodeId != prev.EpisodeId || !prev.EpisodeId.HasValue)
+            return false;
+        var elapsed = snap.Timestamp - prev.Timestamp;
+        if (elapsed.TotalSeconds is not (> 0 and < 10))
+            return false;
+        var expected = prev.Position + TimeSpan.FromSeconds(elapsed.TotalSeconds * prev.Speed);
+        return Math.Abs((snap.Position - expected).TotalSeconds) > 2.0;
     }
 
     public ValueTask DisposeAsync()

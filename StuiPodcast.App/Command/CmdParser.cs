@@ -78,7 +78,8 @@ namespace StuiPodcast.App.Command
 
             (":feed",         TopCommand.Feed),
             (":history",      TopCommand.History),
-            (":update",       TopCommand.Refresh)
+            (":update",       TopCommand.Refresh),
+            (":sync",         TopCommand.Sync)
         ];
 
         #region Public API

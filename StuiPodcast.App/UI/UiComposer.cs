@@ -1,6 +1,7 @@
 using System.Reflection;
 using Serilog;
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.Services;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Download;
@@ -9,7 +10,6 @@ using Terminal.Gui;
 using System.Collections.Generic;
 using System.Linq;
 using StuiPodcast.App.Bootstrap;
-using StuiPodcast.App.Services;
 
 
 namespace StuiPodcast.App.UI;
@@ -276,7 +276,8 @@ static class UiComposer
         Func<Task> save,
         Func<string, Task> engineSwitch,
         Action updateTitle,
-        Func<string, bool> hasFeedWithUrl)
+        Func<string, bool> hasFeedWithUrl,
+        GpodderSyncService? syncService = null)
     {
         // quit
         ui.QuitRequested += () =>
@@ -527,7 +528,7 @@ static class UiComposer
             if (CmdRouter.HandleDownloads(cmd, ui, data, ProgramDownloader(), save))
                 return;
 
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch, syncService);
         };
 
         // search

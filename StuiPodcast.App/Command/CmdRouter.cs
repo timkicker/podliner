@@ -2,6 +2,7 @@ using StuiPodcast.App;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
 using StuiPodcast.App.Debug;
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
@@ -21,7 +22,8 @@ static class CmdRouter
         AppData data,
         Func<Task> persist,
         DownloadManager dlm,
-        Func<string, Task>? switchEngine = null)
+        Func<string, Task>? switchEngine = null,
+        GpodderSyncService? syncService = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
@@ -44,7 +46,7 @@ static class CmdRouter
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService);
 
         // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);
@@ -75,7 +77,8 @@ internal enum TopCommand
     AddFeed, Refresh, RemoveFeed, Feed,
     History, Opml, Open, Copy,
     Write, WriteQuit, WriteQuitBang, QuitBang,
-    Search, Now, Jump, Theme
+    Search, Now, Jump, Theme,
+    Sync
 }
 #endregion
 
@@ -96,6 +99,7 @@ internal sealed class CommandDispatcher
         new CmdHistoryHandler(),
         new CmdOpmlHandler(),
         new CmdIoHandler(),
+        new CmdSyncHandler(),
         // downloads & queue via public fastpaths
     });
 

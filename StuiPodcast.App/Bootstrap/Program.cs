@@ -11,6 +11,7 @@ using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
+using StuiPodcast.Infra.Sync;
 using Terminal.Gui;
 
 namespace StuiPodcast.App.Bootstrap;
@@ -37,6 +38,8 @@ internal class Program
 
     private static UiShell?            _ui;
     private static MprisService?       _mpris;
+    private static GpodderStore?       _gpodderStore;
+    private static GpodderSyncService? _gpodder;
     #endregion
 
     #region services
@@ -109,6 +112,11 @@ internal class Program
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
         _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog);
         _feeds    = new FeedService(_data, _app);
+
+        // gpodder sync (opt-in; no-op if not configured)
+        _gpodderStore = new GpodderStore(appConfigDir);
+        _gpodderStore.Load();
+        _gpodder = new GpodderSyncService(_gpodderStore, new GpodderClient(), _data, _playback, _saver.RequestSaveAsync);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
@@ -192,7 +200,8 @@ internal class Program
             save: _saver.RequestSaveAsync,
             engineSwitch: pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data),
-            hasFeedWithUrl: HasFeedWithUrl
+            hasFeedWithUrl: HasFeedWithUrl,
+            syncService: _gpodder
         );
 
         // progress persistence tick (ui timer)
@@ -221,6 +230,14 @@ internal class Program
 
         // initial lists
         UiComposer.ShowInitialLists(_ui, _data);
+
+        // gpodder auto-sync on startup
+        if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
+            _ = Task.Run(async () =>
+            {
+                try { await _gpodder.SyncAsync(); }
+                catch (Exception ex) { Log.Warning(ex, "gPodder auto-sync startup failed"); }
+            });
 
         try { Application.Run(); }
         finally
@@ -254,6 +271,11 @@ internal class Program
 
             if (_mpris != null)
                 try { await _mpris.DisposeAsync(); } catch { }
+
+            // gpodder push-on-exit
+            if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
+                try { await _gpodder.PushAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+            _gpodder?.Dispose();
 
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
