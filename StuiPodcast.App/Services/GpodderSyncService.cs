@@ -10,7 +10,7 @@ namespace StuiPodcast.App.Services;
 sealed class GpodderSyncService : IDisposable
 {
     private readonly GpodderStore        _store;
-    private readonly GpodderClient       _client;
+    private readonly IGpodderClient      _client;
     private readonly AppData             _data;
     private readonly PlaybackCoordinator _playback;
     private readonly Func<Task>?         _saveAsync;
@@ -23,7 +23,7 @@ sealed class GpodderSyncService : IDisposable
 
     public GpodderSyncService(
         GpodderStore        store,
-        GpodderClient       client,
+        IGpodderClient      client,
         AppData             data,
         PlaybackCoordinator playback,
         Func<Task>?         saveAsync = null)

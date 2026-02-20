@@ -10,7 +10,7 @@ namespace StuiPodcast.Infra.Sync;
 // Pure HTTP client for the gPodder API v2.
 // Owns HttpClient + CookieContainer; session cookie is reused automatically.
 // Always includes Basic Auth header as a reliable fallback.
-public sealed class GpodderClient : IDisposable
+public sealed class GpodderClient : IGpodderClient
 {
     private readonly CookieContainer _cookies = new();
     private readonly HttpClient _http;
@@ -27,6 +27,12 @@ public sealed class GpodderClient : IDisposable
             UseCookies = true,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         };
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+    }
+
+    // For testing: inject a custom HttpMessageHandler.
+    public GpodderClient(HttpMessageHandler handler)
+    {
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
     }
 
