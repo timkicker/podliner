@@ -19,9 +19,11 @@ Full in-app help: `:h`
   - [Player and theme](#player-and-theme)
   - [Network and engine](#network-and-engine)
   - [OPML](#opml)
+  - [Sync (gPodder)](#sync-gpodder)
   - [Misc](#misc)
 - [Engines guide](#engines-guide)
 - [OPML import and export](#opml-import-and-export)
+- [gPodder sync](#gpodder-sync)
 
 ---
 
@@ -192,6 +194,29 @@ Full in-app help: `:h`
   `:opml export`  
   `:opml export ~/stui-feeds.opml`
 
+### Sync (gPodder)
+- `:sync login <server> <user> <pass>`
+  Log in and store credentials.
+  Example: `:sync login https://gpodder.net alice mypass`
+- `:sync logout`
+  Remove credentials and stop syncing.
+- `:sync`
+  Full sync — pull subscription changes then push pending actions.
+- `:sync push`
+  Upload subscription changes and queued play actions.
+- `:sync pull`
+  Download subscription changes from the server.
+- `:sync status`
+  Show server URL, device ID, auto-sync state, last sync time, and pending action count.
+- `:sync device <id>`
+  Set this device's ID (default: `podliner-<hostname>`).
+  Example: `:sync device my-laptop`
+- `:sync auto [on|off]`
+  Enable or disable auto-sync on startup and exit. Omit argument to toggle.
+  Examples: `:sync auto on`, `:sync auto off`
+- `:sync help`
+  Show the in-app sync guide.
+
 ### Misc
 - `:help` (alias `:h`)  
   Show this help.
@@ -275,3 +300,30 @@ FFplay (limited)
 :opml export
 :opml export ~/stui-feeds.opml
 ```
+
+---
+
+## gPodder sync
+
+Sync subscriptions and play history with any gPodder API v2 compatible server.
+
+**Supported servers**
+- [gpodder.net](https://gpodder.net) — public, free
+- Nextcloud with the gPodder app
+- Any self-hosted gPodder API v2 compatible server
+
+**Quick start**
+```
+:sync login https://gpodder.net <user> <pass>
+:sync
+:sync auto on
+```
+
+**Password storage**
+Credentials are stored in the OS keyring when available (libsecret on Linux, Keychain on macOS, Credential Store on Windows). If the keyring is unavailable, the password is saved in `gpodder.json` as a plaintext fallback with a one-time warning.
+
+**Offline behaviour**
+All sync operations check the network state first. If offline (`:net offline` or no connection), sync returns immediately. Pending play actions accumulate while offline and are uploaded on the next successful push.
+
+**Device ID**
+The default device ID is `podliner-<hostname>` (max 64 characters). Change it with `:sync device <id>` before the first login if you want a specific name on the server.

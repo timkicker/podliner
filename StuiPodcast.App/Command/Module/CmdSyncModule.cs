@@ -88,6 +88,21 @@ internal static class CmdSyncModule
                 ui.ShowOsd($"sync: auto {onOff}", 2000);
                 break;
 
+            case "help":
+                try
+                {
+                    var dlg = new Terminal.Gui.Dialog("Sync Help", 80, 28);
+                    var tv = new Terminal.Gui.TextView { ReadOnly = true, WordWrap = true, X = 0, Y = 0, Width = Terminal.Gui.Dim.Fill(), Height = Terminal.Gui.Dim.Fill() };
+                    tv.Text = StuiPodcast.App.HelpCatalog.SyncDoc;
+                    dlg.Add(tv);
+                    var ok = new Terminal.Gui.Button("OK", is_default: true);
+                    ok.Clicked += () => Terminal.Gui.Application.RequestStop();
+                    dlg.AddButton(ok);
+                    Terminal.Gui.Application.Run(dlg);
+                }
+                catch { }
+                break;
+
             case "":
                 // :sync with no args = full sync
                 ui.ShowOsd("sync: syncing…", 1500);

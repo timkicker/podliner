@@ -15,6 +15,7 @@ namespace StuiPodcast.App
         PlayerTheme,
         NetworkEngine,
         OPML,
+        Sync,
         Misc
     }
 
@@ -265,6 +266,22 @@ namespace StuiPodcast.App
                     ":opml export ~/stui-feeds.opml"
                 },
                 Category: HelpCategory.OPML, Rank: 72),
+
+            // sync
+            new(":sync", "Sync subscriptions and play history via gPodder API v2.",
+                "login <server> <user> <pass> | logout | push | pull | status | device <id> | auto [on|off] | help",
+                Examples: new[]{
+                    ":sync login https://gpodder.net alice mypass",
+                    ":sync",
+                    ":sync push",
+                    ":sync pull",
+                    ":sync status",
+                    ":sync auto on",
+                    ":sync device my-laptop",
+                    ":sync logout",
+                    ":sync help"
+                },
+                Category: HelpCategory.Sync, Rank: 75),
         };
         #endregion
 
@@ -336,6 +353,39 @@ Examples
   :opml import feeds.opml --update-titles
   :opml export
   :opml export ~/stui-feeds.opml";
+
+        public static readonly string SyncDoc =
+@"gPodder sync (API v2)
+
+Sync subscriptions and play history with any gPodder-compatible server:
+  • gpodder.net (public, free)
+  • Nextcloud with the gPodder app
+  • Any self-hosted gPodder API v2 compatible server
+
+Quick start
+  :sync login https://gpodder.net <user> <pass>   → authenticate
+  :sync                                            → push + pull (full sync)
+  :sync auto on                                    → sync on startup and exit
+
+Subcommands
+  :sync login <server> <user> <pass>   → log in and store credentials
+  :sync logout                         → remove credentials and stop syncing
+  :sync push                           → upload subscription changes and play history
+  :sync pull                           → download subscription changes
+  :sync status                         → server, device, timestamps, pending actions
+  :sync device <id>                    → set device ID (default: podliner-<hostname>)
+  :sync auto [on|off]                  → toggle auto-sync on startup and exit
+  :sync help                           → show this guide
+
+Password storage
+  Credentials are stored in the OS keyring when available
+  (libsecret on Linux, Keychain on macOS, Credential Store on Windows).
+  If the keyring is unavailable, the password is saved in gpodder.json as a fallback.
+
+Offline behaviour
+  All sync operations require a network connection. If offline (:net offline),
+  sync returns immediately with 'offline'. Pending play actions accumulate while
+  offline and are uploaded on the next push.";
         #endregion
     }
 }

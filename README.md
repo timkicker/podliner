@@ -28,6 +28,7 @@
 - [Install (stable releases)](#install-stable-releases)
 - [Quick start](#quick-start)
 - [Migrate from other players (OPML)](#migrate-from-other-players-opml)
+- [gPodder sync](#gpodder-sync)
 - [Commands (essentials)](#commands-essentials)
 - [Configuration & data](#configuration--data)
 - [Audio engines](#audio-engines)
@@ -42,6 +43,7 @@
 
 - **Keyboard-first & mouse-friendly.** Full mouse support (click, select, scroll) with fast TUI feedback.
 - **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `dd` for remove from queue, `/` to search) plus concise colon-commands (`:add <url>`, `:queue`, `:play`, `:export-opml`, `:import-opml`).
+- **Sync progress and subscriptions** Via the gpodder api
 - **Offline-ready.** Download episodes, resume where you left off, manage a queue.
 - **Easy migration.** OPML import/export to move subscriptions between players.
 - **Cross-platform.** Single-file builds for Linux, macOS, and Windows.
@@ -102,6 +104,32 @@ Most podcast players support **OPML** export/import.
   - Windows: `%APPDATA%\podliner`
 
 
+
+## gPodder sync
+
+Podliner can sync your subscriptions and play history with any **gPodder API v2** compatible server, including [gpodder.net](https://gpodder.net) (public, free), Nextcloud with the gPodder app, or any self-hosted instance.
+
+**Quick start**
+```
+:sync login https://gpodder.net <username> <password>
+:sync          ← pull + push (full sync)
+:sync auto on  ← sync automatically on startup and exit
+```
+
+**Common commands**
+
+| Command | Description |
+|---------|-------------|
+| `:sync login <server> <user> <pass>` | Log in and store credentials |
+| `:sync` | Full sync (pull then push) |
+| `:sync push` | Upload subscription changes and play history |
+| `:sync pull` | Download subscription changes |
+| `:sync status` | Show sync state, device, pending actions |
+| `:sync auto on\|off` | Toggle auto-sync |
+| `:sync logout` | Remove credentials |
+| `:sync help` | In-app guide |
+
+Credentials are stored in the OS keyring when available (libsecret on Linux, Keychain on macOS, Credential Store on Windows), with a plaintext fallback in `gpodder.json` if the keyring is unavailable.
 
 ## Commands (essentials)
 > Full help browser: `:h`  |  Full list: see [COMMANDS](./COMMANDS.md)
