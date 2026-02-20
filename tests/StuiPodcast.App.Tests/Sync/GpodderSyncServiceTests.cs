@@ -30,8 +30,11 @@ public sealed class GpodderSyncServiceTests
         store.Current.ServerUrl = "https://gpodder.net";
         store.Current.Username  = "user";
         store.Current.Password  = "pass";
-        var client = new FakeGpodderClient();
-        var svc    = new GpodderSyncService(store, client, data, pc);
+        var client  = new FakeGpodderClient();
+        // AlwaysFail=true: keyring is unavailable → password stays in store.Current.Password.
+        // This preserves all existing test assertions that check store.Current.Password.
+        var keyring = new FakeKeyring { AlwaysFail = true };
+        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
         return (svc, client, store, pc, data, dir);
     }
 
@@ -360,6 +363,88 @@ public sealed class GpodderSyncServiceTests
 
             store.Current.PendingActions.Should().HaveCount(1);
             store.Current.PendingActions[0].EpisodeUrl.Should().Be(ep.AudioUrl);
+        }
+        finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
+    }
+
+    // ── keyring integration ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LoginAsync_stores_password_in_keyring_when_available()
+    {
+        var dir    = TempDir();
+        var data   = new AppData { NetworkOnline = true };
+        var player = new FakeAudioPlayer();
+        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var store  = new GpodderStore(dir);
+        store.Load();
+        var client  = new FakeGpodderClient { LoginResult = true };
+        var keyring = new FakeKeyring();   // AlwaysFail = false → keyring works
+        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        try
+        {
+            var (ok, msg) = await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");
+
+            ok.Should().BeTrue();
+            // Password must be removed from the JSON config…
+            store.Current.Password.Should().BeNull();
+            store.Current.PasswordStoredInKeyring.Should().BeTrue();
+            // …and stored in the keyring instead.
+            keyring.Contains("alice").Should().BeTrue();
+            // No "plaintext" warning in the message.
+            msg.Should().NotContain("plaintext");
+        }
+        finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task LoginAsync_falls_back_to_plaintext_when_keyring_unavailable()
+    {
+        var dir    = TempDir();
+        var data   = new AppData { NetworkOnline = true };
+        var player = new FakeAudioPlayer();
+        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var store  = new GpodderStore(dir);
+        store.Load();
+        var client  = new FakeGpodderClient { LoginResult = true };
+        var keyring = new FakeKeyring { AlwaysFail = true };
+        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        try
+        {
+            var (ok, msg) = await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");
+
+            ok.Should().BeTrue();
+            // Password must be kept in the JSON config as fallback.
+            store.Current.Password.Should().Be("s3cr3t");
+            store.Current.PasswordStoredInKeyring.Should().BeFalse();
+            // Warning message must be present.
+            msg.Should().Contain("plaintext");
+        }
+        finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Logout_deletes_keyring_entry()
+    {
+        var dir    = TempDir();
+        var data   = new AppData { NetworkOnline = true };
+        var player = new FakeAudioPlayer();
+        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var store  = new GpodderStore(dir);
+        store.Load();
+        var client  = new FakeGpodderClient { LoginResult = true };
+        var keyring = new FakeKeyring();
+        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        try
+        {
+            await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");
+            keyring.Contains("alice").Should().BeTrue("password should be in keyring after login");
+
+            svc.Logout();
+
+            keyring.Contains("alice").Should().BeFalse("keyring entry should be removed on logout");
+            store.Current.PasswordStoredInKeyring.Should().BeFalse();
+            store.Current.Password.Should().BeNull();
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }

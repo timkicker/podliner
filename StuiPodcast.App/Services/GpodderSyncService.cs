@@ -14,6 +14,7 @@ sealed class GpodderSyncService : IDisposable
     private readonly AppData             _data;
     private readonly PlaybackCoordinator _playback;
     private readonly Func<Task>?         _saveAsync;
+    private readonly IKeyring            _keyring;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -26,17 +27,23 @@ sealed class GpodderSyncService : IDisposable
         IGpodderClient      client,
         AppData             data,
         PlaybackCoordinator playback,
-        Func<Task>?         saveAsync = null)
+        Func<Task>?         saveAsync = null,
+        IKeyring?           keyring   = null)
     {
-        _store    = store;
-        _client   = client;
-        _data     = data;
-        _playback = playback;
+        _store     = store;
+        _client    = client;
+        _data      = data;
+        _playback  = playback;
         _saveAsync = saveAsync;
+        _keyring   = keyring ?? new OsKeyring();
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
-            _client.Configure(_store.Current.ServerUrl!, _store.Current.Username!, _store.Current.Password!);
+        {
+            var pwd = ResolvePassword();
+            if (pwd != null)
+                _client.Configure(_store.Current.ServerUrl!, _store.Current.Username!, pwd);
+        }
 
         _playback.SnapshotAvailable += OnSnapshot;
         _playback.StatusChanged     += OnStatusChanged;
@@ -55,13 +62,29 @@ sealed class GpodderSyncService : IDisposable
 
             _store.Current.ServerUrl = server.TrimEnd('/');
             _store.Current.Username  = username;
-            _store.Current.Password  = password;
+
+            // Try OS keyring first; fall back to plaintext in gpodder.json.
+            bool keyringOk = _keyring.TrySet(username, password);
+            if (keyringOk)
+            {
+                _store.Current.Password             = null;
+                _store.Current.PasswordStoredInKeyring = true;
+            }
+            else
+            {
+                _store.Current.Password             = password;
+                _store.Current.PasswordStoredInKeyring = false;
+            }
             _store.Save();
 
             try { await _client.RegisterDeviceAsync(username, _store.Current.DeviceId); }
             catch (Exception ex) { Log.Warning(ex, "gpodder device registration failed"); }
 
-            return (true, $"logged in as {username} (device {_store.Current.DeviceId})");
+            var resultMsg = $"logged in as {username} (device {_store.Current.DeviceId})";
+            if (!keyringOk)
+                resultMsg += "\nWarning: keyring unavailable – password stored in plaintext";
+
+            return (true, resultMsg);
         }
         catch (Exception ex)
         {
@@ -72,14 +95,19 @@ sealed class GpodderSyncService : IDisposable
 
     public void Logout()
     {
-        _store.Current.ServerUrl             = null;
-        _store.Current.Username              = null;
-        _store.Current.Password              = null;
-        _store.Current.SubsTimestamp         = 0;
-        _store.Current.ActionsTimestamp      = 0;
-        _store.Current.LastKnownServerFeeds  = new();
-        _store.Current.PendingActions        = new();
-        _store.Current.LastSyncAt            = null;
+        // Remove keyring entry before wiping the username we look up by.
+        if (_store.Current.PasswordStoredInKeyring && _store.Current.Username != null)
+            _keyring.TryDelete(_store.Current.Username);
+
+        _store.Current.ServerUrl               = null;
+        _store.Current.Username                = null;
+        _store.Current.Password                = null;
+        _store.Current.PasswordStoredInKeyring = false;
+        _store.Current.SubsTimestamp           = 0;
+        _store.Current.ActionsTimestamp        = 0;
+        _store.Current.LastKnownServerFeeds    = new();
+        _store.Current.PendingActions          = new();
+        _store.Current.LastSyncAt              = null;
         _store.Save();
     }
 
@@ -231,8 +259,10 @@ sealed class GpodderSyncService : IDisposable
             ? cfg.LastSyncAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
             : "never";
 
+        var pwdStore = cfg.PasswordStoredInKeyring ? "keyring" : "plaintext";
+
         return $"sync: {cfg.Username}@{cfg.ServerUrl}\n" +
-               $"device: {cfg.DeviceId}  auto: {(cfg.AutoSync ? "on" : "off")}\n" +
+               $"device: {cfg.DeviceId}  auto: {(cfg.AutoSync ? "on" : "off")}  pwd: {pwdStore}\n" +
                $"last sync: {lastSync}  pending actions: {cfg.PendingActions.Count}";
     }
 
@@ -279,10 +309,22 @@ sealed class GpodderSyncService : IDisposable
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
+    // Returns the plaintext password by consulting keyring or the JSON fallback field.
+    private string? ResolvePassword()
+    {
+        var cfg = _store.Current;
+        if (!cfg.IsConfigured) return null;
+        return cfg.PasswordStoredInKeyring
+            ? _keyring.TryGet(cfg.Username!)
+            : cfg.Password;
+    }
+
     private void EnsureClientConfigured()
     {
         var cfg = _store.Current;
-        if (cfg.IsConfigured)
-            _client.Configure(cfg.ServerUrl!, cfg.Username!, cfg.Password!);
+        if (!cfg.IsConfigured) return;
+        var pwd = ResolvePassword();
+        if (pwd != null)
+            _client.Configure(cfg.ServerUrl!, cfg.Username!, pwd);
     }
 }

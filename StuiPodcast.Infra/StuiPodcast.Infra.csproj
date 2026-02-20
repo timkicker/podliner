@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.1.2" />
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
+    <PackageReference Include="KeySharp" Version="1.0.5" />
     <PackageReference Include="LibVLCSharp" Version="3.8.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
     <PackageReference Include="NAudio" Version="2.2.1" />
