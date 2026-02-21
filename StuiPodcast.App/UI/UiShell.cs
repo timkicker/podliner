@@ -141,7 +141,7 @@ public sealed class UiShell
     }
 
 
-    public void ShowOsd(string text, int ms = 1200) => UI(() => _osd.Show(text, ms));
+    public void ShowOsd(string text, int ms = 1200) => _osd.Show(text, ms);
     public void IndicateRefresh(bool done = false)  => ShowOsd(done ? "refreshed ✓" : "refreshing…");
 
     public void EnsureSelectedFeedVisibleAndTop()
@@ -283,6 +283,10 @@ public sealed class UiShell
         );
 
         SetPlayerPlacement(false);
+
+        // Eagerly parent the OSD overlay to the stable root Toplevel now, before any modal
+        // dialog can open and cause EnsureCreated() to parent _win to the wrong Toplevel.
+        _osd.Initialize(Application.Top);
 
         Application.MainLoop?.AddIdle(() =>
         {

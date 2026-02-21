@@ -11,11 +11,20 @@ internal sealed class UiOsdOverlay
     private Label? _label;
     private object? _timeout;
     private string _lastText = string.Empty;
+    private Toplevel? _root;          // captured at Build() time; stable for app lifetime
     private const int Padding = 2;   // 1 space left + 1 space right
     private const int MinWidth = 10; // keep it readable
     #endregion
 
     #region public api (thread-safe)
+    // Call once from UiShell.Build() while Application.Top is the stable root Toplevel.
+    // Eagerly parents _win so it is never orphaned into a dialog's subview tree.
+    public void Initialize(Toplevel root)
+    {
+        _root = root;
+        EnsureCreated();
+    }
+
     // thread-safe osd display
     public void Show(string text, int ms)
     {
@@ -94,7 +103,7 @@ internal sealed class UiOsdOverlay
             return false;
         });
 
-        Application.Top?.SetNeedsDisplay();
+        _root?.SetNeedsDisplay();
     }
 
     private void HideOnUi()
@@ -108,15 +117,15 @@ internal sealed class UiOsdOverlay
         }
 
         _win.Visible = false;
-        Application.Top?.SetNeedsDisplay();
+        _root?.SetNeedsDisplay();
     }
 
     private void ApplyThemeOnUi()
     {
-        var scheme = Application.Top?.ColorScheme ?? Colors.Base;
+        var scheme = _root?.ColorScheme ?? Colors.Base;
         if (_win   != null) _win.ColorScheme   = scheme;
         if (_label != null) _label.ColorScheme = scheme;
-        Application.Top?.SetNeedsDisplay();
+        _root?.SetNeedsDisplay();
     }
     #endregion
 
@@ -124,6 +133,9 @@ internal sealed class UiOsdOverlay
     private void EnsureCreated()
     {
         if (_win != null) return;
+
+        var root = _root ?? Application.Top;  // fallback if called before Initialize()
+        if (root == null) return;
 
         _label = new Label(string.Empty)
         {
@@ -138,26 +150,23 @@ internal sealed class UiOsdOverlay
             CanFocus = false,
             X = Pos.Center(),
             Y = Pos.At(1),
-            ColorScheme = Application.Top?.ColorScheme ?? Colors.Base
+            ColorScheme = root.ColorScheme ?? Colors.Base
         };
 
         _win.Border.BorderStyle = BorderStyle.Rounded;
         _win.Add(_label);
         _win.Visible = false;
 
-        if (Application.Top != null)
-        {
-            Application.Top.Add(_win);
+        root.Add(_win);
 
-            // relayout on terminal resize
-            Application.Top.Resized += _ =>
+        // relayout on terminal resize
+        root.Resized += _ =>
+        {
+            if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
             {
-                if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
-                {
-                    ShowOnUi(_lastText, TimeSpan.FromMilliseconds(10));
-                }
-            };
-        }
+                ShowOnUi(_lastText, TimeSpan.FromMilliseconds(10));
+            }
+        };
     }
     #endregion
 }
