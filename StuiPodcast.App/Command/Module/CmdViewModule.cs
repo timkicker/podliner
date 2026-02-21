@@ -1,5 +1,6 @@
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
+using System.Linq;
 
 namespace StuiPodcast.App.Command.Module;
 
@@ -13,6 +14,12 @@ internal static class CmdViewModule
         IEnumerable<Episode> list = data.Episodes;
         if (data.UnplayedOnly) list = list.Where(e => !e.ManuallyMarkedPlayed);
         if (feedId is Guid fid) ui.SetEpisodesForFeed(fid, list);
+    }
+
+    public static void ApplyFeedList(UiShell ui, AppData data)
+    {
+        var sorted = UiComposer.ApplyFeedSort(data.Feeds, data).ToList();
+        ui.SetFeeds(sorted, data.LastSelectedFeedId);
     }
 
     public static void ExecSearch(string[] args, UiShell ui, AppData data)
@@ -45,7 +52,14 @@ internal static class CmdViewModule
 
     public static void ExecSort(string[] args, UiShell ui, AppData data, Func<Task> persist)
     {
-        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
+        var parts = args ?? Array.Empty<string>();
+        if (parts.Length > 0 && parts[0].Equals("feeds", StringComparison.OrdinalIgnoreCase))
+        {
+            var feedArg = string.Join(' ', parts.Skip(1)).Trim();
+            HandleFeedSort(feedArg, ui, data, persist);
+            return;
+        }
+        var arg = string.Join(' ', parts).Trim();
         HandleSort(arg, ui, data, persist);
     }
 
@@ -95,6 +109,39 @@ internal static class CmdViewModule
 
         try { ui.SetTheme(mode); data.ThemePref = mode.ToString(); _ = persist(); ui.ShowOsd($"theme: {mode}"); }
         catch { ui.ShowOsd("theme: failed"); }
+    }
+
+    // --- feed sort helper
+    private static void HandleFeedSort(string arg, UiShell ui, AppData data, Func<Task> persist)
+    {
+        if (arg.Equals("show", StringComparison.OrdinalIgnoreCase))
+        { ui.ShowOsd($"sort feeds: {data.FeedSortBy} {data.FeedSortDir}"); return; }
+
+        if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            data.FeedSortBy = "title"; data.FeedSortDir = "asc";
+            _ = persist(); ApplyFeedList(ui, data);
+            ui.ShowOsd("sort feeds: title asc"); return;
+        }
+
+        string[] keys = new[] { "title", "updated", "unplayed" };
+        var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (parts.Length >= 1 && parts[0].Equals("by", StringComparison.OrdinalIgnoreCase))
+        {
+            if (parts.Length >= 2)
+            {
+                var key = parts[1].ToLowerInvariant();
+                if (!keys.Contains(key)) { ui.ShowOsd("sort feeds: invalid key"); return; }
+                data.FeedSortBy = key;
+                if (parts.Length >= 3)
+                { var dir = parts[2].ToLowerInvariant(); if (dir is "asc" or "desc") data.FeedSortDir = dir; }
+                _ = persist(); ApplyFeedList(ui, data);
+                ui.ShowOsd($"sort feeds: {data.FeedSortBy} {data.FeedSortDir}"); return;
+            }
+        }
+
+        ui.ShowOsd("sort feeds: by title|updated|unplayed [asc|desc]");
     }
 
     // --- sort helper (from old)

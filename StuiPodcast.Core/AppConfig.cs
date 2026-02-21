@@ -39,6 +39,8 @@ namespace StuiPodcast.Core
             public string SortBy       { get; set; } = "pubdate"; // pubdate, title, duration, feed, progress
             public string SortDir      { get; set; } = "desc";     // asc or desc
             public bool   UnplayedOnly { get; set; } = false;      // filter unplayed episodes
+            public string FeedSortBy   { get; set; } = "title";    // title, updated, unplayed
+            public string FeedSortDir  { get; set; } = "asc";      // asc or desc
         }
 
         public sealed class LastSelectionBlock

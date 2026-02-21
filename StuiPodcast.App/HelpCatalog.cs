@@ -171,9 +171,9 @@ namespace StuiPodcast.App
                 Category: HelpCategory.Navigation, Rank: 55),
 
             // sort/filter/player/theme
-            new(":sort", "Sort the episode list.",
-                "show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]",
-                Examples: new[]{ ":sort show", ":sort reverse", ":sort by title asc" },
+            new(":sort", "Sort the episode list or feed panel.",
+                "[feeds] show | reset | reverse | by <key> [asc|desc]  —  episode keys: pubdate|title|played|progress|feed  —  feed keys: title|updated|unplayed",
+                Examples: new[]{ ":sort show", ":sort reverse", ":sort by title asc", ":sort feeds by unplayed desc", ":sort feeds show", ":sort feeds reset" },
                 Category: HelpCategory.SortFilter, Rank: 36),
 
             new(":filter", "Set or toggle unplayed filter.",

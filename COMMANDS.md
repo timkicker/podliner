@@ -159,11 +159,14 @@ Full in-app help: `:h`
   Examples: `:history clear`, `:history size 500`
 
 ### Sort and filter
-- `:sort show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]`  
-  Control sorting.  
+- `:sort show | reset | reverse | by <pubdate|title|played|progress|feed> [asc|desc]`
+  Sort the episode list.
   Examples: `:sort show`, `:sort reverse`, `:sort by title asc`
-- `:filter [unplayed|all|toggle]`  
-  Set or toggle unplayed filter.  
+- `:sort feeds show | reset | by <title|updated|unplayed> [asc|desc]`
+  Sort the feed panel. Persisted across sessions.
+  Examples: `:sort feeds by title asc`, `:sort feeds by unplayed desc`, `:sort feeds show`
+- `:filter [unplayed|all|toggle]`
+  Set or toggle unplayed filter.
   Examples: `:filter unplayed`, `:filter toggle`
 
 ### Player and theme

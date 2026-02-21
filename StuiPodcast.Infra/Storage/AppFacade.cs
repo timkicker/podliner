@@ -90,6 +90,18 @@ namespace StuiPodcast.Infra.Storage
             get => ConfigStore.Current.ViewDefaults.UnplayedOnly;
             set { ConfigStore.Current.ViewDefaults.UnplayedOnly = value; ConfigStore.SaveAsync(); }
         }
+
+        public string? FeedSortBy
+        {
+            get => ConfigStore.Current.ViewDefaults.FeedSortBy;
+            set { ConfigStore.Current.ViewDefaults.FeedSortBy = value ?? "title"; ConfigStore.SaveAsync(); }
+        }
+
+        public string? FeedSortDir
+        {
+            get => ConfigStore.Current.ViewDefaults.FeedSortDir;
+            set { ConfigStore.Current.ViewDefaults.FeedSortDir = value ?? "asc"; ConfigStore.SaveAsync(); }
+        }
         #endregion
 
         #region read only views

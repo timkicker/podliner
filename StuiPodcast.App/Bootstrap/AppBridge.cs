@@ -16,6 +16,8 @@ static class AppBridge
         data.UnplayedOnly    = app.UnplayedOnly;
         data.SortBy          = app.SortBy;
         data.SortDir         = app.SortDir;
+        data.FeedSortBy      = app.FeedSortBy;
+        data.FeedSortDir     = app.FeedSortDir;
         data.PlaySource      = data.PlaySource;
         
         data.Feeds.Clear();    data.Feeds.AddRange(app.Feeds);
@@ -33,6 +35,8 @@ static class AppBridge
         app.UnplayedOnly     = data.UnplayedOnly;
         app.SortBy           = data.SortBy;
         app.SortDir          = data.SortDir;
+        app.FeedSortBy       = data.FeedSortBy;
+        app.FeedSortDir      = data.FeedSortDir;
         
         foreach (var q in app.Queue.ToList()) app.QueueRemove(q);
         foreach (var id in data.Queue) app.QueuePush(id);

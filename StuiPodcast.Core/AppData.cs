@@ -15,6 +15,8 @@
         public int HistorySize { get; set; } = 200;
         public string? SortBy { get; set; } = "pubdate";
         public string? SortDir { get; set; } = "desc";
+        public string? FeedSortBy  { get; set; } = "title";
+        public string? FeedSortDir { get; set; } = "asc";
 
         public bool AutoAdvance { get; set; } = true;
         public bool WrapAdvance { get; set; } = true;

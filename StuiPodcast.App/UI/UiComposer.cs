@@ -10,6 +10,7 @@ using Terminal.Gui;
 using System.Collections.Generic;
 using System.Linq;
 using StuiPodcast.App.Bootstrap;
+using StuiPodcast.App.Command.Module;
 
 
 namespace StuiPodcast.App.UI;
@@ -68,6 +69,51 @@ static class UiComposer
     #endregion
 
     #region sorting
+    private static bool IsPlayed(Episode e)
+    {
+        if (e.ManuallyMarkedPlayed) return true;
+        var len = e.DurationMs;
+        if (len <= 0) return false;
+        var pos = e.Progress?.LastPosMs ?? 0;
+        if (len <= 60_000) return pos >= (long)(len * 0.98) || len - pos <= 500;
+        return pos >= (long)(len * 0.995) || len - pos <= 2000;
+    }
+
+    public static IEnumerable<Feed> ApplyFeedSort(IEnumerable<Feed> feeds, AppData data)
+    {
+        if (feeds == null) return Enumerable.Empty<Feed>();
+        var by  = (data.FeedSortBy  ?? "title").Trim().ToLowerInvariant();
+        var dir = (data.FeedSortDir ?? "asc").Trim().ToLowerInvariant();
+        bool desc = dir == "desc";
+
+        var episodes = data.Episodes ?? Enumerable.Empty<Episode>();
+
+        switch (by)
+        {
+            case "updated":
+                var latest = episodes
+                    .GroupBy(e => e.FeedId)
+                    .ToDictionary(g => g.Key, g => g.Max(e => e.PubDate ?? DateTimeOffset.MinValue));
+                return desc
+                    ? feeds.OrderByDescending(f => latest.GetValueOrDefault(f.Id, DateTimeOffset.MinValue))
+                    : feeds.OrderBy(f => latest.GetValueOrDefault(f.Id, DateTimeOffset.MinValue));
+
+            case "unplayed":
+                var counts = episodes
+                    .GroupBy(e => e.FeedId)
+                    .ToDictionary(g => g.Key, g => g.Count(e => !IsPlayed(e)));
+                return desc
+                    ? feeds.OrderByDescending(f => counts.GetValueOrDefault(f.Id, 0))
+                    : feeds.OrderBy(f => counts.GetValueOrDefault(f.Id, 0));
+
+            case "title":
+            default:
+                return desc
+                    ? feeds.OrderByDescending(f => f.Title ?? "", StringComparer.OrdinalIgnoreCase)
+                    : feeds.OrderBy(f => f.Title ?? "", StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
     public static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
     {
         if (eps == null) return Enumerable.Empty<Episode>();
@@ -82,16 +128,6 @@ static class UiComposer
             if (len <= 0) return 0.0;
             var r = pos / Math.Max(len, 1);
             return Math.Clamp(r, 0.0, 1.0);
-        }
-
-        static bool IsPlayed(Episode e)
-        {
-            if (e.ManuallyMarkedPlayed) return true;
-            var len = e.DurationMs;
-            if (len <= 0) return false;
-            var pos = e.Progress?.LastPosMs ?? 0;
-            if (len <= 60_000) return pos >= (long)(len * 0.98) || len - pos <= 500;
-            return pos >= (long)(len * 0.995) || len - pos <= 2000;
         }
 
         string FeedTitle(Episode e)
@@ -558,7 +594,7 @@ static class UiComposer
     #region initialization
     public static void ShowInitialLists(UiShell ui, AppData data)
     {
-        ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
+        CmdViewModule.ApplyFeedList(ui, data);
         ui.SetUnplayedHint(data.UnplayedOnly);
         CmdRouter.ApplyList(ui, data);
 
