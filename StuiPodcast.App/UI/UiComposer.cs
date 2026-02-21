@@ -603,6 +603,7 @@ static class UiComposer
                 if (ui != null && player != null)
                 {
                     ui.UpdatePlayerSnapshot(snap, player.State.Volume0_100);
+                    ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
 
                     var nowId = ui.GetNowPlayingId();
                     if (nowId is Guid nid && snap.EpisodeId == nid)
@@ -652,6 +653,7 @@ static class UiComposer
                             if (fid != null) ui.SetEpisodesForFeed(fid.Value, eps);
                         },
                         data.Episodes);
+                    ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
                 }
             }
             catch { }

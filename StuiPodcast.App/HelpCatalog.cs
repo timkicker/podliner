@@ -306,8 +306,9 @@ namespace StuiPodcast.App
   - Recommended. Mature & feature-complete.
 
 • Media Foundation (Windows)
-  Supports: seek, pause, volume, speed, local files, HTTP
+  Supports: seek, pause, volume, local files, HTTP
   Built in on Windows. No extra install needed.
+  Speed control not supported.
 
 • MPV (mpv, IPC)
   - Supports: seek, pause, volume, speed, local files, HTTP

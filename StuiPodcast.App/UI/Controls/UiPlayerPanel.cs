@@ -205,6 +205,12 @@ internal sealed class UiPlayerPanel : FrameView
             mid, BtnVolDown, BtnVolUp, VolPctLabel, VolBar, Progress);
     }
 
+    public void SetSpeedEnabled(bool enabled)
+    {
+        BtnSpeedDown.Enabled = enabled;
+        BtnSpeedUp.Enabled   = enabled;
+    }
+
     // wire seeks/volume once; idempotent on repeated calls
     public void WireSeeks(Action<string> command, Func<TimeSpan> lastEffectiveLength, Action<string> osd)
     {

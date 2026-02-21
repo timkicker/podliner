@@ -480,6 +480,11 @@ public sealed class UiShell
         });
     }
 
+    public void UpdateSpeedEnabled(bool enabled)
+    {
+        UI(() => _player?.SetSpeedEnabled(enabled));
+    }
+
     public void UpdatePlayerUI(PlayerState s)
     {
         UI(() =>

@@ -250,6 +250,11 @@ MPV (mpv, IPC)
 - Supports seek, pause, volume, speed, local files, HTTP
 - Requires mpv in PATH. Uses IPC socket.
 
+Media Foundation (Windows only)
+- Supports seek, pause, volume, local files, HTTP
+- Built in on Windows. No extra install needed.
+- Speed control not supported.
+
 FFplay (limited)
 - Supports play and stop only
 - Coarse seek by restart (-ss). Speed and volume only at start.

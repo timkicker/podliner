@@ -120,7 +120,7 @@ internal static class CmdPlaybackModule
 
     public static void Speed(string arg, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, UiShell ui)
     {
-        if ((audioPlayer.Capabilities & PlayerCapabilities.Speed) == 0) { ui.ShowOsd("speed not supported on this engine"); return; }
+        if ((audioPlayer.Capabilities & PlayerCapabilities.Speed) == 0) { ui.ShowOsd("speed not supported by current engine"); return; }
         if (string.IsNullOrWhiteSpace(arg)) return;
         var cur = audioPlayer.State.Speed;
 
