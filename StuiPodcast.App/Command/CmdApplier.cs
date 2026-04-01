@@ -13,7 +13,7 @@ static class  CmdApplier
 {
     public static void ApplyPostUiFlags(
         CliEntrypoint.Options cli,
-        UiShell? ui,
+        IUiShell? ui,
         AppData data,
         SwappableAudioPlayer? audioPlayer,
         PlaybackCoordinator? playback,

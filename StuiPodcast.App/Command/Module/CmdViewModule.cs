@@ -6,7 +6,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdViewModule
 {
-    public static void ApplyList(UiShell ui, AppData data)
+    public static void ApplyList(IUiShell ui, AppData data)
     {
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
@@ -16,13 +16,13 @@ internal static class CmdViewModule
         if (feedId is Guid fid) ui.SetEpisodesForFeed(fid, list);
     }
 
-    public static void ApplyFeedList(UiShell ui, AppData data)
+    public static void ApplyFeedList(IUiShell ui, AppData data)
     {
         var sorted = UiComposer.ApplyFeedSort(data.Feeds, data).ToList();
         ui.SetFeeds(sorted, data.LastSelectedFeedId);
     }
 
-    public static void ExecSearch(string[] args, UiShell ui, AppData data)
+    public static void ExecSearch(string[] args, IUiShell ui, AppData data)
     {
         var query = string.Join(' ', args ?? Array.Empty<string>()).Trim();
 
@@ -50,7 +50,7 @@ internal static class CmdViewModule
         ui.ShowOsd($"search: {query}", 900);
     }
 
-    public static void ExecSort(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecSort(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var parts = args ?? Array.Empty<string>();
         if (parts.Length > 0 && parts[0].Equals("feeds", StringComparison.OrdinalIgnoreCase))
@@ -63,7 +63,7 @@ internal static class CmdViewModule
         HandleSort(arg, ui, data, persist);
     }
 
-    public static void ExecFilter(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecFilter(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
@@ -76,7 +76,7 @@ internal static class CmdViewModule
         _ = persist();
     }
 
-    public static void ExecPlayerBar(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecPlayerBar(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(arg) || arg == "toggle")
@@ -87,7 +87,7 @@ internal static class CmdViewModule
         { ui.SetPlayerPlacement(false); data.PlayerAtTop = false; _ = persist(); return; }
     }
 
-    public static void ExecTheme(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecTheme(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(arg) || arg == "toggle")
@@ -98,13 +98,13 @@ internal static class CmdViewModule
             return;
         }
 
-        UiShell.ThemeMode mode = arg switch
+        ThemeMode mode = arg switch
         {
-            "base"   => UiShell.ThemeMode.Base,
-            "accent" => UiShell.ThemeMode.MenuAccent,
-            "native" => UiShell.ThemeMode.Native,
-            "auto"   => OperatingSystem.IsWindows() ? UiShell.ThemeMode.Base : UiShell.ThemeMode.MenuAccent,
-            _        => OperatingSystem.IsWindows() ? UiShell.ThemeMode.Base : UiShell.ThemeMode.MenuAccent
+            "base"   => ThemeMode.Base,
+            "accent" => ThemeMode.MenuAccent,
+            "native" => ThemeMode.Native,
+            "auto"   => OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent,
+            _        => OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent
         };
 
         try { ui.SetTheme(mode); data.ThemePref = mode.ToString(); _ = persist(); ui.ShowOsd($"theme: {mode}"); }
@@ -112,7 +112,7 @@ internal static class CmdViewModule
     }
 
     // --- feed sort helper
-    private static void HandleFeedSort(string arg, UiShell ui, AppData data, Func<Task> persist)
+    private static void HandleFeedSort(string arg, IUiShell ui, AppData data, Func<Task> persist)
     {
         if (arg.Equals("show", StringComparison.OrdinalIgnoreCase))
         { ui.ShowOsd($"sort feeds: {data.FeedSortBy} {data.FeedSortDir}"); return; }
@@ -145,7 +145,7 @@ internal static class CmdViewModule
     }
 
     // --- sort helper (from old)
-    private static void HandleSort(string arg, UiShell ui, AppData data, Func<Task> persist)
+    private static void HandleSort(string arg, IUiShell ui, AppData data, Func<Task> persist)
     {
         if (arg.Equals("show", StringComparison.OrdinalIgnoreCase)) { ui.ShowOsd($"sort: {data.SortBy} {data.SortDir}"); return; }
         if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))

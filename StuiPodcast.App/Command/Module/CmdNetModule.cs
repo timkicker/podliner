@@ -5,7 +5,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdNetModule
 {
-    public static void ExecNet(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecNet(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (arg is "online" or "on") { data.NetworkOnline = true; _ = persist(); ui.ShowOsd("Online", 600); }
@@ -25,7 +25,7 @@ internal static class CmdNetModule
         }
     }
 
-    public static void ExecPlaySource(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecPlaySource(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (arg is "show" or "") { ui.ShowOsd($"play-source: {data.PlaySource ?? "auto"}"); return; }

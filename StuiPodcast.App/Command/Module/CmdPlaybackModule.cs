@@ -8,7 +8,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdPlaybackModule
 {
-    public static void ExecSeek(string[] args, IAudioPlayer audioPlayer, UiShell ui)
+    public static void ExecSeek(string[] args, IAudioPlayer audioPlayer, IUiShell ui)
     {
         if ((audioPlayer.Capabilities & PlayerCapabilities.Seek) == 0) { ui.ShowOsd("seek not supported by current engine"); return; }
         if (string.Equals(audioPlayer.Name, "ffplay", StringComparison.OrdinalIgnoreCase)) ui.ShowOsd("coarse seek (ffplay): restarts stream", 1100);
@@ -16,25 +16,25 @@ internal static class CmdPlaybackModule
         Seek(arg, audioPlayer);
     }
 
-    public static void ExecVolume(string[] args, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, UiShell ui)
+    public static void ExecVolume(string[] args, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, IUiShell ui)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         Volume(arg, audioPlayer, data, persist, ui);
     }
 
-    public static void ExecSpeed(string[] args, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, UiShell ui)
+    public static void ExecSpeed(string[] args, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, IUiShell ui)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         Speed(arg, audioPlayer, data, persist, ui);
     }
 
-    public static void ExecReplay(string[] args, IAudioPlayer audioPlayer, UiShell ui)
+    public static void ExecReplay(string[] args, IAudioPlayer audioPlayer, IUiShell ui)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         Replay(arg, audioPlayer, ui);
     }
 
-    public static void ExecNow(UiShell ui, AppData data)
+    public static void ExecNow(IUiShell ui, AppData data)
     {
         var nowId = ui.GetNowPlayingId();
         if (nowId == null) { ui.ShowOsd("no episode playing"); return; }
@@ -45,7 +45,7 @@ internal static class CmdPlaybackModule
         ui.ShowOsd("jumped to now", 700);
     }
 
-    public static void ExecJump(string[] args, IAudioPlayer audioPlayer, UiShell ui)
+    public static void ExecJump(string[] args, IAudioPlayer audioPlayer, IUiShell ui)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         if (string.IsNullOrEmpty(arg)) { ui.ShowOsd("usage: :jump <hh:mm[:ss]|+/-sec|%>"); return; }
@@ -53,7 +53,7 @@ internal static class CmdPlaybackModule
     }
 
     // helpers copied
-    public static void Replay(string arg, IAudioPlayer audioPlayer, UiShell ui)
+    public static void Replay(string arg, IAudioPlayer audioPlayer, IUiShell ui)
     {
         if (string.IsNullOrWhiteSpace(arg)) { audioPlayer.SeekTo(TimeSpan.Zero); return; }
         if (int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sec) && sec > 0)
@@ -103,7 +103,7 @@ internal static class CmdPlaybackModule
             audioPlayer.SeekTo(TimeSpan.FromSeconds(absSecs));
     }
 
-    public static void Volume(string arg, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, UiShell ui)
+    public static void Volume(string arg, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, IUiShell ui)
     {
         if ((audioPlayer.Capabilities & PlayerCapabilities.Volume) == 0) { ui.ShowOsd("volume not supported on this engine"); return; }
         if (string.IsNullOrWhiteSpace(arg)) return;
@@ -118,7 +118,7 @@ internal static class CmdPlaybackModule
         { var v = Math.Clamp(abs, 0, 100); audioPlayer.SetVolume(v); data.Volume0_100 = v; _ = persist(); ui.ShowOsd($"Vol {v}%"); }
     }
 
-    public static void Speed(string arg, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, UiShell ui)
+    public static void Speed(string arg, IAudioPlayer audioPlayer, AppData data, Func<Task> persist, IUiShell ui)
     {
         if ((audioPlayer.Capabilities & PlayerCapabilities.Speed) == 0) { ui.ShowOsd("speed not supported by current engine"); return; }
         if (string.IsNullOrWhiteSpace(arg)) return;

@@ -6,14 +6,14 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdFeedsModule
 {
-    public static void ExecAddFeed(string[] args, UiShell ui)
+    public static void ExecAddFeed(string[] args, IUiShell ui)
     {
         var url = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         if (!string.IsNullOrEmpty(url)) ui.RequestAddFeed(url);
         else ui.ShowOsd("usage: :add <rss-url>");
     }
 
-    public static void ExecFeed(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecFeed(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         Guid? target = arg switch
@@ -36,7 +36,7 @@ internal static class CmdFeedsModule
         else ui.ShowOsd("usage: :feed all|saved|downloaded|history|queue");
     }
 
-    public static void RemoveSelectedFeed(UiShell ui, AppData data, Func<Task> persist)
+    public static void RemoveSelectedFeed(IUiShell ui, AppData data, Func<Task> persist)
     {
         var fid = ui.GetSelectedFeedId();
         if (fid is null) { ui.ShowOsd("No feed selected"); return; }

@@ -17,7 +17,7 @@ static class CmdRouter
         string raw,
         IAudioPlayer audioPlayer,
         PlaybackCoordinator playback,
-        UiShell ui,
+        IUiShell ui,
         MemoryLogSink mem,
         AppData data,
         Func<Task> persist,
@@ -52,13 +52,13 @@ static class CmdRouter
         CommandDispatcher.Default.Dispatch(parsed, ctx);
     }
 
-    public static bool HandleQueue(string cmd, UiShell ui, AppData data, Func<Task> saveAsync)
+    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync)
         => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync);
 
-    public static bool HandleDownloads(string cmd, UiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
+    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
         => CmdDownloadsModule.HandleDownloads(cmd, ui, data, dlm, saveAsync);
 
-    public static void ApplyList(UiShell ui, AppData data)
+    public static void ApplyList(IUiShell ui, AppData data)
         => CmdViewModule.ApplyList(ui, data);
 }
 #endregion

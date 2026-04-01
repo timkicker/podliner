@@ -6,7 +6,7 @@ namespace StuiPodcast.App.Services;
 
 internal static class EpisodeListBuilder
 {
-    public static List<Episode> BuildCurrentList(UiShell ui, AppData data)
+    public static List<Episode> BuildCurrentList(IUiShell ui, AppData data)
     {
         var feedId = ui.GetSelectedFeedId();
         IEnumerable<Episode> baseList = data.Episodes;

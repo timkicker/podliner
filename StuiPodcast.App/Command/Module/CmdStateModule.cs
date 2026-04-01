@@ -5,13 +5,13 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdStateModule
 {
-    public static void ExecSave(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecSave(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         SaveToggle(arg, ui, data, persist);
     }
 
-    private static void SaveToggle(string arg, UiShell ui, AppData data, Func<Task> persist)
+    private static void SaveToggle(string arg, IUiShell ui, AppData data, Func<Task> persist)
     {
         var ep = ui.GetSelectedEpisode();
         if (ep is null) return;

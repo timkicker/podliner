@@ -19,6 +19,14 @@ namespace StuiPodcast.App.Command
             [":rm-feed"] = ":remove-feed",
         };
 
+        // case-sensitive vim shortcuts (must be checked before case-insensitive lookups)
+        private static readonly Dictionary<string, TopCommand> CaseSensitive = new(StringComparer.Ordinal)
+        {
+            [":H"] = TopCommand.VimTop,
+            [":M"] = TopCommand.VimMiddle,
+            [":L"] = TopCommand.VimBottom,
+        };
+
         // exact matches
         private static readonly Dictionary<string, TopCommand> Exact = new(Ci)
         {
@@ -36,9 +44,9 @@ namespace StuiPodcast.App.Command
             [":play-prev"] = TopCommand.PlayPrev,
             [":now"]       = TopCommand.Now,
 
-            [":zt"] = TopCommand.VimTop,    [":H"] = TopCommand.VimTop,
-            [":zz"] = TopCommand.VimMiddle, [":M"] = TopCommand.VimMiddle,
-            [":zb"] = TopCommand.VimBottom, [":L"] = TopCommand.VimBottom,
+            [":zt"] = TopCommand.VimTop,
+            [":zz"] = TopCommand.VimMiddle,
+            [":zb"] = TopCommand.VimBottom,
 
             [":add"]         = TopCommand.AddFeed,
             [":refresh"]     = TopCommand.Refresh,
@@ -147,12 +155,18 @@ namespace StuiPodcast.App.Command
         {
             if (string.IsNullOrWhiteSpace(cmd)) return "";
             if (cmd[0] != ':') cmd = ":" + cmd;
+            // Skip alias expansion for case-sensitive vim shortcuts
+            if (CaseSensitive.ContainsKey(cmd)) return cmd;
             return Canon.TryGetValue(cmd, out var longForm) ? longForm : cmd;
         }
 
         private static TopCommand MapTop(string cmd)
         {
             if (cmd.Length == 0) return TopCommand.Unknown;
+
+            // Case-sensitive vim shortcuts first
+            if (CaseSensitive.TryGetValue(cmd, out var csMatch))
+                return csMatch;
 
             if (Exact.TryGetValue(cmd, out var mapped))
                 return mapped;

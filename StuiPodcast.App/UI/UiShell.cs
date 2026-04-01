@@ -7,7 +7,7 @@ using StuiPodcast.App.UI.Controls;
 
 namespace StuiPodcast.App.UI;
 
-public sealed class UiShell
+public sealed class UiShell : IUiShell
 {
     #region events/api
     // events/api same as before
@@ -51,8 +51,6 @@ public sealed class UiShell
 
     #region state
     private readonly MemoryLogSink _mem;
-    public enum ThemeMode { MenuAccent, Base, Native, User }
-
     private ThemeMode _theme;
     private bool _playerAtTop = false;
     private bool _startupPinned = false;

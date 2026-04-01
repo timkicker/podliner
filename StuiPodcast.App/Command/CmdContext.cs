@@ -11,7 +11,7 @@ internal sealed class CmdContext
 {
     public IAudioPlayer AudioPlayer { get; }
     public PlaybackCoordinator Playback { get; }
-    public UiShell Ui { get; }
+    public IUiShell Ui { get; }
     public MemoryLogSink Mem { get; }
     public AppData Data { get; }
     public Func<Task> Persist { get; }
@@ -19,7 +19,7 @@ internal sealed class CmdContext
     public Func<string, Task>? SwitchEngine { get; }
     public GpodderSyncService? Sync { get; }
 
-    public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, UiShell ui, MemoryLogSink mem,
+    public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, IUiShell ui, MemoryLogSink mem,
         AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine,
         GpodderSyncService? sync = null)
     {

@@ -5,7 +5,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdHistoryModule
 {
-    public static void ExecHistory(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecHistory(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 

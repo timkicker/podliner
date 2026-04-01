@@ -5,7 +5,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdIoModule
 {
-    public static void ExecOpen(string[] args, UiShell ui, AppData data)
+    public static void ExecOpen(string[] args, IUiShell ui, AppData data)
     {
         var mode = (args.Length > 0 ? args[0] : "site").Trim().ToLowerInvariant(); // "site" | "audio"
         var ep = ui.GetSelectedEpisode();
@@ -29,7 +29,7 @@ internal static class CmdIoModule
         if (!TryOpenSystem(url)) ui.ShowOsd(url, 2000);
     }
 
-    public static void ExecCopy(string[] args, UiShell ui, AppData data)
+    public static void ExecCopy(string[] args, IUiShell ui, AppData data)
     {
         var what = (args.Length > 0 ? args[0] : "url").Trim().ToLowerInvariant(); // url|title|guid
         var ep = ui.GetSelectedEpisode();

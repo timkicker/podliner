@@ -6,7 +6,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdOpmlModule
 {
-    public static void ExecOpml(string[] args, UiShell ui, AppData data, Func<Task> persist)
+    public static void ExecOpml(string[] args, IUiShell ui, AppData data, Func<Task> persist)
     {
         var argv = args ?? Array.Empty<string>();
         if (argv.Length == 0) { ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]"); return; }

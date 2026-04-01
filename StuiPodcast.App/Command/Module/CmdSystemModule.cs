@@ -4,7 +4,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdSystemModule
 {
-    public static void ExecLogs(string[] args, UiShell ui)
+    public static void ExecLogs(string[] args, IUiShell ui)
     {
         var a = args.Length > 0 ? args[0] : "";
         int tail = 500;
@@ -12,20 +12,20 @@ internal static class CmdSystemModule
         ui.ShowLogsOverlay(tail);
     }
 
-    public static void ExecOsd(string[] args, UiShell ui)
+    public static void ExecOsd(string[] args, IUiShell ui)
     {
         var text = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         if (!string.IsNullOrEmpty(text)) ui.ShowOsd(text);
         else ui.ShowOsd("usage: :osd <text>");
     }
 
-    public static void ExecWrite(Func<Task> persist, UiShell ui)
+    public static void ExecWrite(Func<Task> persist, IUiShell ui)
     {
         try { persist().GetAwaiter().GetResult(); ui.ShowOsd("saved", 900); }
         catch (Exception ex) { ui.ShowOsd($"save failed: {ex.Message}", 1800); }
     }
 
-    public static void ExecWriteQuit(Func<Task> persist, UiShell ui, bool bang)
+    public static void ExecWriteQuit(Func<Task> persist, IUiShell ui, bool bang)
     {
         ui.ShowOsd(bang ? "saving… quitting!" : "saving… quitting…", 800);
         _ = Task.Run(async () =>

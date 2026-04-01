@@ -7,7 +7,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdDownloadsModule
 {
-    public static bool HandleDownloads(string cmd, UiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
+    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
     {
         cmd = (cmd ?? "").Trim();
 
@@ -111,7 +111,7 @@ internal static class CmdDownloadsModule
         return true;
     }
 
-    public static void DlToggle(string arg, UiShell ui, AppData data, Func<Task> persist, DownloadManager dlm)
+    public static void DlToggle(string arg, IUiShell ui, AppData data, Func<Task> persist, DownloadManager dlm)
     {
         var ep = ui.GetSelectedEpisode();
         if (ep is null) return;

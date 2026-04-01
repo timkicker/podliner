@@ -5,7 +5,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdQueueModule
 {
-    public static bool HandleQueue(string cmd, UiShell ui, AppData data, Func<Task> saveAsync)
+    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync)
     {
         if (string.IsNullOrWhiteSpace(cmd)) return false;
         var t = cmd.Trim();

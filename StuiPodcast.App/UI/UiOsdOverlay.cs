@@ -10,7 +10,9 @@ internal sealed class UiOsdOverlay
     private FrameView? _win;
     private Label? _label;
     private object? _timeout;
+    private int _generation;          // incremented on each Show; stale timeout callbacks are ignored
     private string _lastText = string.Empty;
+    private DateTimeOffset _hideAt;   // when the current message should disappear
     private Toplevel? _root;          // captured at Build() time; stable for app lifetime
     private const int Padding = 2;   // 1 space left + 1 space right
     private const int MinWidth = 10; // keep it readable
@@ -97,9 +99,12 @@ internal sealed class UiOsdOverlay
             _timeout = null;
         }
 
+        var gen = ++_generation;
+        _hideAt = DateTimeOffset.UtcNow + duration;
+
         _timeout = Application.MainLoop.AddTimeout(duration, _ =>
         {
-            HideOnUi();
+            if (gen == _generation) HideOnUi();
             return false;
         });
 
@@ -159,12 +164,14 @@ internal sealed class UiOsdOverlay
 
         root.Add(_win);
 
-        // relayout on terminal resize
+        // relayout on terminal resize — preserve remaining display duration
         root.Resized += _ =>
         {
             if (_win?.Visible == true && !string.IsNullOrEmpty(_lastText))
             {
-                ShowOnUi(_lastText, TimeSpan.FromMilliseconds(10));
+                var remaining = _hideAt - DateTimeOffset.UtcNow;
+                if (remaining.TotalMilliseconds < 50) remaining = TimeSpan.FromMilliseconds(50);
+                ShowOnUi(_lastText, remaining);
             }
         };
     }

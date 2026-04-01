@@ -7,14 +7,14 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdNavigationModule
 {
-    public static void ExecGoto(string[] args, UiShell ui, AppData data)
+    public static void ExecGoto(string[] args, IUiShell ui, AppData data)
     {
         var arg = (args.Length > 0 ? args[0] : "").ToLowerInvariant();
         if (arg is "top" or "start") { SelectAbsolute(0, ui, data); return; }
         if (arg is "bottom" or "end") { SelectAbsolute(int.MaxValue, ui, data); return; }
     }
 
-    public static void SelectRelative(int dir, UiShell ui, AppData data, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
+    public static void SelectRelative(int dir, IUiShell ui, AppData data, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
     {
         var list = EpisodeListBuilder.BuildCurrentList(ui, data);
         if (list.Count == 0) return;
@@ -40,7 +40,7 @@ internal static class CmdNavigationModule
         }
     }
 
-    public static void SelectAbsolute(int index, UiShell ui, AppData data)
+    public static void SelectAbsolute(int index, IUiShell ui, AppData data)
     {
         var list = EpisodeListBuilder.BuildCurrentList(ui, data);
         if (list.Count == 0) return;
@@ -48,7 +48,7 @@ internal static class CmdNavigationModule
         ui.SelectEpisodeIndex(target);
     }
 
-    public static void SelectMiddle(UiShell ui, AppData data)
+    public static void SelectMiddle(IUiShell ui, AppData data)
     {
         var list = EpisodeListBuilder.BuildCurrentList(ui, data);
         if (list.Count == 0) return;
@@ -56,7 +56,7 @@ internal static class CmdNavigationModule
         ui.SelectEpisodeIndex(target);
     }
 
-    public static void JumpUnplayed(int dir, UiShell ui, PlaybackCoordinator playback, AppData data)
+    public static void JumpUnplayed(int dir, IUiShell ui, PlaybackCoordinator playback, AppData data)
     {
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;

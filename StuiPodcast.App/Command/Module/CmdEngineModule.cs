@@ -9,7 +9,7 @@ internal static class CmdEngineModule
     public static void ExecEngine(
         string[] args,
         IAudioPlayer audioPlayer,
-        UiShell ui,
+        IUiShell ui,
         AppData data,
         Func<Task> persist,
         Func<string, Task>? switchEngine = null)
