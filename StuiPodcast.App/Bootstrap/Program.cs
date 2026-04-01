@@ -226,7 +226,7 @@ internal class Program
 
         // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
-            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync));
+            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync), _gpodder);
 
         // initial lists
         UiComposer.ShowInitialLists(_ui, _data);

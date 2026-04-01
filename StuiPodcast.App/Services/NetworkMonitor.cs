@@ -47,16 +47,11 @@ sealed class NetworkMonitor
         // react to nic availability
         try { NetworkChange.NetworkAvailabilityChanged += (_, __) => { TriggerProbe(); }; } catch { }
 
-        // periodic probes
-        timerToken = Application.MainLoop.AddTimeout(NetProbeInterval(), _ =>
+        // periodic probes — single recurring timer
+        timerToken = Application.MainLoop?.AddTimeout(NetProbeInterval(), _ =>
         {
             TriggerProbe();
-            Application.MainLoop.AddTimeout(NetProbeInterval(), __ =>
-            {
-                TriggerProbe();
-                return true;
-            });
-            return false;
+            return true;
         });
     }
 

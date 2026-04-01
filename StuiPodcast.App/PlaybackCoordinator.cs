@@ -302,7 +302,7 @@ sealed class PlaybackCoordinator
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
         var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
-        var lenMsMeta   = (long)(_current?.DurationMs!);
+        var lenMsMeta   = (long)(_current?.DurationMs ?? 0);
         posMs = (long)Math.Max(0, s.Position.TotalMilliseconds);
 
         effLenMs = Math.Max(Math.Max(lenMsPlayer, lenMsMeta), posMs);
