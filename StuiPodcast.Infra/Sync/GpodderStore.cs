@@ -94,7 +94,7 @@ public sealed class GpodderStore
 
             try { if (File.Exists(_tmpPath)) File.Delete(_tmpPath); } catch { /* best effort */ }
         }
-        catch { /* leave logging to the caller */ }
+        catch (Exception ex) { Serilog.Log.Error(ex, "GpodderStore: failed to save {Path}", _filePath); }
     }
 
     private static GpodderSyncConfig CreateDefault() => new() { DeviceId = DefaultDeviceId() };

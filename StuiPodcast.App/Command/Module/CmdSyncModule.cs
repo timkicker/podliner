@@ -33,8 +33,16 @@ internal static class CmdSyncModule
                 ui.ShowOsd("sync: logging in…", 1500);
                 _ = Task.Run(async () =>
                 {
-                    var (ok, msg) = await syncService.LoginAsync(server, user, pass);
-                    Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 3000 : 4000));
+                    try
+                    {
+                        var (ok, msg) = await syncService.LoginAsync(server, user, pass);
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 3000 : 4000));
+                    }
+                    catch (Exception ex)
+                    {
+                        Serilog.Log.Error(ex, "sync login task failed");
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: error: {ex.Message}", 4000));
+                    }
                 });
                 break;
 
@@ -47,8 +55,16 @@ internal static class CmdSyncModule
                 ui.ShowOsd("sync: pushing…", 1500);
                 _ = Task.Run(async () =>
                 {
-                    var (ok, msg) = await syncService.PushAsync();
-                    Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    try
+                    {
+                        var (ok, msg) = await syncService.PushAsync();
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    }
+                    catch (Exception ex)
+                    {
+                        Serilog.Log.Error(ex, "sync push task failed");
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: error: {ex.Message}", 4000));
+                    }
                 });
                 break;
 
@@ -56,8 +72,16 @@ internal static class CmdSyncModule
                 ui.ShowOsd("sync: pulling…", 1500);
                 _ = Task.Run(async () =>
                 {
-                    var (ok, msg) = await syncService.PullAsync();
-                    Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    try
+                    {
+                        var (ok, msg) = await syncService.PullAsync();
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    }
+                    catch (Exception ex)
+                    {
+                        Serilog.Log.Error(ex, "sync pull task failed");
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: error: {ex.Message}", 4000));
+                    }
                 });
                 break;
 
@@ -108,8 +132,16 @@ internal static class CmdSyncModule
                 ui.ShowOsd("sync: syncing…", 1500);
                 _ = Task.Run(async () =>
                 {
-                    var (ok, msg) = await syncService.SyncAsync();
-                    Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    try
+                    {
+                        var (ok, msg) = await syncService.SyncAsync();
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: {msg}", ok ? 2000 : 3000));
+                    }
+                    catch (Exception ex)
+                    {
+                        Serilog.Log.Error(ex, "sync task failed");
+                        Application.MainLoop?.Invoke(() => ui.ShowOsd($"sync: error: {ex.Message}", 4000));
+                    }
                 });
                 break;
 

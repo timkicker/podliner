@@ -326,5 +326,7 @@ sealed class GpodderSyncService : IDisposable
         var pwd = ResolvePassword();
         if (pwd != null)
             _client.Configure(cfg.ServerUrl!, cfg.Username!, pwd);
+        else
+            Log.Warning("gpodder: could not resolve password for {User} (keyring unavailable?)", cfg.Username);
     }
 }
