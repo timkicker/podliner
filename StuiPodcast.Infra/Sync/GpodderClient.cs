@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Serilog;
 using StuiPodcast.Core.Sync;
 
 namespace StuiPodcast.Infra.Sync;
@@ -53,9 +54,24 @@ public sealed class GpodderClient : IGpodderClient
         var req = new HttpRequestMessage(HttpMethod.Post, url);
         AddBasicAuth(req);
 
+        Log.Information("gpodder/login POST {Url} user={User}", url, username);
         var resp = await _http.SendAsync(req);
-        return resp.IsSuccessStatusCode;
+        if (!resp.IsSuccessStatusCode)
+        {
+            Log.Warning("gpodder/login failed status={Status} reason={Reason} url={Url}",
+                (int)resp.StatusCode, resp.ReasonPhrase, url);
+            LastLoginStatus = (int)resp.StatusCode;
+            LastLoginReason = resp.ReasonPhrase;
+            return false;
+        }
+        LastLoginStatus = (int)resp.StatusCode;
+        LastLoginReason = resp.ReasonPhrase;
+        return true;
     }
+
+    // Diagnostic info from the most recent login attempt (for user-facing error messages).
+    public int?    LastLoginStatus { get; private set; }
+    public string? LastLoginReason { get; private set; }
 
     // PUT /api/2/devices/{username}/{deviceId}.json
     public async Task RegisterDeviceAsync(string username, string deviceId)

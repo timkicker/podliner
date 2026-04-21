@@ -118,6 +118,28 @@ public sealed class CmdPlaybackVolumeSpeedTests
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("not supported"));
     }
 
+    // Regression for issue #18: MediaFoundation-like capabilities (no Speed flag) must
+    // reject all speed changes — presets and relative/absolute — and never touch player state.
+    [Theory]
+    [InlineData("1.0")]
+    [InlineData("1.25")]
+    [InlineData("1.5")]
+    [InlineData("+0.1")]
+    [InlineData("-0.1")]
+    public void Speed_without_capability_rejects_all_forms(string arg)
+    {
+        _player.Capabilities = PlayerCapabilities.Play | PlayerCapabilities.Pause
+            | PlayerCapabilities.Stop | PlayerCapabilities.Seek | PlayerCapabilities.Volume;
+        var originalSpeed = _player.State.Speed;
+        var originalData = _data.Speed;
+
+        CmdPlaybackModule.Speed(arg, _player, _data, SaveAsync, _ui);
+
+        _player.State.Speed.Should().Be(originalSpeed);
+        _data.Speed.Should().Be(originalData);
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("not supported"));
+    }
+
     [Fact]
     public void Speed_comma_as_decimal_separator()
     {

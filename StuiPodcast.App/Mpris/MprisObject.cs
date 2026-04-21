@@ -5,7 +5,7 @@ using Tmds.DBus;
 
 namespace StuiPodcast.App.Mpris;
 
-sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
+public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
 {
     public static readonly ObjectPath Path = new("/org/mpris/MediaPlayer2");
 

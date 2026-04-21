@@ -11,4 +11,8 @@ public interface IGpodderClient : IDisposable
     Task<long> PushSubscriptionChangesAsync(string username, string deviceId, string[] add, string[] remove);
     Task<EpisodeActionsResult> GetEpisodeActionsAsync(string username, long since);
     Task<long> PushEpisodeActionsAsync(string username, IEnumerable<PendingGpodderAction> actions);
+
+    // Diagnostics from the most recent login attempt (null if never called or exception).
+    int?    LastLoginStatus { get; }
+    string? LastLoginReason { get; }
 }

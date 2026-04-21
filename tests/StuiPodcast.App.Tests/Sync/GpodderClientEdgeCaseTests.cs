@@ -128,6 +128,31 @@ public sealed class GpodderClientEdgeCaseTests
     }
 
     [Fact]
+    public async Task LoginAsync_records_status_on_404_for_diagnostics()
+    {
+        var (handler, client) = MakeClient();
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NotFound) { ReasonPhrase = "Not Found" });
+
+        var ok = await client.LoginAsync("https://gpodder.net", "user", "pass");
+
+        ok.Should().BeFalse();
+        client.LastLoginStatus.Should().Be(404);
+        client.LastLoginReason.Should().Be("Not Found");
+    }
+
+    [Fact]
+    public async Task LoginAsync_records_status_on_success()
+    {
+        var (handler, client) = MakeClient();
+        handler.Enqueue(FakeHttpHandler.Json(new { }));
+
+        var ok = await client.LoginAsync("https://gpodder.net", "user", "pass");
+
+        ok.Should().BeTrue();
+        client.LastLoginStatus.Should().Be(200);
+    }
+
+    [Fact]
     public async Task Configure_trims_trailing_slash()
     {
         var handler = new FakeHttpHandler();

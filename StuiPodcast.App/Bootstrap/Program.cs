@@ -174,6 +174,9 @@ internal class Program
         _ui.SetUnplayedHint(_data.UnplayedOnly);
         _ui.SetPlayerPlacement(_data.PlayerAtTop);
 
+        // reflect initial engine capabilities in the UI (e.g. disable speed buttons on MediaFoundation)
+        _ui.UpdateSpeedEnabled((_player.Capabilities & PlayerCapabilities.Speed) != 0);
+
         // lookups
         _ui.SetQueueLookup(id => _data.Queue.Contains(id));
         _ui.SetDownloadStateLookup(id => _app!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);

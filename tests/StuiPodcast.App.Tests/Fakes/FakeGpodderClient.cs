@@ -13,6 +13,12 @@ sealed class FakeGpodderClient : IGpodderClient
     public List<(string[] add, string[] remove)> SubsPushes  { get; } = new();
     public List<PendingGpodderAction>             ActionsSent { get; } = new();
 
+    public int?    LastLoginStatus { get; set; }
+    public string? LastLoginReason { get; set; }
+
+    int?    IGpodderClient.LastLoginStatus => LastLoginStatus;
+    string? IGpodderClient.LastLoginReason => LastLoginReason;
+
     void IGpodderClient.Configure(string server, string username, string password) { }
 
     Task<bool> IGpodderClient.LoginAsync(string server, string username, string password)

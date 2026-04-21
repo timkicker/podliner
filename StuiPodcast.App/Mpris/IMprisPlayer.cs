@@ -3,7 +3,7 @@ using Tmds.DBus;
 namespace StuiPodcast.App.Mpris;
 
 [DBusInterface("org.mpris.MediaPlayer2.Player")]
-interface IMprisPlayer : IDBusObject
+public interface IMprisPlayer : IDBusObject
 {
     Task NextAsync();
     Task PreviousAsync();

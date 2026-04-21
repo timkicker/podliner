@@ -57,8 +57,20 @@ sealed class GpodderSyncService : IDisposable
 
         try
         {
+            Log.Information("gpodder/sync login attempt server={Server} user={User}", server, username);
             var ok = await _client.LoginAsync(server, username, password);
-            if (!ok) return (false, "login failed (check credentials)");
+            if (!ok)
+            {
+                var status = _client.LastLoginStatus;
+                var reason = _client.LastLoginReason;
+                var detail = status.HasValue
+                    ? $"HTTP {status}{(string.IsNullOrWhiteSpace(reason) ? "" : $" {reason}")}"
+                    : "unknown error";
+                Log.Warning("gpodder/sync login failed server={Server} detail={Detail}", server, detail);
+                // Hint for Nextcloud users whose /api/2 endpoints don't exist.
+                var hint = status == 404 ? " (endpoint not found — Nextcloud gPodder-Sync uses a different API path)" : "";
+                return (false, $"login failed: {detail}{hint}");
+            }
 
             _store.Current.ServerUrl = server.TrimEnd('/');
             _store.Current.Username  = username;

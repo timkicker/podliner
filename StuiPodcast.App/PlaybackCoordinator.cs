@@ -8,7 +8,7 @@ namespace StuiPodcast.App;
 #region playback coordinator
 
 // coordinates playback progress, persistence and auto advance
-sealed class PlaybackCoordinator
+public sealed class PlaybackCoordinator
 {
     #region deps and state
 
