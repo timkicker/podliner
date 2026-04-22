@@ -640,6 +640,10 @@ static class UiComposer
                 {
                     ui.UpdatePlayerSnapshot(snap, player.State.Volume0_100);
                     ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
+                    // Keep the playing episode row's progress bar fresh with a
+                    // single-row update; the periodic full refresh used to do
+                    // this but rebuilt the whole list.
+                    ui.RefreshActiveProgress(snap);
 
                     var nowId = ui.GetNowPlayingId();
                     if (nowId is Guid nid && snap.EpisodeId == nid)

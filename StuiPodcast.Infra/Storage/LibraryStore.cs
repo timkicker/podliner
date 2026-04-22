@@ -9,7 +9,7 @@ namespace StuiPodcast.Infra.Storage
     // debounced saves and basic validation
     // no download fields in the library
     // callers should canonicalize urls before storing
-    public sealed class LibraryStore
+    public sealed class LibraryStore : IDisposable
     {
         #region fields and state
 
@@ -481,6 +481,28 @@ namespace StuiPodcast.Infra.Storage
         {
             try { if (File.Exists(TmpPath)) File.Delete(TmpPath); }
             catch { /* best effort */ }
+        }
+
+        #endregion
+
+        #region dispose
+
+        // Flush any pending debounced save and release the timer.
+        public void Dispose()
+        {
+            Timer? timer;
+            lock (_gate)
+            {
+                timer = _debounceTimer;
+                _debounceTimer = null;
+            }
+            if (timer == null) return;
+
+            using var waitHandle = new ManualResetEvent(false);
+            try { timer.Dispose(waitHandle); waitHandle.WaitOne(TimeSpan.FromSeconds(2)); }
+            catch { /* best effort */ }
+
+            if (_savePending && !_readOnly) SaveNow();
         }
 
         #endregion

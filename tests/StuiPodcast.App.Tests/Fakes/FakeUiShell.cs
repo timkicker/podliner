@@ -64,6 +64,8 @@ sealed class FakeUiShell : IUiShell
     public void SetWindowTitle(string? s) => LastWindowTitle = s;
     public void ShowDetails(Episode e) => LastShownDetails = e;
     public void SetNowPlaying(Guid? episodeId) => NowPlayingId = episodeId;
+    public PlaybackSnapshot? LastActiveProgressSnap { get; private set; }
+    public void RefreshActiveProgress(PlaybackSnapshot snap) => LastActiveProgressSnap = snap;
     public void RequestAddFeed(string url) => LastRequestedAddFeedUrl = url;
     public void RequestRemoveFeed() => RemoveFeedRequested = true;
     public void RequestRefresh() => RefreshRequested = true;

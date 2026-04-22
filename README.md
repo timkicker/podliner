@@ -42,8 +42,9 @@
 ## Why podliner? 
 
 - **Keyboard-first & mouse-friendly.** Full mouse support (click, select, scroll) with fast TUI feedback.
-- **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `dd` for remove from queue, `/` to search) plus concise colon-commands (`:add <url>`, `:queue`, `:play`, `:export-opml`, `:import-opml`).
-- **Sync progress and subscriptions** Via the gpodder api
+- **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `/` to search) plus concise colon-commands (`:add <url>`, `:queue add`, `:opml import`, `:opml export`).
+- **Sync progress and subscriptions** via the gPodder API.
+- **MPRIS on Linux.** Media keys (play/pause/next/prev) and status from `playerctl`, KDE/GNOME widgets, etc.
 - **Offline-ready.** Download episodes, resume where you left off, manage a queue.
 - **Easy migration.** OPML import/export to move subscriptions between players.
 - **Cross-platform.** Single-file builds for Linux, macOS, and Windows.
@@ -95,8 +96,8 @@ irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 |
 Most podcast players support **OPML** export/import.
 
 - **Export** your subscriptions from the old player as an `.opml` file (e.g. `subscriptions.opml`).
-- In **podliner**, open the **Import OPML** action and select that file.
-- To **export** your current subscriptions from podliner, use **Export OPML**. It writes to your **Documents** folder as:
+- In **podliner**, run `:opml import <path>` to import.
+- To **export** your current subscriptions from podliner, run `:opml export`. With no path, it writes to your **Documents** folder as:
   - Linux/macOS: `~/Documents/podliner-feeds.opml`
   - Windows: `%USERPROFILE%\Documents\podliner-feeds.opml`
 - If you prefer to drop files in place, podliner stores its config here:
@@ -107,7 +108,9 @@ Most podcast players support **OPML** export/import.
 
 ## gPodder sync
 
-Podliner can sync your subscriptions and play history with any **gPodder API v2** compatible server, including [gpodder.net](https://gpodder.net) (public, free), Nextcloud with the gPodder app, or any self-hosted instance.
+Podliner can sync your subscriptions and play history with any **gPodder API v2** compatible server. Tested with [gpodder.net](https://gpodder.net) (public, free) and self-hosted gpodder instances.
+
+> Note: Nextcloud's gPodder-Sync app uses a different API path and is not supported yet. See [#6](https://github.com/timkicker/podliner/issues/6).
 
 **Quick start**
 ```
@@ -144,11 +147,12 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 - j / k: move down / up
 - gg / G: jump to top / bottom
 - / : search in current list
-- f : toggle “unplayed only”
+- u : toggle “unplayed only”
 
 **Downloads & queue**
 - d : download or show status
-- :queue : switch to queue view
+- :feed queue : switch to queue view
+- :queue add|rm|clear|shuffle : queue ops for selected episode
 - :play-next / :play-prev : next/previous in queue
 
 **Feeds**
@@ -172,7 +176,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
   - Windows: `%LOCALAPPDATA%\podliner\logs\`
   - File pattern: `podliner-.log` (daily)
   - Example: `…/podliner/logs/podliner-YYYYMMDD.log`
-- **Downloads**: {{IF APPLICABLE: path or “same as configured in app”}}
+- **Downloads**: `~/Podcasts/` by default (all platforms); override by setting `DownloadDir` in `appsettings.json`
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
 > Back up `appsettings.json` and `library.json` to migrate settings and library to another machine.
@@ -180,21 +184,22 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 
 ## Audio engines
 podliner can use different players:
-- **mpv** (recommended)
-- **ffplay** (part of ffmpeg)
-- **VLC** (via LibVLC; Windows support included with `VideoLAN.LibVLC.Windows`)
-- **Media Foundation**; built in (Windows only) and used as fallback when VLC or MPV are not available.
+- **VLC** (via LibVLC; bundled on Windows via `VideoLAN.LibVLC.Windows`, install `vlc` on Linux/macOS). Preferred: full seek/speed/volume support.
+- **mpv** (IPC socket). Full feature support.
+- **Media Foundation** (Windows only, built-in). No playback speed control.
+- **ffplay** (part of ffmpeg). Fallback only: coarse seek by restart, no live speed/volume.
 
 Install examples:
-- Debian/Ubuntu: `sudo apt-get install -y mpv ffmpeg`
-- Fedora: `sudo dnf install -y mpv ffmpeg`
-- Arch: `sudo pacman -S --needed mpv ffmpeg`
-- macOS: `brew install mpv ffmpeg` *(if you use Homebrew)*
-- Windows: download mpv or rely on VLC package as configured.
+- Debian/Ubuntu: `sudo apt-get install -y vlc mpv ffmpeg`
+- Fedora: `sudo dnf install -y vlc mpv ffmpeg`
+- Arch: `sudo pacman -S --needed vlc mpv ffmpeg`
+- macOS: `brew install --cask vlc && brew install mpv ffmpeg`
+- Windows: VLC is bundled; `mpv`/`ffmpeg` optional via your package manager of choice.
 
 Engine selection & fallback:
-- Default is `auto` (prefer local download if available; else remote if online).
-- You can switch engines from via command `:engine vlc|mpv|ffplay|mediafoundation `
+- Default is `auto`: tries VLC first, then an OS-specific fallback chain (Windows: MediaFoundation → mpv → ffplay; Linux/macOS: mpv → ffplay).
+- Switch engines at runtime with `:engine vlc|mpv|ffplay|mediafoundation`.
+- `:play-source auto|local|remote` controls whether to prefer local downloads or the remote URL.
 
 ## FAQ / Troubleshooting
 
@@ -281,12 +286,12 @@ Security-sensitive issues: contact tim@kicker.dev.
 **Libraries used**
 - [Terminal.Gui](https://github.com/migueldeicaza/gui.cs) - TUI framework
 - [Serilog](https://serilog.net/) and [Serilog.Sinks.File](https://github.com/serilog/serilog-sinks-file) - logging
-- [AngleSharp](https://anglesharp.github.io/)- HTML parsing
+- [AngleSharp](https://anglesharp.github.io/) - HTML parsing
 - [CodeHollow.FeedReader](https://github.com/codehollow/FeedReader) - RSS/Atom parsing
-- [Microsoft.Data.Sqlite](https://learn.microsoft.com/dotnet/standard/data/sqlite/) - SQLite provider
 - [LibVLCSharp](https://github.com/videolan/libvlcsharp) - VLC bindings
-- [VideoLAN.LibVLC.Windows](https://www.nuget.org/packages/VideoLAN.LibVLC.Windows)- LibVLC binaries for Windows
-- [NAudio](https://github.com/naudio/NAudio)- Windows audio helpers (Media Foundation)
+- [VideoLAN.LibVLC.Windows](https://www.nuget.org/packages/VideoLAN.LibVLC.Windows) - LibVLC binaries for Windows
+- [NAudio](https://github.com/naudio/NAudio) - Windows audio helpers (Media Foundation)
+- [Tmds.DBus](https://github.com/tmds/Tmds.DBus) - D-Bus client (MPRIS on Linux)
 
 **Engines and tools**
 - [VLC](https://www.videolan.org/) - media engine (via LibVLC)

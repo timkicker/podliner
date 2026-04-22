@@ -38,7 +38,8 @@ Full in-app help: `:h`
 
 **Navigation**
 - `j / k`: move selection down or up
-- `g / G`: jump to start or end
+- `g / G`: seek audio to start / end
+- `:H / :M / :L` or `:zt / :zz / :zb`: jump selection to top / middle / bottom of the list
 - `/`: search in current list
 
 **Downloads**
@@ -63,19 +64,19 @@ Full in-app help: `:h`
 | `Space`                | Toggle play or pause                           |                                 |
 | `← / →`                | Seek -10s / +10s                               |                                 |
 | `H / L`                | Seek -60s / +60s                               |                                 |
+| `g / G`                | Seek audio to 0:00 / 100%                      |                                 |
 | `- / +`                | Volume down / up                               | 0 to 100                        |
 | `[ / ]`                | Slower / faster                                |                                 |
 | `=` or `1`             | Reset speed to 1.0x                            |                                 |
 | `2 / 3`                | Speed presets 1.25x / 1.5x                     |                                 |
-| `Enter`                | Play selected episode                           |                                 |
+| `Enter`                | Play selected episode                          |                                 |
 | `i`                    | Open Shownotes tab                             |                                 |
 | `Esc` (in Shownotes)   | Back to Episodes                               |                                 |
 | `j / k`                | Move selection down / up                       |                                 |
 | `h / l`                | Focus feeds / episodes                         |                                 |
-| `J / K`                | Next / previous unplayed                       |                                 |
-| `⇧J / ⇧K`             | Move item down / up in Queue                    |                                 |
+| `J / K`                | Next / previous unplayed (move item in Queue view) | Context-aware              |
 | `m`                    | Toggle played flag                             |                                 |
-| `u`                    | Toggle unplayed filter                         | Use `f` instead if you remapped |
+| `u`                    | Toggle unplayed filter                         |                                 |
 | `d`                    | Toggle download flag                           |                                 |
 | `:`                    | Enter command mode                             |                                 |
 | `/`                    | Search (Enter to apply, `n` to repeat)         |                                 |
@@ -118,8 +119,8 @@ Full in-app help: `:h`
   Examples: `:goto top`, `:goto end`
 - `:now`  
   Select the currently playing episode.
-- `:zt` `:zz` `:zb` (aliases `:H` `:M` `:L`)  
-  Position the current row at top, middle, or bottom.
+- `:zt` `:zz` `:zb` (also `:H` `:M` `:L`)
+  Jump selection to top, middle, or bottom of the current list.
 
 ### Downloads
 - `:download [start|cancel]` (alias `:dl`)  
@@ -149,7 +150,7 @@ Full in-app help: `:h`
   Examples: `:add https://example.com/feed.xml`, `:a https://…`
 - `:refresh` (aliases `:update` `:r`)  
   Refresh all feeds.
-- `:remove-feed` (aliases `:rm-feed` `:feed remove`)  
+- `:remove-feed` (alias `:rm-feed`)
   Remove the currently selected feed.
 - `:feed all|saved|downloaded|history|queue`  
   Switch to a virtual feed.  
@@ -184,9 +185,9 @@ Full in-app help: `:h`
 - `:play-source [auto|local|remote|show]`  
   Prefer playback source.  
   Examples: `:play-source`, `:play-source show`, `:play-source local`
-- `:engine [show|help|auto|vlc|mpv|ffplay|diag]`  
-  Select or inspect playback engine.  
-  Examples: `:engine`, `:engine mpv`, `:engine help`, `:engine diag`
+- `:engine [show|help|auto|vlc|mpv|ffplay|mediafoundation|mf|diag]`
+  Select or inspect playback engine. `mf` is a shorthand for `mediafoundation` (Windows only).
+  Examples: `:engine`, `:engine mpv`, `:engine mf`, `:engine help`, `:engine diag`
 
 ### OPML
 - `:opml import <path> [--update-titles] | export [<path>]`  
@@ -266,19 +267,20 @@ FFplay (limited)
 
 **Switching engines**
 ```
-:engine                  -> show current engine and capabilities
-:engine help             -> show this guide
-:engine auto             -> prefer VLC then MPV then FFplay
-:engine vlc|mpv|ffplay   -> set preference
-:engine diag             -> show active engine, caps, preference and last used
+:engine                                     -> show current engine and capabilities
+:engine help                                -> show this guide
+:engine auto                                -> Windows: VLC -> MediaFoundation -> MPV -> FFplay
+                                               Linux/macOS: VLC -> MPV -> FFplay
+:engine vlc|mpv|ffplay|mediafoundation|mf   -> set preference
+:engine diag                                -> show active engine, caps, preference and last used
 ```
 
 **Notes**
 - On FFplay, `:seek` restarts playback at the new position (coarse seek).
-- If an action is not supported by the active engine, a short OSD hint appears.
+- If an action is not supported by the active engine, a short OSD hint appears (e.g. `:speed` on MediaFoundation).
 - Linux: install `vlc`, `mpv`, `ffmpeg`.
-- macOS: `brew install vlc mpv ffmpeg`
-- Windows: install VLC, MPV, FFmpeg and add them to PATH.
+- macOS: `brew install --cask vlc && brew install mpv ffmpeg`
+- Windows: VLC is bundled with podliner. Install `mpv`/`ffmpeg` separately if you want them.
 
 ---
 
@@ -317,8 +319,9 @@ Sync subscriptions and play history with any gPodder API v2 compatible server.
 
 **Supported servers**
 - [gpodder.net](https://gpodder.net) — public, free
-- Nextcloud with the gPodder app
 - Any self-hosted gPodder API v2 compatible server
+
+> Nextcloud's gPodder-Sync app uses a different API path and is not supported yet. See [#6](https://github.com/timkicker/podliner/issues/6).
 
 **Quick start**
 ```

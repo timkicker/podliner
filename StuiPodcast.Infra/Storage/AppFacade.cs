@@ -5,7 +5,7 @@ namespace StuiPodcast.Infra.Storage
 {
     // app facade: single entry point for ui and orchestration
     // wraps config store and library store; downloads are not persisted
-    public sealed class AppFacade
+    public sealed class AppFacade : IDisposable
     {
         public ConfigStore  ConfigStore  { get; }
         public LibraryStore LibraryStore { get; }
@@ -171,6 +171,14 @@ namespace StuiPodcast.Infra.Storage
             private NullDownloadLookup() { }
             public bool IsDownloaded(Guid episodeId) => false;
             public bool TryGetLocalPath(Guid episodeId, out string? path) { path = null; return false; }
+        }
+        #endregion
+
+        #region dispose
+        public void Dispose()
+        {
+            try { ConfigStore.Dispose(); }  catch { /* best effort */ }
+            try { LibraryStore.Dispose(); } catch { /* best effort */ }
         }
         #endregion
     }

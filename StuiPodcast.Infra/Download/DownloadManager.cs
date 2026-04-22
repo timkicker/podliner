@@ -296,6 +296,46 @@ namespace StuiPodcast.Infra.Download
             }
         }
 
+        // Thread-safe "cancel + drop all state" for an episode. Replaces the
+        // pattern where UI code would call Cancel() and then directly mutate
+        // _data.DownloadQueue/_data.DownloadMap from outside the lock.
+        public void Forget(Guid episodeId)
+        {
+            Cancel(episodeId);
+            lock (_gate)
+            {
+                _data.DownloadQueue.RemoveAll(x => x == episodeId);
+                _data.DownloadMap.Remove(episodeId);
+            }
+        }
+
+        // Thread-safe queue clear.
+        public int ClearQueue()
+        {
+            lock (_gate)
+            {
+                var n = _data.DownloadQueue.Count;
+                _data.DownloadQueue.Clear();
+                return n;
+            }
+        }
+
+        // Thread-safe snapshot of the download map for UI enumeration.
+        public IReadOnlyList<KeyValuePair<Guid, DownloadStatus>> SnapshotMap()
+        {
+            lock (_gate) return _data.DownloadMap.ToArray();
+        }
+
+        public int QueuedCount()
+        {
+            lock (_gate) return _data.DownloadQueue.Count;
+        }
+
+        public int CountInState(DownloadState state)
+        {
+            lock (_gate) return _data.DownloadMap.Count(kv => kv.Value.State == state);
+        }
+
         public DownloadState GetState(Guid episodeId)
         {
             lock (_gate)
@@ -304,6 +344,26 @@ namespace StuiPodcast.Infra.Download
                     return st.State;
             }
             return DownloadState.None;
+        }
+
+        // Thread-safe snapshot of a single status. Returns a copy, so callers
+        // can inspect fields without holding the lock.
+        public bool TryGetStatus(Guid episodeId, out DownloadStatus? status)
+        {
+            lock (_gate)
+            {
+                if (_data.DownloadMap.TryGetValue(episodeId, out var st))
+                {
+                    status = new DownloadStatus
+                    {
+                        State = st.State, BytesReceived = st.BytesReceived, TotalBytes = st.TotalBytes,
+                        LocalPath = st.LocalPath, Error = st.Error, UpdatedAt = st.UpdatedAt
+                    };
+                    return true;
+                }
+            }
+            status = null;
+            return false;
         }
 
         #endregion
@@ -577,48 +637,53 @@ namespace StuiPodcast.Infra.Download
             try
             {
                 await using var net = await resp.Content.ReadAsStreamAsync(outerCancel).ConfigureAwait(false);
-                await using var file = new FileStream(effectiveTmpPath, resumeFrom > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
 
-                var buf = new byte[64 * 1024];
+                // Scope the FileStream so it's fully closed before we try to Move/Replace.
+                // FileShare.None + an open handle causes IOException on Windows when moving
+                // the file out from under ourselves; explicit dispose releases the handle.
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-
-                while (true)
+                await using (var file = new FileStream(effectiveTmpPath, resumeFrom > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
                 {
-                    using var readCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
-                    readCts.CancelAfter(READ_TIMEOUT_MS);
+                    var buf = new byte[64 * 1024];
 
-                    int n;
-                    try
+                    while (true)
                     {
-                        n = await net.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException oce) when (!outerCancel.IsCancellationRequested)
-                    {
-                        throw new IOException("read timeout", oce);
-                    }
+                        using var readCts = CancellationTokenSource.CreateLinkedTokenSource(outerCancel);
+                        readCts.CancelAfter(READ_TIMEOUT_MS);
 
-                    if (n <= 0) break;
-
-                    await file.WriteAsync(buf.AsMemory(0, n), outerCancel).ConfigureAwait(false);
-                    bytesEmitted += n;
-
-                    var now = DateTime.UtcNow;
-                    if ((now - lastPulse).TotalMilliseconds >= PROGRESS_PULSE_MS)
-                    {
-                        lastPulse = now;
-                        var cg = resumeFrom + bytesEmitted;
-                        var ct = total.HasValue ? resumeFrom + total.Value : (long?)null;
-
-                        SetState(ep.Id, s =>
+                        int n;
+                        try
                         {
-                            s.BytesReceived = cg;
-                            s.TotalBytes = ct;
-                            s.State = DownloadState.Running;
-                        });
-                    }
-                }
+                            n = await net.ReadAsync(buf.AsMemory(0, buf.Length), readCts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException oce) when (!outerCancel.IsCancellationRequested)
+                        {
+                            throw new IOException("read timeout", oce);
+                        }
 
-                await file.FlushAsync(outerCancel).ConfigureAwait(false);
+                        if (n <= 0) break;
+
+                        await file.WriteAsync(buf.AsMemory(0, n), outerCancel).ConfigureAwait(false);
+                        bytesEmitted += n;
+
+                        var now = DateTime.UtcNow;
+                        if ((now - lastPulse).TotalMilliseconds >= PROGRESS_PULSE_MS)
+                        {
+                            lastPulse = now;
+                            var cg = resumeFrom + bytesEmitted;
+                            var ct = total.HasValue ? resumeFrom + total.Value : (long?)null;
+
+                            SetState(ep.Id, s =>
+                            {
+                                s.BytesReceived = cg;
+                                s.TotalBytes = ct;
+                                s.State = DownloadState.Running;
+                            });
+                        }
+                    }
+
+                    await file.FlushAsync(outerCancel).ConfigureAwait(false);
+                } // <-- FileStream disposed here, handle released before Move below
                 sw.Stop();
 
                 SetState(ep.Id, s => s.State = DownloadState.Verifying);

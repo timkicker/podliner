@@ -35,6 +35,7 @@ internal class Program
     private static PlaybackCoordinator? _playback;
     private static MemoryLogSink     _memLog = new();
     private static DownloadManager?  _downloader;
+    private static DownloadLookupAdapter? _downloadLookup;
 
     private static UiShell?            _ui;
     private static MprisService?       _mpris;
@@ -86,9 +87,9 @@ internal class Program
         Console.WriteLine($"Library: {_libraryStore.FilePath}");
 
         _downloader = new DownloadManager(_data, appConfigDir);
-        var downloadLookup = new DownloadLookupAdapter(_downloader, _data);
+        _downloadLookup = new DownloadLookupAdapter(_downloader, _data);
 
-        _app = new AppFacade(_configStore, _libraryStore, downloadLookup);
+        _app = new AppFacade(_configStore, _libraryStore, _downloadLookup);
 
         // load and bridge to appdata
         var cfg = _app.LoadConfig();
@@ -111,12 +112,14 @@ internal class Program
         // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
         _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog);
-        _feeds    = new FeedService(_data, _app);
+        _feeds    = new FeedService(_data, _app, uiDispatch: DispatchToUi);
 
         // gpodder sync (opt-in; no-op if not configured)
         _gpodderStore = new GpodderStore(appConfigDir);
         _gpodderStore.Load();
-        _gpodder = new GpodderSyncService(_gpodderStore, new GpodderClient(), _data, _playback, _saver.RequestSaveAsync);
+        _gpodder = new GpodderSyncService(
+            _gpodderStore, new GpodderClient(), _data, _playback, _saver.RequestSaveAsync,
+            uiDispatch: DispatchToUi);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
@@ -264,7 +267,17 @@ internal class Program
                 // ignored
             }
 
-            _player?.Dispose();
+            try { _player?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _downloadLookup?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
 
             try { _downloader?.Dispose(); }
             catch
@@ -281,6 +294,24 @@ internal class Program
             _gpodder?.Dispose();
 
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
+
+            try { _feeds?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _playback?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _app?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
 
             try { Application.Shutdown(); }
             catch
@@ -319,6 +350,22 @@ internal class Program
     #endregion
 
     #region helpers
+    // Run the given action on the Terminal.Gui main loop and await its completion.
+    // Falls back to synchronous execution if no loop is running (tests, CLI-only flows).
+    private static Task DispatchToUi(Action action)
+    {
+        var loop = Application.MainLoop;
+        if (loop == null) { action(); return Task.CompletedTask; }
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        loop.Invoke(() =>
+        {
+            try { action(); tcs.TrySetResult(true); }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        });
+        return tcs.Task;
+    }
+
     // resolve configuration directory
     private static string ResolveConfigDir()
     {

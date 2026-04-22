@@ -35,6 +35,13 @@ internal sealed class UiEpisodesPane
     #region state and caches
 
     private List<Episode> _episodes = new();
+    // Cached row texts passed to ListView.SetSource. Mutating entries in-place
+    // is what lets UpdateRow(epId) avoid rebuilding the whole list.
+    private List<string> _items = new();
+    private readonly Dictionary<Guid, int> _indexById = new();
+    // Remember the previously highlighted now-playing row so a change in
+    // _nowPlayingId only has to refresh the old and new rows, not all of them.
+    private Guid? _prevNowPlayingId;
     private List<Feed> _feeds = new();
     private Dictionary<Guid, string> _feedTitleMap = new();
 
@@ -146,7 +153,9 @@ internal sealed class UiEpisodesPane
         {
             // queue: fifo based on _queueOrder, ignore search/sort
             _showFeedColumn = true; // queue lists multiple feeds → enable column
-            var map = src.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
+            // Episode IDs are unique by design; GroupBy is overkill.
+            var map = new Dictionary<Guid, Episode>();
+            foreach (var e in src) map[e.Id] = e;
             src = _queueOrder.Where(map.ContainsKey).Select(id => map[id]);
         }
         else
@@ -175,12 +184,13 @@ internal sealed class UiEpisodesPane
         }
 
         _episodes = src.ToList();
+        RebuildIndex();
 
         // determine target selection
         int sel = 0;
         if (preferSelectId is Guid pid)
         {
-            var i = _episodes.FindIndex(e => e.Id == pid);
+            _indexById.TryGetValue(pid, out var i);
             if (i >= 0) sel = i;
         }
         else
@@ -188,13 +198,17 @@ internal sealed class UiEpisodesPane
             sel = Math.Clamp(keepSel, 0, Math.Max(0, _episodes.Count - 1));
         }
 
-        // set items
-        var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
-        List.SetSource(items);
-        List.SelectedItem = items.Count > 0 ? Math.Clamp(sel, 0, items.Count - 1) : 0;
+        // build + hand the cached items list to Terminal.Gui; in-place mutation
+        // on this same reference is what makes UpdateRow cheap.
+        _items = new List<string>(_episodes.Count);
+        foreach (var e in _episodes) _items.Add(RowFor(e, _nowPlayingId, _activeSnapshot));
+        _prevNowPlayingId = _nowPlayingId;
+
+        List.SetSource(_items);
+        List.SelectedItem = _items.Count > 0 ? Math.Clamp(sel, 0, _items.Count - 1) : 0;
 
         // restore scroll
-        var maxTop = Math.Max(0, items.Count - 1);
+        var maxTop = Math.Max(0, _items.Count - 1);
         List.TopItem = Math.Clamp(keepTop, 0, maxTop);
 
         UpdateEmptyHint(feedId, FEED_ALL, FEED_SAVED, FEED_DOWNLOADED, FEED_HISTORY, FEED_QUEUE, search);
@@ -366,33 +380,61 @@ internal sealed class UiEpisodesPane
     // existing signature retained for compatibility
     public void InjectNowPlaying(Guid? nowId)
     {
+        var prev = _nowPlayingId;
         _nowPlayingId = nowId;
         _activeSnapshot = null; // no snapshot → use persistent values
-        RebuildRowsPreservingView();
+        RefreshNowPlayingTransition(prev);
     }
 
     // overload with snapshot to sync active episode progress with audio player
     public void InjectNowPlaying(Guid? nowId, PlaybackSnapshot snapshot)
     {
+        var prev = _nowPlayingId;
         _nowPlayingId = nowId;
         _activeSnapshot = snapshot;
-        RebuildRowsPreservingView();
+        RefreshNowPlayingTransition(prev);
     }
 
-    private void RebuildRowsPreservingView()
+    // Mutate only the rows that actually changed: the row losing the ▶ marker
+    // and the row gaining it. Much cheaper than a full rebuild when a user has
+    // thousands of episodes.
+    private void RefreshNowPlayingTransition(Guid? previousNowId)
     {
-        var items = _episodes.Select(e => RowFor(e, _nowPlayingId, _activeSnapshot)).ToList();
+        if (previousNowId.HasValue && previousNowId != _nowPlayingId)
+            UpdateRow(previousNowId.Value);
 
-        // preserve selection & scroll
-        var keepSel = List.Source?.Count > 0 ? Math.Clamp(List.SelectedItem, 0, List.Source.Count - 1) : 0;
-        var keepTop = List.TopItem;
+        if (_nowPlayingId.HasValue)
+            UpdateRow(_nowPlayingId.Value);
 
-        List.SetSource(items);
-        var maxSel = Math.Max(0, items.Count - 1);
-        List.SelectedItem = Math.Clamp(keepSel, 0, maxSel);
-        List.TopItem = Math.Clamp(keepTop, 0, Math.Max(0, items.Count - 1));
-
+        _prevNowPlayingId = _nowPlayingId;
         Tabs.SetNeedsDisplay();
+    }
+
+    // Re-renders just the active episode row with the latest snapshot. Called
+    // on the playback tick to update the progress bar without rebuilding the
+    // whole list.
+    public void RefreshActiveProgress(PlaybackSnapshot snapshot)
+    {
+        _activeSnapshot = snapshot;
+        if (_nowPlayingId is Guid nid) UpdateRow(nid);
+    }
+
+    // Targeted row update: swap one entry in the cached _items list and let
+    // Terminal.Gui redraw. This relies on ListView reading the source on each
+    // render (it wraps the IList without snapshotting).
+    private void UpdateRow(Guid episodeId)
+    {
+        if (!_indexById.TryGetValue(episodeId, out var idx)) return;
+        if (idx < 0 || idx >= _items.Count || idx >= _episodes.Count) return;
+        _items[idx] = RowFor(_episodes[idx], _nowPlayingId, _activeSnapshot);
+        List.SetNeedsDisplay();
+    }
+
+    private void RebuildIndex()
+    {
+        _indexById.Clear();
+        for (int i = 0; i < _episodes.Count; i++)
+            _indexById[_episodes[i].Id] = i;
     }
 
     #endregion

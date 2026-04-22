@@ -15,6 +15,9 @@ sealed class GpodderSyncService : IDisposable
     private readonly PlaybackCoordinator _playback;
     private readonly Func<Task>?         _saveAsync;
     private readonly IKeyring            _keyring;
+    // Marshals data mutations to the UI thread to avoid races with UI reads of _data.Feeds.
+    // Defaults to synchronous (test-friendly); Program.cs wires it to Application.MainLoop.Invoke.
+    private readonly Func<Action, Task>  _uiDispatch;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -27,15 +30,17 @@ sealed class GpodderSyncService : IDisposable
         IGpodderClient      client,
         AppData             data,
         PlaybackCoordinator playback,
-        Func<Task>?         saveAsync = null,
-        IKeyring?           keyring   = null)
+        Func<Task>?         saveAsync  = null,
+        IKeyring?           keyring    = null,
+        Func<Action, Task>? uiDispatch = null)
     {
-        _store     = store;
-        _client    = client;
-        _data      = data;
-        _playback  = playback;
-        _saveAsync = saveAsync;
-        _keyring   = keyring ?? new OsKeyring();
+        _store      = store;
+        _client     = client;
+        _data       = data;
+        _playback   = playback;
+        _saveAsync  = saveAsync;
+        _keyring    = keyring    ?? new OsKeyring();
+        _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
@@ -154,34 +159,41 @@ sealed class GpodderSyncService : IDisposable
                 cfg.Username!, cfg.DeviceId, cfg.SubsTimestamp);
 
             int added = 0, removed = 0;
+            List<string> snapshotUrls = new();
 
-            foreach (var url in delta.Add)
+            // Mutate _data.Feeds on the UI thread so concurrent UI reads don't trip over us.
+            await _uiDispatch(() =>
             {
-                if (string.IsNullOrWhiteSpace(url)) continue;
-                if (_data.Feeds.Any(f => string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase)))
-                    continue;
+                foreach (var url in delta.Add)
+                {
+                    if (string.IsNullOrWhiteSpace(url)) continue;
+                    if (_data.Feeds.Any(f => string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase)))
+                        continue;
 
-                // Best-effort placeholder; user can refresh later to fetch episodes.
-                _data.Feeds.Add(new Feed { Title = url, Url = url });
-                added++;
-            }
+                    // Best-effort placeholder; user can refresh later to fetch episodes.
+                    _data.Feeds.Add(new Feed { Title = url, Url = url });
+                    added++;
+                }
 
-            foreach (var url in delta.Remove)
-            {
-                if (string.IsNullOrWhiteSpace(url)) continue;
-                var feed = _data.Feeds.FirstOrDefault(f =>
-                    string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase));
-                if (feed == null) continue;
-                _data.Feeds.Remove(feed);
-                removed++;
-            }
+                foreach (var url in delta.Remove)
+                {
+                    if (string.IsNullOrWhiteSpace(url)) continue;
+                    var feed = _data.Feeds.FirstOrDefault(f =>
+                        string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase));
+                    if (feed == null) continue;
+                    _data.Feeds.Remove(feed);
+                    removed++;
+                }
+
+                snapshotUrls = _data.Feeds
+                    .Where(f => !string.IsNullOrEmpty(f.Url))
+                    .Select(f => f.Url)
+                    .ToList();
+            }).ConfigureAwait(false);
 
             cfg.SubsTimestamp        = delta.Timestamp;
-            cfg.LastKnownServerFeeds = _data.Feeds
-                .Where(f => !string.IsNullOrEmpty(f.Url))
-                .Select(f => f.Url)
-                .ToList();
-            cfg.LastSyncAt = DateTimeOffset.UtcNow;
+            cfg.LastKnownServerFeeds = snapshotUrls;
+            cfg.LastSyncAt           = DateTimeOffset.UtcNow;
             _store.Save();
 
             if (_saveAsync != null && (added > 0 || removed > 0))
@@ -208,11 +220,14 @@ sealed class GpodderSyncService : IDisposable
         {
             var cfg = _store.Current;
 
-            // Subscription diff
-            var currentUrls = _data.Feeds
-                .Where(f => !string.IsNullOrEmpty(f.Url))
-                .Select(f => f.Url)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Snapshot the feed URLs on the UI thread so we don't race a concurrent mutation.
+            HashSet<string> currentUrls = new(StringComparer.OrdinalIgnoreCase);
+            await _uiDispatch(() =>
+            {
+                foreach (var f in _data.Feeds)
+                    if (!string.IsNullOrEmpty(f.Url)) currentUrls.Add(f.Url);
+            }).ConfigureAwait(false);
+
             var serverUrls = cfg.LastKnownServerFeeds
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 

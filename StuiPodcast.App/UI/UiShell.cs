@@ -424,6 +424,11 @@ public sealed class UiShell : IUiShell
 
     public void SetUnplayedHint(bool on) => _episodesPane?.SetUnplayedCaption(on);
 
+    // Forward a fresh playback snapshot to the episodes pane so the active row
+    // shows live progress without triggering a full list rebuild.
+    public void RefreshActiveProgress(PlaybackSnapshot snap)
+        => UI(() => _episodesPane?.RefreshActiveProgress(snap));
+
     public void SetNowPlaying(Guid? episodeId)
     {
         UI(() =>

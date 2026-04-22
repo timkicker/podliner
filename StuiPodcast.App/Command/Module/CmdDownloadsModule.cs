@@ -18,9 +18,9 @@ internal static class CmdDownloadsModule
 
             if (string.IsNullOrEmpty(sub))
             {
-                var q = data.DownloadQueue.Count;
-                var running = data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Running);
-                var failed = data.DownloadMap.Count(kv => kv.Value.State == DownloadState.Failed);
+                var q = dlm.QueuedCount();
+                var running = dlm.CountInState(DownloadState.Running);
+                var failed  = dlm.CountInState(DownloadState.Failed);
                 ui.ShowOsd($"downloads: queue {q}, running {running}, failed {failed}", 1500);
                 return true;
             }
@@ -28,9 +28,9 @@ internal static class CmdDownloadsModule
             if (sub == "retry-failed")
             {
                 int n = 0;
-                foreach (var (id, st) in data.DownloadMap.ToArray())
+                foreach (var kv in dlm.SnapshotMap())
                 {
-                    if (st.State == DownloadState.Failed) { dlm.Enqueue(id); n++; }
+                    if (kv.Value.State == DownloadState.Failed) { dlm.Enqueue(kv.Key); n++; }
                 }
                 _ = saveAsync();
                 ui.RefreshEpisodesForSelectedFeed(data.Episodes);
@@ -40,8 +40,7 @@ internal static class CmdDownloadsModule
 
             if (sub == "clear-queue")
             {
-                int n = data.DownloadQueue.Count;
-                data.DownloadQueue.Clear();
+                var n = dlm.ClearQueue();
                 _ = saveAsync();
                 ui.RefreshEpisodesForSelectedFeed(data.Episodes);
                 ui.ShowOsd($"downloads: cleared queue ({n})", 1200);
@@ -50,7 +49,7 @@ internal static class CmdDownloadsModule
 
             if (sub == "open-dir")
             {
-                var dir = GuessDownloadDir(data);
+                var dir = GuessDownloadDir(dlm);
                 if (!string.IsNullOrWhiteSpace(dir)) TryOpenSystem(dir);
                 else ui.ShowOsd("downloads: no directory found", 1200);
                 return true;
@@ -79,9 +78,7 @@ internal static class CmdDownloadsModule
                 break;
 
             case "cancel":
-                dlm.Cancel(ep.Id);
-                data.DownloadMap.Remove(ep.Id);
-                data.DownloadQueue.RemoveAll(x => x == ep.Id);
+                dlm.Forget(ep.Id);
                 ui.ShowOsd("Download canceled ✖");
                 break;
 
@@ -96,9 +93,7 @@ internal static class CmdDownloadsModule
                 }
                 else
                 {
-                    dlm.Cancel(ep.Id);
-                    data.DownloadMap.Remove(ep.Id);
-                    data.DownloadQueue.RemoveAll(x => x == ep.Id);
+                    dlm.Forget(ep.Id);
                     ui.ShowOsd("Download unqueued");
                 }
                 break;
@@ -129,9 +124,7 @@ internal static class CmdDownloadsModule
         }
         else
         {
-            dlm.Cancel(ep.Id);
-            data.DownloadQueue.RemoveAll(x => x == ep.Id);
-            data.DownloadMap.Remove(ep.Id);
+            dlm.Forget(ep.Id);
             ui.ShowOsd("Download canceled ✖");
         }
 
@@ -139,13 +132,13 @@ internal static class CmdDownloadsModule
         CmdViewModule.ApplyList(ui, data);
     }
 
-    private static string? GuessDownloadDir(AppData data)
+    private static string? GuessDownloadDir(DownloadManager dlm)
     {
         try
         {
-            var any = data.DownloadMap.Values
-                .Where(v => v.State == DownloadState.Done && !string.IsNullOrWhiteSpace(v.LocalPath))
-                .Select(v => Path.GetDirectoryName(v.LocalPath!)!)
+            var any = dlm.SnapshotMap()
+                .Where(kv => kv.Value.State == DownloadState.Done && !string.IsNullOrWhiteSpace(kv.Value.LocalPath))
+                .Select(kv => Path.GetDirectoryName(kv.Value.LocalPath!)!)
                 .FirstOrDefault(p => p != null && Directory.Exists(p));
             return any;
         }

@@ -14,25 +14,28 @@ using System.Net.Http.Headers;
 
 namespace StuiPodcast.Infra
 {
-    public class FeedService
+    public class FeedService : IDisposable
     {
         #region fields and ctor
 
         private readonly AppData _data;
         private readonly AppFacade _app;
         private readonly HttpClient _http;
+        // Marshals _data.Feeds/_data.Episodes mutations to the UI thread so concurrent UI
+        // reads don't race our thread-pool continuations. Defaults to synchronous for tests.
+        private readonly Func<Action, Task> _uiDispatch;
 
-        public FeedService(AppData data, AppFacade app)
+        public FeedService(AppData data, AppFacade app, Func<Action, Task>? uiDispatch = null)
+            : this(data, app, BuildDefaultHandler(), uiDispatch) { }
+
+        // For testing: inject a custom HttpMessageHandler (e.g., FakeHttpHandler).
+        public FeedService(AppData data, AppFacade app, HttpMessageHandler handler, Func<Action, Task>? uiDispatch = null)
         {
             _data = data;
             _app = app;
+            _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
 
-            // own http client with decompression and timeouts
-            var handler = new HttpClientHandler
-            {
-                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
-            };
-            _http = new HttpClient(handler)
+            _http = new HttpClient(handler, disposeHandler: true)
             {
                 Timeout = TimeSpan.FromSeconds(30)
             };
@@ -44,22 +47,34 @@ namespace StuiPodcast.Infra
             _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*", 0.8));
         }
 
+        private static HttpClientHandler BuildDefaultHandler() => new()
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
+        };
+
         #endregion
 
         #region public api
 
         public async Task RemoveFeedAsync(Guid feedId, bool removeDownloads = false)
         {
-            var epIds = _data.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
+            HashSet<Guid> epIds = new();
+            await _uiDispatch(() =>
+            {
+                epIds = _data.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
+            }).ConfigureAwait(false);
 
             var removedFeed = _app.RemoveFeed(feedId);
             var removedEps = _app.RemoveEpisodesByFeed(feedId);
             var removedFromQ = _app.QueueRemoveByEpisodeIds(epIds);
 
-            _data.Feeds.RemoveAll(f => f.Id == feedId);
-            _data.Episodes.RemoveAll(e => e.FeedId == feedId);
-            _data.Queue.RemoveAll(id => epIds.Contains(id));
-            if (_data.LastSelectedFeedId == feedId) _data.LastSelectedFeedId = null;
+            await _uiDispatch(() =>
+            {
+                _data.Feeds.RemoveAll(f => f.Id == feedId);
+                _data.Episodes.RemoveAll(e => e.FeedId == feedId);
+                _data.Queue.RemoveAll(id => epIds.Contains(id));
+                if (_data.LastSelectedFeedId == feedId) _data.LastSelectedFeedId = null;
+            }).ConfigureAwait(false);
 
             if (removeDownloads)
             {
@@ -106,7 +121,7 @@ namespace StuiPodcast.Infra
             var saved = _app.AddOrUpdateFeed(probeFeed);
 
             // update ui cache
-            UpsertFeedIntoData(saved);
+            await UpsertFeedIntoDataAsync(saved).ConfigureAwait(false);
 
             // best effort first refresh
             try { await RefreshFeedAsync(saved).ConfigureAwait(false); }
@@ -117,8 +132,12 @@ namespace StuiPodcast.Infra
 
         public async Task RefreshAllAsync()
         {
+            // snapshot the feed list on the UI thread to avoid enumerating a live list
+            List<CoreFeed> snapshot = new();
+            await _uiDispatch(() => snapshot = _data.Feeds.ToList()).ConfigureAwait(false);
+
             // intentionally sequential
-            foreach (var feed in _data.Feeds.ToList())
+            foreach (var feed in snapshot)
             {
                 try { await RefreshFeedAsync(feed).ConfigureAwait(false); }
                 catch { /* best effort per feed */ }
@@ -137,7 +156,7 @@ namespace StuiPodcast.Infra
                 Log.Warning("feed/refresh no content url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
                 var persistedFail = _app.AddOrUpdateFeed(feed);
-                UpsertFeedIntoData(persistedFail);
+                await UpsertFeedIntoDataAsync(persistedFail).ConfigureAwait(false);
                 return;
             }
 
@@ -153,7 +172,7 @@ namespace StuiPodcast.Infra
                 Log.Warning(ex, "feed/refresh parse fail url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
                 var persistedFail = _app.AddOrUpdateFeed(feed);
-                UpsertFeedIntoData(persistedFail);
+                await UpsertFeedIntoDataAsync(persistedFail).ConfigureAwait(false);
                 return;
             }
 
@@ -163,60 +182,70 @@ namespace StuiPodcast.Infra
             feed.LastChecked = DateTimeOffset.Now;
 
             var persistedFeed = _app.AddOrUpdateFeed(feed);
-            UpsertFeedIntoData(persistedFeed);
+            await UpsertFeedIntoDataAsync(persistedFeed).ConfigureAwait(false);
 
             int added = 0, updated = 0, skippedNoAudio = 0;
+            var items = (f.Items ?? Array.Empty<FeedItem>()).ToList();
 
-            // process items (unchanged from before)
-            foreach (var item in f.Items ?? Array.Empty<FeedItem>())
+            // Parse + decide + mutate _data.Episodes on the UI thread so concurrent UI
+            // enumerations of _data.Episodes don't trip over us.
+            await _uiDispatch(() =>
             {
-                var audioUrl = TryGetAudioUrl(item);
-                if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
+                // Build a URL → Episode lookup once so dedup is O(1) per item
+                // instead of O(total episodes) per item inside the loop.
+                var byUrl = new Dictionary<string, Episode>(StringComparer.OrdinalIgnoreCase);
+                foreach (var e in _data.Episodes)
+                    if (e.FeedId == persistedFeed.Id && !string.IsNullOrEmpty(e.AudioUrl))
+                        byUrl[e.AudioUrl] = e;
 
-                var pub = ParseDate(item);
-                var lenMs = TryGetDurationMs(item) ?? 0;
-                var desc = HtmlToText(item.Content ?? item.Description ?? "");
-                var title = item.Title ?? "(untitled)";
-
-                var existing = _data.Episodes.FirstOrDefault(e =>
-                    e.FeedId == persistedFeed.Id &&
-                    string.Equals(e.AudioUrl, audioUrl, StringComparison.OrdinalIgnoreCase));
-
-                if (existing == null)
+                foreach (var item in items)
                 {
-                    var ep = new Episode
+                    var audioUrl = TryGetAudioUrl(item);
+                    if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
+
+                    var pub = ParseDate(item);
+                    var lenMs = TryGetDurationMs(item) ?? 0;
+                    var desc = HtmlToText(item.Content ?? item.Description ?? "");
+                    var title = item.Title ?? "(untitled)";
+
+                    byUrl.TryGetValue(audioUrl, out var existing);
+
+                    if (existing == null)
                     {
-                        Id = Guid.NewGuid(),
-                        FeedId = persistedFeed.Id,
-                        Title = title,
-                        AudioUrl = audioUrl,
-                        PubDate = pub,
-                        DurationMs = lenMs,
-                        DescriptionText = desc,
-                        Saved = false,
-                        Progress = new EpisodeProgress()
-                    };
+                        var ep = new Episode
+                        {
+                            Id = Guid.NewGuid(),
+                            FeedId = persistedFeed.Id,
+                            Title = title,
+                            AudioUrl = audioUrl,
+                            PubDate = pub,
+                            DurationMs = lenMs,
+                            DescriptionText = desc,
+                            Saved = false,
+                            Progress = new EpisodeProgress()
+                        };
 
-                    var persistedEp = _app.AddOrUpdateEpisode(ep);
-                    _data.Episodes.Add(persistedEp);
-                    added++;
-                }
-                else
-                {
-                    if (string.IsNullOrWhiteSpace(existing.Title) && !string.IsNullOrWhiteSpace(title))
-                        existing.Title = title;
-                    if (!existing.PubDate.HasValue && pub.HasValue)
-                        existing.PubDate = pub;
-                    if (string.IsNullOrWhiteSpace(existing.DescriptionText) && !string.IsNullOrWhiteSpace(desc))
-                        existing.DescriptionText = desc;
-                    if (existing.DurationMs <= 0 && lenMs > 0)
-                        existing.DurationMs = lenMs;
+                        var persistedEp = _app.AddOrUpdateEpisode(ep);
+                        _data.Episodes.Add(persistedEp);
+                        byUrl[audioUrl] = persistedEp; // keep dedup state fresh for rest of loop
+                        added++;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(existing.Title) && !string.IsNullOrWhiteSpace(title))
+                            existing.Title = title;
+                        if (!existing.PubDate.HasValue && pub.HasValue)
+                            existing.PubDate = pub;
+                        if (string.IsNullOrWhiteSpace(existing.DescriptionText) && !string.IsNullOrWhiteSpace(desc))
+                            existing.DescriptionText = desc;
+                        if (existing.DurationMs <= 0 && lenMs > 0)
+                            existing.DurationMs = lenMs;
 
-                    var persistedEp = _app.AddOrUpdateEpisode(existing);
-                    // _data holds reference; nothing to add
-                    updated++;
+                        var persistedEp = _app.AddOrUpdateEpisode(existing);
+                        updated++;
+                    }
                 }
-            }
+            }).ConfigureAwait(false);
 
             Log.Information("feed/refresh summary id={Id} added={Added} updated={Updated} skippedNoAudio={Skipped}",
                 feed.Id, added, updated, skippedNoAudio);
@@ -226,7 +255,8 @@ namespace StuiPodcast.Infra
 
         #region helpers
 
-        void UpsertFeedIntoData(CoreFeed saved)
+        // Upsert a feed into _data.Feeds on the UI thread so UI readers don't race.
+        Task UpsertFeedIntoDataAsync(CoreFeed saved) => _uiDispatch(() =>
         {
             var df = _data.Feeds.FirstOrDefault(x => x.Id == saved.Id);
             if (df == null) _data.Feeds.Add(saved);
@@ -236,7 +266,7 @@ namespace StuiPodcast.Infra
                 df.Url = saved.Url;
                 df.LastChecked = saved.LastChecked;
             }
-        }
+        });
 
         static DateTimeOffset? ParseDate(FeedItem item)
         {
@@ -407,6 +437,15 @@ namespace StuiPodcast.Infra
                     .Replace("\n", " ")
                     .Trim();
             }
+        }
+
+        #endregion
+
+        #region dispose
+
+        public void Dispose()
+        {
+            try { _http.Dispose(); } catch { /* best effort */ }
         }
 
         #endregion

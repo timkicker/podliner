@@ -36,23 +36,25 @@ sealed class MprisService : IAsyncDisposable
         var prev = _lastSnapshot;
         _lastSnapshot = snap;
 
-        var changed = new Dictionary<string, object>();
-
+        // Snapshots fire ~4×/sec during playback; skip work when nothing changed.
         var status = ToPlaybackStatus(snap);
-        if (status != ToPlaybackStatus(prev))
-            changed["PlaybackStatus"] = status;
+        bool statusChanged  = status != ToPlaybackStatus(prev);
+        bool rateChanged    = Math.Abs(snap.Speed - prev.Speed) > 0.001;
+        bool episodeChanged = snap.EpisodeId != prev.EpisodeId;
+        bool seeked         = IsSeekDetected(prev, snap);
 
-        if (Math.Abs(snap.Speed - prev.Speed) > 0.001)
-            changed["Rate"] = snap.Speed;
+        if (!statusChanged && !rateChanged && !episodeChanged && !seeked) return;
 
-        if (snap.EpisodeId != prev.EpisodeId)
-            changed["Metadata"] = _obj!.BuildMetadata();
-
-        if (changed.Count > 0)
+        if (statusChanged || rateChanged || episodeChanged)
+        {
+            var changed = new Dictionary<string, object>();
+            if (statusChanged)  changed["PlaybackStatus"] = status;
+            if (rateChanged)    changed["Rate"] = snap.Speed;
+            if (episodeChanged) changed["Metadata"] = _obj!.BuildMetadata();
             _obj?.NotifyPlayerPropertiesChanged(changed);
+        }
 
-        if (IsSeekDetected(prev, snap))
-            _obj?.NotifySeeked((long)snap.Position.TotalMicroseconds);
+        if (seeked) _obj?.NotifySeeked((long)snap.Position.TotalMicroseconds);
     }
 
     internal static string ToPlaybackStatus(PlaybackSnapshot snap)

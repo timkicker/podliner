@@ -9,7 +9,7 @@ namespace StuiPodcast.Infra.Storage
     // debounced save helper and immediate save for explicit writes
     // tolerant load with comments and trailing commas
     // detects read only situations
-    public sealed class ConfigStore
+    public sealed class ConfigStore : IDisposable
     {
         #region fields and state
 
@@ -257,6 +257,30 @@ namespace StuiPodcast.Infra.Storage
                     return a; // return canonical casing
             }
             return allowed[0];
+        }
+
+        #endregion
+
+        #region dispose
+
+        // Flush any pending debounced save and release the timer.
+        public void Dispose()
+        {
+            Timer? timer;
+            lock (_gate)
+            {
+                timer = _debounceTimer;
+                _debounceTimer = null;
+            }
+            if (timer == null) return;
+
+            // Stop the timer and wait for any in-flight callback to finish.
+            using var waitHandle = new ManualResetEvent(false);
+            try { timer.Dispose(waitHandle); waitHandle.WaitOne(TimeSpan.FromSeconds(2)); }
+            catch { /* best effort */ }
+
+            // Flush if there was a pending save at shutdown.
+            if (_savePending && !_readOnly) SaveNow();
         }
 
         #endregion

@@ -21,8 +21,20 @@ internal static class CmdSystemModule
 
     public static void ExecWrite(Func<Task> persist, IUiShell ui)
     {
-        try { persist().GetAwaiter().GetResult(); ui.ShowOsd("saved", 900); }
-        catch (Exception ex) { ui.ShowOsd($"save failed: {ex.Message}", 1800); }
+        // Run the save off the UI thread so the TUI stays responsive, then
+        // dispatch the result OSD back via the main loop.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await persist().ConfigureAwait(false);
+                Terminal.Gui.Application.MainLoop?.Invoke(() => ui.ShowOsd("saved", 900));
+            }
+            catch (Exception ex)
+            {
+                Terminal.Gui.Application.MainLoop?.Invoke(() => ui.ShowOsd($"save failed: {ex.Message}", 1800));
+            }
+        });
     }
 
     public static void ExecWriteQuit(Func<Task> persist, IUiShell ui, bool bang)

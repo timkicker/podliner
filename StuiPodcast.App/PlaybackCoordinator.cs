@@ -8,7 +8,7 @@ namespace StuiPodcast.App;
 #region playback coordinator
 
 // coordinates playback progress, persistence and auto advance
-public sealed class PlaybackCoordinator
+public sealed class PlaybackCoordinator : IDisposable
 {
     #region deps and state
 
@@ -76,7 +76,7 @@ public sealed class PlaybackCoordinator
         CancelResume();
         CancelStallWatch();
         
-        _loadingCts?.Cancel();
+        CancelAndDispose(ref _loadingCts);
         _loadingCts = new CancellationTokenSource();
 
         _loadingBaseline = TimeSpan.FromMilliseconds(ep.Progress?.LastPosMs ?? 0);
@@ -218,7 +218,13 @@ public sealed class PlaybackCoordinator
         }
 
         var now = DateTime.UtcNow;
-        if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(1))
+
+        // Progress display on the active row is now piggybacked on SnapshotAvailable
+        // (see UiComposer.RefreshActiveProgress). The periodic full list refresh
+        // that used to live here rebuilt every row every second — expensive and
+        // redundant. The refreshUi callback is kept for structural fallbacks
+        // but only fires every 5s to catch rare missed updates.
+        if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(5))
         {
             _lastUiRefresh = now;
             try { refreshUi(allEpisodes); } catch { }
@@ -237,7 +243,7 @@ public sealed class PlaybackCoordinator
 
     private void StartOneShotResume(long ms, int sid)
     {
-        _resumeCts?.Cancel();
+        CancelAndDispose(ref _resumeCts);
         var cts = new CancellationTokenSource();
         _resumeCts = cts;
 
@@ -266,11 +272,7 @@ public sealed class PlaybackCoordinator
         });
     }
 
-    private void CancelResume()
-    {
-        try { _resumeCts?.Cancel(); } catch { }
-        _resumeCts = null;
-    }
+    private void CancelResume() => CancelAndDispose(ref _resumeCts);
 
     private void StartStallWatch(int sid, TimeSpan timeout)
     {
@@ -293,10 +295,24 @@ public sealed class PlaybackCoordinator
         });
     }
 
-    private void CancelStallWatch()
+    private void CancelStallWatch() => CancelAndDispose(ref _stallCts);
+
+    // Cancel a CTS, dispose it, and null the field in one step. Old code only
+    // cancelled and reassigned, leaking the CTS registration table on every Play.
+    private static void CancelAndDispose(ref CancellationTokenSource? cts)
     {
-        try { _stallCts?.Cancel(); } catch { }
-        _stallCts = null;
+        var c = cts;
+        cts = null;
+        if (c == null) return;
+        try { c.Cancel(); } catch { }
+        try { c.Dispose(); } catch { }
+    }
+
+    public void Dispose()
+    {
+        CancelAndDispose(ref _loadingCts);
+        CancelAndDispose(ref _resumeCts);
+        CancelAndDispose(ref _stallCts);
     }
 
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)

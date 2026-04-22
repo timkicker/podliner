@@ -16,6 +16,7 @@ internal interface IUiShell
     void SetWindowTitle(string? s);
     void ShowDetails(Episode e);
     void SetNowPlaying(Guid? episodeId);
+    void RefreshActiveProgress(PlaybackSnapshot snap);
     void RequestAddFeed(string url);
     void RequestRemoveFeed();
     void RequestRefresh();
