@@ -158,7 +158,21 @@ namespace StuiPodcast.App.UI
         public static string FormatDuration(long ms)
         {
             if (ms <= 0) return "--:--";
-            long total = ms / 1000;
+            return FormatSeconds(ms / 1000);
+        }
+
+        // shared time formatter: h:mm:ss for >=1h, mm:ss below.
+        // Previously every player-bar render had its own local closure that
+        // used TimeSpan.TotalMinutes, producing "120:00" for a 2h episode.
+        public static string FormatTime(TimeSpan t)
+        {
+            if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+            return FormatSeconds((long)Math.Floor(t.TotalSeconds));
+        }
+
+        private static string FormatSeconds(long total)
+        {
+            if (total < 0) total = 0;
             long h = total / 3600;
             long m = (total % 3600) / 60;
             long s = total % 60;

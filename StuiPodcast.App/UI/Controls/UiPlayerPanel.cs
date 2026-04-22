@@ -52,6 +52,18 @@ internal sealed class UiPlayerPanel : FrameView
 
     // current playing state for optimistic toggle
     private bool _lastKnownPlaying = false;
+    // Deduplicate sub-second render churn. The 250 ms UI timer plus the audio
+    // engine's own state-changed bursts (libVLC can fire TimeChanged ~10×/sec)
+    // otherwise trigger many renders per second with identical second-precision
+    // output — visually perceived as the counter "flying" and elapsed vs
+    // remaining briefly disagreeing between renders.
+    private int _lastRenderPosSec = -1;
+    private int _lastRenderLenSec = -1;
+    private int _lastRenderRemSec = -1;
+    private bool _lastRenderPlaying = false;
+    private int _lastRenderVolume = -1;
+    private double _lastRenderSpeed = double.NaN;
+    private bool _lastRenderLoading;
 
     // tuning
     private static readonly TimeSpan LoadingAdvanceThreshold = TimeSpan.FromMilliseconds(400);
@@ -303,13 +315,46 @@ internal sealed class UiPlayerPanel : FrameView
         var len = snap.Length < TimeSpan.Zero ? TimeSpan.Zero : snap.Length;
         if (pos > len && len > TimeSpan.Zero) pos = len;
 
-        // quantize to whole seconds for consistency
-        int posSec = (int)Math.Floor(pos.TotalSeconds);             // or Math.Round(...) if preferred
+        // Quantize to whole seconds for display. We derive remSec from the
+        // already-floored values so elapsed + remaining always equals length
+        // on screen; using an unfloored diff makes pos + rem drift by 1s
+        // against len, which is the "not in sync" symptom users notice.
+        int posSec = (int)Math.Floor(pos.TotalSeconds);
         int lenSec = (int)Math.Floor(len.TotalSeconds);
+        int remSec = Math.Max(0, lenSec - posSec);
+
+        // Loading state must be updated before we early-return: if we skip
+        // because nothing changed at second granularity but the engine did
+        // start playing (posSec > 0), the loading flag still needs clearing.
+        if (_isLoading && (snap.IsPlaying || posSec > 0))
+            _isLoading = false;
+
+        int vol = Math.Clamp(volume0to100, 0, 100);
+
+        // Dedup: if the user-visible state hasn't changed at second precision,
+        // skip the render. Keeps the display calm and makes elapsed/remaining
+        // perfectly in sync (they can only change together).
+        if (posSec == _lastRenderPosSec &&
+            lenSec == _lastRenderLenSec &&
+            remSec == _lastRenderRemSec &&
+            snap.IsPlaying == _lastRenderPlaying &&
+            vol == _lastRenderVolume &&
+            Math.Abs(snap.Speed - _lastRenderSpeed) < 0.001 &&
+            _isLoading == _lastRenderLoading)
+        {
+            return;
+        }
+
+        _lastRenderPosSec = posSec;
+        _lastRenderLenSec = lenSec;
+        _lastRenderRemSec = remSec;
+        _lastRenderPlaying = snap.IsPlaying;
+        _lastRenderVolume = vol;
+        _lastRenderSpeed = snap.Speed;
+        _lastRenderLoading = _isLoading;
+
         pos = TimeSpan.FromSeconds(Math.Clamp(posSec, 0, Math.Max(0, lenSec)));
         len = TimeSpan.FromSeconds(Math.Max(0, lenSec));
-
-        var remSec = Math.Max(0, lenSec - posSec);
         var rem = TimeSpan.FromSeconds(remSec);
 
         var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
@@ -320,9 +365,6 @@ internal sealed class UiPlayerPanel : FrameView
         var remStr = lenSec == 0 ? "--:--" : format(rem);
 
         TimeLabel.Text = $"{icon} {posStr} / {lenStr}  (-{remStr})";
-
-        if (_isLoading && (snap.IsPlaying || posSec > 0))
-            _isLoading = false;
 
         if (_isLoading)
             BtnPlayPause.Text = _loadingText;
@@ -337,9 +379,8 @@ internal sealed class UiPlayerPanel : FrameView
             ? Math.Clamp((float)posSec / lenSec, 0f, 1f)
             : 0f;
 
-        var v = Math.Clamp(volume0to100, 0, 100);
-        VolBar.Fraction  = v / 100f;
-        VolPctLabel.Text = UIGlyphSet.VolumePercent(v);
+        VolBar.Fraction  = vol / 100f;
+        VolPctLabel.Text = UIGlyphSet.VolumePercent(vol);
         SpeedLabel.Text  = UIGlyphSet.SpeedLabel(snap.Speed);
 
         UpdateLoadingVisuals();

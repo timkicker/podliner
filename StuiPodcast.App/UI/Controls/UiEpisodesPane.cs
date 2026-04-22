@@ -421,12 +421,17 @@ internal sealed class UiEpisodesPane
 
     // Targeted row update: swap one entry in the cached _items list and let
     // Terminal.Gui redraw. This relies on ListView reading the source on each
-    // render (it wraps the IList without snapshotting).
+    // render (it wraps the IList without snapshotting). Also dedups: skips
+    // SetNeedsDisplay when the rendered string didn't actually change, which
+    // avoids terminal repaint churn when the active snapshot pulses several
+    // times per second at sub-second resolution.
     private void UpdateRow(Guid episodeId)
     {
         if (!_indexById.TryGetValue(episodeId, out var idx)) return;
         if (idx < 0 || idx >= _items.Count || idx >= _episodes.Count) return;
-        _items[idx] = RowFor(_episodes[idx], _nowPlayingId, _activeSnapshot);
+        var next = RowFor(_episodes[idx], _nowPlayingId, _activeSnapshot);
+        if (_items[idx] == next) return;
+        _items[idx] = next;
         List.SetNeedsDisplay();
     }
 

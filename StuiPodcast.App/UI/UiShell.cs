@@ -451,12 +451,11 @@ public sealed class UiShell : IUiShell
             if (_player != null)
                 _player.Progress.Fraction = (len > 0) ? Math.Clamp((float)pos / len, 0f, 1f) : 0f;
 
-            static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
             var lenTs = TimeSpan.FromMilliseconds(Math.Max(0, len));
             var posTs = TimeSpan.FromMilliseconds(Math.Max(0, Math.Min(pos, len)));
-            var posStr = F(posTs);
-            var lenStr = len == 0 ? "--:--" : F(lenTs);
-            var remStr = len == 0 ? "--:--" : F((lenTs - posTs) < TimeSpan.Zero ? TimeSpan.Zero : (lenTs - posTs));
+            var posStr = UIGlyphSet.FormatTime(posTs);
+            var lenStr = len == 0 ? "--:--" : UIGlyphSet.FormatTime(lenTs);
+            var remStr = len == 0 ? "--:--" : UIGlyphSet.FormatTime(lenTs - posTs);
             _player?.TimeLabel?.SetText($"⏸ {posStr} / {lenStr}  (-{remStr})");
 
             _episodesPane?.InjectNowPlaying(_nowPlayingId);
@@ -482,8 +481,7 @@ public sealed class UiShell : IUiShell
             if (snap.Position > effLen) effLen = snap.Position;
             _lastEffLenTs = effLen;
 
-            static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
-            _player.Update(snap, volume0to100, F);
+            _player.Update(snap, volume0to100, UIGlyphSet.FormatTime);
         });
     }
 
@@ -511,8 +509,7 @@ public sealed class UiShell : IUiShell
             if (s.Position > effLen) effLen = s.Position;
             _lastEffLenTs = effLen;
 
-            static string F(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
-            _player.Update(s, effLen, F);
+            _player.Update(s, effLen, UIGlyphSet.FormatTime);
         });
     }
     #endregion
