@@ -490,28 +490,9 @@ public sealed class UiShell : IUiShell
         UI(() => _player?.SetSpeedEnabled(enabled));
     }
 
-    public void UpdatePlayerUI(PlayerState s)
-    {
-        UI(() =>
-        {
-            if (_player == null) return;
-
-            if (_startupPinned)
-            {
-                bool meaningless = (s.Length == null || s.Length == TimeSpan.Zero)
-                                    && s.Position == TimeSpan.Zero
-                                    && !s.IsPlaying;
-                if (meaningless) return;
-                _startupPinned = false;
-            }
-
-            TimeSpan effLen = s.Length ?? TimeSpan.Zero;
-            if (s.Position > effLen) effLen = s.Position;
-            _lastEffLenTs = effLen;
-
-            _player.Update(s, effLen, UIGlyphSet.FormatTime);
-        });
-    }
+    // UpdatePlayerUI(PlayerState) was the legacy render path before
+    // UpdatePlayerSnapshot replaced it. No caller references it anymore;
+    // removed to avoid confusion.
     #endregion
 
     #region theme/layout

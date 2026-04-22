@@ -307,18 +307,19 @@ static class UiComposer
 
     #region ui wiring
     public static void WireUi(
-        UiShell ui,
-        AppData data,
-        AppFacade app,
-        FeedService? feeds,
-        PlaybackCoordinator? playback,
-        SwappableAudioPlayer? audioPlayer,
+        AppServices ctx,
         Func<Task> save,
         Func<string, Task> engineSwitch,
         Action updateTitle,
-        Func<string, bool> hasFeedWithUrl,
-        GpodderSyncService? syncService = null)
+        Func<string, bool> hasFeedWithUrl)
     {
+        var ui           = ctx.Ui;
+        var data         = ctx.Data;
+        var app          = ctx.App;
+        var feeds        = ctx.Feeds;
+        var playback     = ctx.Playback;
+        var audioPlayer  = ctx.Player;
+        var syncService  = ctx.Gpodder;
         // quit
         ui.QuitRequested += () =>
         {
@@ -565,10 +566,10 @@ static class UiComposer
                 return;
             }
 
-            if (CmdRouter.HandleDownloads(cmd, ui, data, ProgramDownloader(), save))
+            if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save))
                 return;
 
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ProgramLog(), data, save, ProgramDownloader(), engineSwitch, syncService);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService);
         };
 
         // search
@@ -586,18 +587,14 @@ static class UiComposer
             if (fid != null) ui?.SetEpisodesForFeed(fid.Value, list);
         };
 
-        // local accessors
-        static DownloadManager ProgramDownloader() => (DownloadManager)typeof(Program)
-            .GetField("_downloader", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-
-        static MemoryLogSink ProgramLog() => (MemoryLogSink)typeof(Program)
-            .GetField("_memLog", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
     }
     #endregion
 
     #region initialization
-    public static void ShowInitialLists(UiShell ui, AppData data)
+    public static void ShowInitialLists(AppServices ctx)
     {
+        var ui = ctx.Ui;
+        var data = ctx.Data;
         CmdViewModule.ApplyFeedList(ui, data);
         ui.SetUnplayedHint(data.UnplayedOnly);
         CmdRouter.ApplyList(ui, data);
@@ -631,10 +628,8 @@ static class UiComposer
             ui.ShowStartupEpisode(last, data.Volume0_100, data.Speed);
         }
 
-        var player = (SwappableAudioPlayer)typeof(Program)
-            .GetField("_player", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
-        var playback = (PlaybackCoordinator)typeof(Program)
-            .GetField("_playback", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
+        var player = ctx.Player;
+        var playback = ctx.Playback;
 
         // Track the last episode whose title we pushed to the window label so
         // we don't re-scan data.Episodes and re-set the same string 4×/sec.

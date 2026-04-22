@@ -195,19 +195,25 @@ internal class Program
         // downloader -> ui
         UiComposer.AttachDownloaderUi(_downloader, _ui, _data);
 
+        // Build the composition-root record now that every service exists.
+        // UiComposer + CmdApplier pull dependencies from this record instead
+        // of reaching into Program's private statics via reflection.
+        var services = new AppServices(
+            Ui: _ui, Data: _data, App: _app!,
+            ConfigStore: _configStore!, LibraryStore: _libraryStore!,
+            Feeds: _feeds!, Player: _player!, Playback: _playback!,
+            Downloader: _downloader!, DownloadLookup: _downloadLookup!,
+            MemLog: _memLog, GpodderStore: _gpodderStore!, Gpodder: _gpodder,
+            Saver: _saver!, Net: _net!, EngineSvc: _engineSvc!
+        );
+
         // build remaining ui behaviors
         UiComposer.WireUi(
-            ui: _ui,
-            data: _data,
-            app: _app,
-            feeds: _feeds,
-            playback: _playback,
-            audioPlayer: _player,
+            ctx: services,
             save: _saver.RequestSaveAsync,
             engineSwitch: pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data),
-            hasFeedWithUrl: HasFeedWithUrl,
-            syncService: _gpodder
+            hasFeedWithUrl: HasFeedWithUrl
         );
 
         // progress persistence tick (ui timer)
@@ -235,7 +241,7 @@ internal class Program
             cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync), _gpodder);
 
         // initial lists
-        UiComposer.ShowInitialLists(_ui, _data);
+        UiComposer.ShowInitialLists(services);
 
         // gpodder auto-sync on startup
         if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)

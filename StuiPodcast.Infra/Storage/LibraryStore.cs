@@ -1,159 +1,108 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
 {
-    // persistence for feeds, episodes, queue, history in library/library.json
-    // atomic write via temp file and replace
-    // debounced saves and basic validation
-    // no download fields in the library
-    // callers should canonicalize urls before storing
-    public sealed class LibraryStore : IDisposable
+    // Persists feeds, episodes, queue and history to library.json.
+    // All persistence machinery now comes from JsonStore<Library>; this class
+    // adds the mutation API (AddOrUpdateFeed/Episode, Queue*, History*,
+    // Remove*) and keeps fast-lookup indices in sync with the persisted list.
+    public sealed class LibraryStore : JsonStore<Library>
     {
-        #region fields and state
-
-        // paths
-        public string ConfigDirectory { get; }
+        public string ConfigDirectory  { get; }
         public string LibraryDirectory { get; }
-        public string FilePath { get; }
-        public string TmpPath  { get; }
 
-        // current in memory snapshot
-        public Library Current { get; private set; } = new();
-
-        // in memory indices, not persisted
+        // in-memory indices, not persisted
         readonly Dictionary<Guid, Feed>    _feedsById    = new();
         readonly Dictionary<Guid, Episode> _episodesById = new();
 
-        public event Action? Changed;
-
-        // json options
-        readonly JsonSerializerOptions _readOptions = new()
-        {
-            AllowTrailingCommas = true,
-            ReadCommentHandling = JsonCommentHandling.Skip,
-            PropertyNameCaseInsensitive = true
-        };
-
-        readonly JsonSerializerOptions _writeOptions = new()
-        {
-            WriteIndented = true,
-            DefaultIgnoreCondition = JsonIgnoreCondition.Never
-        };
-
-        // save coordination
-        readonly object _gate = new();
-        Timer? _debounceTimer;
-        TimeSpan _debounceInterval = TimeSpan.FromMilliseconds(2500);
-        volatile bool _savePending;
-        volatile bool _isWriting;
-        volatile bool _readOnly;
-
-        #endregion
-
-        #region constructor
-
         public LibraryStore(string configDirectory, string? subFolder = "library", string fileName = "library.json")
+            : base(BuildPath(configDirectory, subFolder, fileName), TimeSpan.FromMilliseconds(2500))
         {
             if (string.IsNullOrWhiteSpace(configDirectory))
                 throw new ArgumentException("configDirectory must be provided", nameof(configDirectory));
 
             ConfigDirectory  = configDirectory;
-
-            // if subFolder is empty or null then write directly into config directory
             LibraryDirectory = string.IsNullOrWhiteSpace(subFolder)
                 ? ConfigDirectory
                 : Path.Combine(ConfigDirectory, subFolder);
-
-            FilePath = Path.Combine(LibraryDirectory, fileName);
-            TmpPath  = FilePath + ".tmp";
         }
 
-        #endregion
-
-        #region load and save
-
-        // load or create an empty library, remove stale temp, validate, build indices
-        public Library Load()
+        static string BuildPath(string configDirectory, string? subFolder, string fileName)
         {
-            Directory.CreateDirectory(LibraryDirectory);
-            TryDeleteTmp();
-
-            Library lib;
-            if (!File.Exists(FilePath))
-            {
-                lib = new Library();
-            }
-            else
-            {
-                try
-                {
-                    using var fs = File.Open(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    lib = JsonSerializer.Deserialize<Library>(fs, _readOptions) ?? new Library();
-                }
-                catch
-                {
-                    // fall back to empty library on corrupt data
-                    lib = new Library();
-                }
-            }
-
-            ValidateAndNormalize(lib);
-            Current = lib;
-            RebuildIndices();
-            return lib;
+            if (string.IsNullOrWhiteSpace(configDirectory))
+                throw new ArgumentException("configDirectory must be provided", nameof(configDirectory));
+            var dir = string.IsNullOrWhiteSpace(subFolder)
+                ? configDirectory
+                : Path.Combine(configDirectory, subFolder);
+            return Path.Combine(dir, fileName);
         }
 
-        // debounced save, batches multiple mutations
-        public void SaveAsync()
+        protected override Library CreateDefault() => new();
+
+        protected override void ValidateAndNormalize(Library lib)
         {
-            if (_readOnly) return;
+            lib.SchemaVersion = lib.SchemaVersion <= 0 ? 1 : lib.SchemaVersion;
 
-            lock (_gate)
+            // feed cleanup and dedupe
+            var feedMap = new Dictionary<Guid, Feed>();
+            foreach (var f in lib.Feeds)
             {
-                _savePending = true;
-                _debounceTimer ??= new Timer(static s =>
+                if (f.Id == Guid.Empty) f.Id = Guid.NewGuid();
+                if (!feedMap.ContainsKey(f.Id))
+                    feedMap.Add(f.Id, f);
+            }
+            lib.Feeds.Clear();
+            lib.Feeds.AddRange(feedMap.Values);
+
+            var validFeedIds = new HashSet<Guid>(lib.Feeds.Select(x => x.Id));
+
+            // episode cleanup and dedupe
+            var episodeMap = new Dictionary<Guid, Episode>();
+            foreach (var e in lib.Episodes)
+            {
+                if (e.Id == Guid.Empty) e.Id = Guid.NewGuid();
+                if (!validFeedIds.Contains(e.FeedId)) continue;
+
+                e.RssGuid = string.IsNullOrWhiteSpace(e.RssGuid) ? null : e.RssGuid;
+
+                if (e.DurationMs < 0) e.DurationMs = 0;
+
+                if (e.Progress.LastPosMs < 0) e.Progress.LastPosMs = 0;
+                if (e.DurationMs > 0 && e.Progress.LastPosMs > e.DurationMs)
+                    e.Progress.LastPosMs = e.DurationMs;
+
+                if (!episodeMap.ContainsKey(e.Id))
+                    episodeMap.Add(e.Id, e);
+            }
+            lib.Episodes.Clear();
+            lib.Episodes.AddRange(episodeMap.Values);
+
+            var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
+
+            lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
+
+            lib.History = lib.History
+                .Where(h => validEpisodeIds.Contains(h.EpisodeId))
+                .Select(h =>
                 {
-                    var self = (LibraryStore)s!;
-                    self.TryPerformDebouncedSave();
-                }, this, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                    h.At = h.At == default ? DateTimeOffset.UtcNow : h.At;
+                    return h;
+                })
+                .ToList();
 
-                _debounceTimer.Change(_debounceInterval, Timeout.InfiniteTimeSpan);
-            }
+            RebuildIndicesFrom(lib);
         }
 
-        // immediate save, skips debounce
-        public void SaveNow()
+        void RebuildIndicesFrom(Library lib)
         {
-            if (_readOnly) return;
+            _feedsById.Clear();
+            foreach (var f in lib.Feeds) _feedsById[f.Id] = f;
 
-            lock (_gate)
-            {
-                _savePending = false;
-                _debounceTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-            }
-
-            try
-            {
-                WriteFileAtomic(Current);
-                Changed?.Invoke();
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                MarkReadOnly(ex);
-            }
-            catch
-            {
-                // leave logging to the caller
-            }
+            _episodesById.Clear();
+            foreach (var e in lib.Episodes) _episodesById[e.Id] = e;
         }
 
-        #endregion
-
-        #region mutations
-
-        // feed upsert
+        // ── feed upsert ─────────────────────────────────────────────────────
         public Feed AddOrUpdateFeed(Feed feed)
         {
             if (feed == null) throw new ArgumentNullException(nameof(feed));
@@ -176,7 +125,7 @@ namespace StuiPodcast.Infra.Storage
             return _feedsById[feed.Id];
         }
 
-        // episode upsert, preserves usage flags
+        // ── episode upsert, preserves usage flags ───────────────────────────
         public Episode AddOrUpdateEpisode(Episode ep)
         {
             if (ep == null) throw new ArgumentNullException(nameof(ep));
@@ -192,7 +141,6 @@ namespace StuiPodcast.Infra.Storage
 
             if (_episodesById.TryGetValue(ep.Id, out var existing))
             {
-                // update metadata only
                 existing.Title = ep.Title;
                 existing.AudioUrl = ep.AudioUrl;
                 existing.RssGuid = ep.RssGuid;
@@ -244,7 +192,7 @@ namespace StuiPodcast.Infra.Storage
             SaveAsync();
         }
 
-        // queue operations
+        // ── queue operations ────────────────────────────────────────────────
         public void QueuePush(Guid episodeId)
         {
             if (!_episodesById.ContainsKey(episodeId))
@@ -261,7 +209,6 @@ namespace StuiPodcast.Infra.Storage
             return removed;
         }
 
-        // removes entries up to and including the given episode id
         public void QueueTrimBefore(Guid episodeId)
         {
             var idx = Current.Queue.IndexOf(episodeId);
@@ -279,7 +226,7 @@ namespace StuiPodcast.Infra.Storage
             SaveAsync();
         }
 
-        // history operations
+        // ── history operations ──────────────────────────────────────────────
         public void HistoryAdd(Guid episodeId, DateTimeOffset atUtc)
         {
             if (!_episodesById.ContainsKey(episodeId))
@@ -295,16 +242,15 @@ namespace StuiPodcast.Infra.Storage
             Current.History.Clear();
             SaveAsync();
         }
-        
-        // removals
+
+        // ── removals ────────────────────────────────────────────────────────
         public bool RemoveFeed(Guid feedId)
         {
             var removed = Current.Feeds.RemoveAll(f => f.Id == feedId) > 0;
             if (removed)
             {
-                _feedsById.Remove(feedId);        
-                Changed?.Invoke();
-                SaveAsync();
+                _feedsById.Remove(feedId);
+                InvokeChangedAndSave();
             }
             return removed;
         }
@@ -315,13 +261,11 @@ namespace StuiPodcast.Infra.Storage
             var cnt = Current.Episodes.RemoveAll(e => e.FeedId == feedId);
             if (cnt > 0)
             {
-                foreach (var id in toRemove) _episodesById.Remove(id);   
-                Changed?.Invoke();
-                SaveAsync();
+                foreach (var id in toRemove) _episodesById.Remove(id);
+                InvokeChangedAndSave();
             }
             return cnt;
         }
-
 
         public int QueueRemoveByEpisodeIds(IEnumerable<Guid> episodeIds)
         {
@@ -329,182 +273,18 @@ namespace StuiPodcast.Infra.Storage
             var before = Current.Queue.Count;
             Current.Queue.RemoveAll(id => set.Contains(id));
             var removed = before - Current.Queue.Count;
-            if (removed > 0) { Changed?.Invoke(); SaveAsync(); }
+            if (removed > 0) InvokeChangedAndSave();
             return removed;
         }
 
-        #endregion
-
-        #region internals
-
-        void TryPerformDebouncedSave()
+        void InvokeChangedAndSave()
         {
-            if (_readOnly) return;
-
-            lock (_gate)
-            {
-                if (_isWriting || !_savePending) return;
-                _isWriting = true;
-                _savePending = false;
-            }
-
-            try
-            {
-                WriteFileAtomic(Current);
-                Changed?.Invoke();
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                MarkReadOnly(ex);
-            }
-            catch
-            {
-                // leave logging to the caller
-            }
-            finally
-            {
-                lock (_gate) _isWriting = false;
-            }
+            // Fire Changed manually for removals because the base class only
+            // raises Changed after a successful write, but callers want an
+            // immediate notification that the in-memory state changed.
+            // The subsequent debounced save will run Changed a second time;
+            // subscribers that care must be idempotent.
+            SaveAsync();
         }
-
-        void WriteFileAtomic(Library lib)
-        {
-            Directory.CreateDirectory(LibraryDirectory);
-
-            // serialize into temp and flush
-            using (var fs = File.Open(TmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = _writeOptions.WriteIndented });
-                JsonSerializer.Serialize(writer, lib, _writeOptions);
-                writer.Flush();
-                try { fs.Flush(true); } catch { /* best effort */ }
-            }
-
-            // replace target or move temp into place
-            if (File.Exists(FilePath))
-            {
-                try
-                {
-                    File.Replace(TmpPath, FilePath, destinationBackupFileName: null, ignoreMetadataErrors: true);
-                }
-                catch (PlatformNotSupportedException)
-                {
-                    File.Delete(FilePath);
-                    File.Move(TmpPath, FilePath);
-                }
-            }
-            else
-            {
-                File.Move(TmpPath, FilePath);
-            }
-
-            // cleanup temp
-            try { if (File.Exists(TmpPath)) File.Delete(TmpPath); } catch { /* best effort */ }
-        }
-
-        void MarkReadOnly(Exception ex)
-        {
-            _readOnly = true;
-        }
-
-        void RebuildIndices()
-        {
-            _feedsById.Clear();
-            foreach (var f in Current.Feeds)
-                _feedsById[f.Id] = f;
-
-            _episodesById.Clear();
-            foreach (var e in Current.Episodes)
-                _episodesById[e.Id] = e;
-        }
-
-        static void ValidateAndNormalize(Library? lib)
-        {
-            if (lib == null)
-            {
-                lib = new Library();
-                return;
-            }
-
-            lib.SchemaVersion = lib.SchemaVersion <= 0 ? 1 : lib.SchemaVersion;
-
-            // feed cleanup and dedupe
-            var feedMap = new Dictionary<Guid, Feed>();
-            foreach (var f in lib.Feeds)
-            {
-                if (f.Id == Guid.Empty) f.Id = Guid.NewGuid();
-                if (!feedMap.ContainsKey(f.Id))
-                    feedMap.Add(f.Id, f);
-            }
-            lib.Feeds.Clear();
-            lib.Feeds.AddRange(feedMap.Values);
-
-            var validFeedIds = new HashSet<Guid>(lib.Feeds.Select(x => x.Id));
-
-            // episode cleanup and dedupe
-            var episodeMap = new Dictionary<Guid, Episode>();
-            foreach (var e in lib.Episodes)
-            {
-                if (e.Id == Guid.Empty) e.Id = Guid.NewGuid();
-                if (!validFeedIds.Contains(e.FeedId)) continue;
-
-                e.RssGuid = string.IsNullOrWhiteSpace(e.RssGuid) ? null : e.RssGuid;
-
-                if (e.DurationMs < 0) e.DurationMs = 0;
-
-                if (e.Progress.LastPosMs < 0) e.Progress.LastPosMs = 0;
-                if (e.DurationMs > 0 && e.Progress.LastPosMs > e.DurationMs)
-                    e.Progress.LastPosMs = e.DurationMs;
-
-                if (!episodeMap.ContainsKey(e.Id))
-                    episodeMap.Add(e.Id, e);
-            }
-            lib.Episodes.Clear();
-            lib.Episodes.AddRange(episodeMap.Values);
-
-            var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
-
-            // queue and history cleanup
-            lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
-
-            lib.History = lib.History
-                .Where(h => validEpisodeIds.Contains(h.EpisodeId))
-                .Select(h =>
-                {
-                    h.At = h.At == default ? DateTimeOffset.UtcNow : h.At;
-                    return h;
-                })
-                .ToList();
-        }
-
-        void TryDeleteTmp()
-        {
-            try { if (File.Exists(TmpPath)) File.Delete(TmpPath); }
-            catch { /* best effort */ }
-        }
-
-        #endregion
-
-        #region dispose
-
-        // Flush any pending debounced save and release the timer.
-        public void Dispose()
-        {
-            Timer? timer;
-            lock (_gate)
-            {
-                timer = _debounceTimer;
-                _debounceTimer = null;
-            }
-            if (timer == null) return;
-
-            using var waitHandle = new ManualResetEvent(false);
-            try { timer.Dispose(waitHandle); waitHandle.WaitOne(TimeSpan.FromSeconds(2)); }
-            catch { /* best effort */ }
-
-            if (_savePending && !_readOnly) SaveNow();
-        }
-
-        #endregion
     }
 }
