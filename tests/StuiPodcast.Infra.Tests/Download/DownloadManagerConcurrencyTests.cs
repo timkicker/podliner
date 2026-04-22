@@ -1,6 +1,7 @@
 using FluentAssertions;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
+using StuiPodcast.Infra.Storage;
 using Xunit;
 
 namespace StuiPodcast.Infra.Tests.Download;
@@ -12,18 +13,22 @@ public sealed class DownloadManagerConcurrencyTests : IDisposable
 {
     private readonly string _dir;
     private readonly AppData _data = new();
+    private readonly LibraryStore _lib;
     private readonly DownloadManager _mgr;
 
     public DownloadManagerConcurrencyTests()
     {
         _dir = Path.Combine(Path.GetTempPath(), "podliner-dlconc-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        _mgr = new DownloadManager(_data, _dir);
+        _lib = new LibraryStore(_dir);
+        _lib.Load();
+        _mgr = new DownloadManager(_data, _lib, _dir);
     }
 
     public void Dispose()
     {
         try { _mgr.Dispose(); } catch { }
+        try { _lib.Dispose(); } catch { }
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 

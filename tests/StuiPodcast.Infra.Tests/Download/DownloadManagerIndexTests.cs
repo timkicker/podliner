@@ -1,6 +1,7 @@
 using FluentAssertions;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
+using StuiPodcast.Infra.Storage;
 using Xunit;
 
 namespace StuiPodcast.Infra.Tests.Download;
@@ -28,7 +29,8 @@ public sealed class DownloadManagerIndexTests : IDisposable
     public void Fresh_manager_with_no_index_file_starts_empty()
     {
         var data = new AppData();
-        using var mgr = new DownloadManager(data, _dir);
+        using var lib = new LibraryStore(_dir); lib.Load();
+        using var mgr = new DownloadManager(data, lib, _dir);
 
         data.DownloadMap.Should().BeEmpty();
     }
@@ -42,7 +44,8 @@ public sealed class DownloadManagerIndexTests : IDisposable
         var data = new AppData();
         var act = () =>
         {
-            using var mgr = new DownloadManager(data, _dir);
+            using var lib = new LibraryStore(_dir); lib.Load();
+        using var mgr = new DownloadManager(data, lib, _dir);
         };
 
         act.Should().NotThrow();
@@ -65,7 +68,8 @@ public sealed class DownloadManagerIndexTests : IDisposable
         """);
 
         var data = new AppData();
-        using var mgr = new DownloadManager(data, _dir);
+        using var lib = new LibraryStore(_dir); lib.Load();
+        using var mgr = new DownloadManager(data, lib, _dir);
 
         // Implementation reads the file but state should reflect that the path doesn't exist.
         // Either the entry is present with Done + non-existent file, or absent entirely.
@@ -94,7 +98,8 @@ public sealed class DownloadManagerIndexTests : IDisposable
         """);
 
         var data = new AppData();
-        using var mgr = new DownloadManager(data, _dir);
+        using var lib = new LibraryStore(_dir); lib.Load();
+        using var mgr = new DownloadManager(data, lib, _dir);
 
         mgr.TryGetStatus(epId, out var st).Should().BeTrue();
         st!.State.Should().Be(DownloadState.Done);
@@ -108,7 +113,8 @@ public sealed class DownloadManagerIndexTests : IDisposable
         File.WriteAllText(indexPath, "{\"SchemaVersion\":1,\"Items\":[]}");
 
         var data = new AppData();
-        using var mgr = new DownloadManager(data, _dir);
+        using var lib = new LibraryStore(_dir); lib.Load();
+        using var mgr = new DownloadManager(data, lib, _dir);
 
         data.DownloadMap.Should().BeEmpty();
     }

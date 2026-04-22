@@ -11,9 +11,9 @@ internal sealed class CmdViewHandler : ICmdHandler
         var ui = ctx.Ui; var data = ctx.Data;
         switch (cmd.Kind)
         {
-            case TopCommand.Search:    CmdViewModule.ExecSearch(cmd.Args, ui, data); return;
-            case TopCommand.Sort:      CmdViewModule.ExecSort(cmd.Args, ui, data, ctx.Persist); CmdViewModule.ApplyList(ui, data); return;
-            case TopCommand.Filter:    CmdViewModule.ExecFilter(cmd.Args, ui, data, ctx.Persist); CmdViewModule.ApplyList(ui, data); return;
+            case TopCommand.Search:    CmdViewModule.ExecSearch(cmd.Args, ui, data, ctx.Episodes); return;
+            case TopCommand.Sort:      CmdViewModule.ExecSort(cmd.Args, ui, data, ctx.Persist, ctx.FeedStore, ctx.Episodes); CmdViewModule.ApplyList(ui, data, ctx.Episodes); return;
+            case TopCommand.Filter:    CmdViewModule.ExecFilter(cmd.Args, ui, data, ctx.Persist); CmdViewModule.ApplyList(ui, data, ctx.Episodes); return;
             case TopCommand.PlayerBar: CmdViewModule.ExecPlayerBar(cmd.Args, ui, data, ctx.Persist); return;
             case TopCommand.Theme:     CmdViewModule.ExecTheme(cmd.Args, ui, data, ctx.Persist); return;
         }

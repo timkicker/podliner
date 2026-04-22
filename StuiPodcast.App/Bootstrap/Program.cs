@@ -89,7 +89,7 @@ internal class Program
         Console.WriteLine($"Config:  {_configStore.FilePath}");
         Console.WriteLine($"Library: {_libraryStore.FilePath}");
 
-        _downloader = new DownloadManager(_data, appConfigDir);
+        _downloader = new DownloadManager(_data, _libraryStore, appConfigDir);
         _downloadLookup = new DownloadLookupAdapter(_downloader, _data);
 
         _app = new AppFacade(_configStore, _libraryStore, _downloadLookup);
@@ -110,7 +110,7 @@ internal class Program
         // LibraryStore directly, which the stores read through.
         _episodes  = new EpisodeStore(_libraryStore);
         _feedStore = new FeedStore(_libraryStore);
-        _queue     = new QueueService(_data, _libraryStore);
+        _queue     = new QueueService(_libraryStore);
 
         // apply cli engine preference before creating audio player
         if (!string.IsNullOrWhiteSpace(cli.Engine))
@@ -129,8 +129,8 @@ internal class Program
         _gpodderStore = new GpodderStore(appConfigDir);
         _gpodderStore.Load();
         _gpodder = new GpodderSyncService(
-            _gpodderStore, new GpodderClient(), _data, _playback, _saver.RequestSaveAsync,
-            uiDispatch: DispatchToUi, episodes: _episodes, feedStore: _feedStore);
+            _gpodderStore, new GpodderClient(), _data, _playback, _episodes, _feedStore,
+            saveAsync: _saver.RequestSaveAsync, uiDispatch: DispatchToUi);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
@@ -159,9 +159,9 @@ internal class Program
         }
 
         _ui.Build();
-        UiComposer.UpdateWindowTitleWithDownloads(_ui, _data);
+        UiComposer.UpdateWindowTitleWithDownloads(_ui, _data, _episodes);
 
-        UiComposer.ScrollAllToTopOnIdle(_ui, _data);
+        UiComposer.ScrollAllToTopOnIdle(_ui, _data, _episodes);
 
         // theme resolve (default = user)
         var themeChoice = UiThemeResolver.Resolve(cli.Theme, _data.ThemePref);
@@ -184,7 +184,7 @@ internal class Program
         _net.Start(out _netTimerToken);
 
         // wire ui behaviors (sorter, lookups, events)
-        _ui.EpisodeSorter = eps => UiComposer.ApplySort(eps, _data);
+        _ui.EpisodeSorter = eps => UiComposer.ApplySort(eps, _data, _feedStore);
         _ui.SetUnplayedHint(_data.UnplayedOnly);
         _ui.SetPlayerPlacement(_data.PlayerAtTop);
 
@@ -192,9 +192,6 @@ internal class Program
         _ui.UpdateSpeedEnabled((_player.Capabilities & PlayerCapabilities.Speed) != 0);
 
         // lookups
-        // Queue lookup goes through IQueueService so the UI sees a consistent
-        // view whether mutations came via legacy data.Queue paths or the new
-        // service API.
         _ui.SetQueueLookup(id => _queue!.Contains(id));
         _ui.SetDownloadStateLookup(id => _app!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);
         _ui.SetOfflineLookup(() => !_data.NetworkOnline);
@@ -207,7 +204,7 @@ internal class Program
         };
 
         // downloader -> ui
-        UiComposer.AttachDownloaderUi(_downloader, _ui, _data);
+        UiComposer.AttachDownloaderUi(_downloader, _ui, _data, _episodes);
 
         // Build the composition-root record now that every service exists.
         // UiComposer + CmdApplier pull dependencies from this record instead
@@ -245,8 +242,7 @@ internal class Program
                         eps => {
                             var fid = _ui.GetSelectedFeedId();
                             if (fid != null) _ui.SetEpisodesForFeed(fid.Value, eps);
-                        },
-                        _data.Episodes);
+                        });
                 }
             }
             catch { }
@@ -255,7 +251,9 @@ internal class Program
 
         // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
-            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader, pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync), _gpodder);
+            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader,
+            pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
+            _episodes, _feedStore, _queue, _gpodder);
 
         // initial lists
         UiComposer.ShowInitialLists(services);

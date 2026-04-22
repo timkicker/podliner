@@ -13,26 +13,36 @@ public sealed class CmdNavigationModuleTests
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeEpisodeStore _episodes = new();
+    private readonly FakeQueueService _queue = new();
     private readonly PlaybackCoordinator _pc;
 
     public CmdNavigationModuleTests()
     {
         var player = new FakeAudioPlayer();
-        _pc = new PlaybackCoordinator(_data, player, () => Task.CompletedTask, new MemoryLogSink());
+        _pc = new PlaybackCoordinator(_data, player, () => Task.CompletedTask, new MemoryLogSink(), _episodes, _queue);
     }
+
+    private List<Episode> _feedEpisodes = new();
 
     private Guid MakeFeedWithEpisodes(int count, bool manuallyPlayed = false)
     {
         var fid = Guid.NewGuid();
+        _feedEpisodes = new List<Episode>();
         for (int i = 0; i < count; i++)
-            _data.Episodes.Add(new Episode
+        {
+            var ep = new Episode
             {
+                Id = Guid.NewGuid(),
                 FeedId = fid,
                 Title = $"ep{i}",
                 AudioUrl = $"https://x.com/{i}.mp3",
                 PubDate = DateTimeOffset.UtcNow.AddDays(-i),
                 ManuallyMarkedPlayed = manuallyPlayed
-            });
+            };
+            _episodes.Seed(ep);
+            _feedEpisodes.Add(ep);
+        }
         _ui.SelectedFeedId = fid;
         return fid;
     }
@@ -45,7 +55,7 @@ public sealed class CmdNavigationModuleTests
     public void Goto_top_start_selects_index_zero(string arg)
     {
         MakeFeedWithEpisodes(5);
-        CmdNavigationModule.ExecGoto(new[] { arg }, _ui, _data);
+        CmdNavigationModule.ExecGoto(new[] { arg }, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(0);
     }
 
@@ -55,7 +65,7 @@ public sealed class CmdNavigationModuleTests
     public void Goto_bottom_end_selects_last_index(string arg)
     {
         MakeFeedWithEpisodes(5);
-        CmdNavigationModule.ExecGoto(new[] { arg }, _ui, _data);
+        CmdNavigationModule.ExecGoto(new[] { arg }, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(4);
     }
 
@@ -63,7 +73,7 @@ public sealed class CmdNavigationModuleTests
     public void Goto_unknown_arg_does_not_change_selection()
     {
         MakeFeedWithEpisodes(3);
-        CmdNavigationModule.ExecGoto(new[] { "banana" }, _ui, _data);
+        CmdNavigationModule.ExecGoto(new[] { "banana" }, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(-1);
     }
 
@@ -74,10 +84,10 @@ public sealed class CmdNavigationModuleTests
     {
         MakeFeedWithEpisodes(3);
 
-        CmdNavigationModule.SelectAbsolute(99, _ui, _data);
+        CmdNavigationModule.SelectAbsolute(99, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(2);
 
-        CmdNavigationModule.SelectAbsolute(-5, _ui, _data);
+        CmdNavigationModule.SelectAbsolute(-5, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(0);
     }
 
@@ -85,7 +95,7 @@ public sealed class CmdNavigationModuleTests
     public void SelectAbsolute_on_empty_list_is_noop()
     {
         _ui.SelectedFeedId = Guid.NewGuid();
-        CmdNavigationModule.SelectAbsolute(0, _ui, _data);
+        CmdNavigationModule.SelectAbsolute(0, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(-1);
     }
 
@@ -95,7 +105,7 @@ public sealed class CmdNavigationModuleTests
     public void SelectMiddle_picks_middle_index()
     {
         MakeFeedWithEpisodes(5);
-        CmdNavigationModule.SelectMiddle(_ui, _data);
+        CmdNavigationModule.SelectMiddle(_ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(2); // 5/2 == 2
     }
 
@@ -103,7 +113,7 @@ public sealed class CmdNavigationModuleTests
     public void SelectMiddle_on_even_count_picks_upper_middle()
     {
         MakeFeedWithEpisodes(4);
-        CmdNavigationModule.SelectMiddle(_ui, _data);
+        CmdNavigationModule.SelectMiddle(_ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(2); // 4/2 == 2
     }
 
@@ -111,7 +121,7 @@ public sealed class CmdNavigationModuleTests
     public void SelectMiddle_on_empty_list_is_noop()
     {
         _ui.SelectedFeedId = Guid.NewGuid();
-        CmdNavigationModule.SelectMiddle(_ui, _data);
+        CmdNavigationModule.SelectMiddle(_ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(-1);
     }
 
@@ -121,9 +131,9 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_forward_moves_one_step()
     {
         MakeFeedWithEpisodes(5);
-        _ui.SelectedEpisode = _data.Episodes[0];
+        _ui.SelectedEpisode = _feedEpisodes[0];
 
-        CmdNavigationModule.SelectRelative(+1, _ui, _data);
+        CmdNavigationModule.SelectRelative(+1, _ui, _data, _episodes);
 
         _ui.LastSelectedIndex.Should().Be(1);
     }
@@ -132,9 +142,9 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_backward_moves_one_step()
     {
         MakeFeedWithEpisodes(5);
-        _ui.SelectedEpisode = _data.Episodes[2];
+        _ui.SelectedEpisode = _feedEpisodes[2];
 
-        CmdNavigationModule.SelectRelative(-1, _ui, _data);
+        CmdNavigationModule.SelectRelative(-1, _ui, _data, _episodes);
 
         _ui.LastSelectedIndex.Should().Be(1);
     }
@@ -143,9 +153,9 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_forward_at_end_clamps_to_last()
     {
         MakeFeedWithEpisodes(3);
-        _ui.SelectedEpisode = _data.Episodes[2];
+        _ui.SelectedEpisode = _feedEpisodes[2];
 
-        CmdNavigationModule.SelectRelative(+1, _ui, _data);
+        CmdNavigationModule.SelectRelative(+1, _ui, _data, _episodes);
 
         _ui.LastSelectedIndex.Should().Be(2);
     }
@@ -154,9 +164,9 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_backward_at_start_clamps_to_zero()
     {
         MakeFeedWithEpisodes(3);
-        _ui.SelectedEpisode = _data.Episodes[0];
+        _ui.SelectedEpisode = _feedEpisodes[0];
 
-        CmdNavigationModule.SelectRelative(-1, _ui, _data);
+        CmdNavigationModule.SelectRelative(-1, _ui, _data, _episodes);
 
         _ui.LastSelectedIndex.Should().Be(0);
     }
@@ -167,7 +177,7 @@ public sealed class CmdNavigationModuleTests
         MakeFeedWithEpisodes(3);
         _ui.SelectedEpisode = null;
 
-        CmdNavigationModule.SelectRelative(+1, _ui, _data);
+        CmdNavigationModule.SelectRelative(+1, _ui, _data, _episodes);
 
         // idx defaults to 0, then +1 → 1
         _ui.LastSelectedIndex.Should().Be(1);
@@ -177,7 +187,7 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_on_empty_list_is_noop()
     {
         _ui.SelectedFeedId = Guid.NewGuid();
-        CmdNavigationModule.SelectRelative(+1, _ui, _data);
+        CmdNavigationModule.SelectRelative(+1, _ui, _data, _episodes);
         _ui.LastSelectedIndex.Should().Be(-1);
     }
 
@@ -185,13 +195,13 @@ public sealed class CmdNavigationModuleTests
     public void SelectRelative_with_playAfter_sets_now_playing()
     {
         MakeFeedWithEpisodes(3);
-        _ui.SelectedEpisode = _data.Episodes[0];
+        _ui.SelectedEpisode = _feedEpisodes[0];
 
-        CmdNavigationModule.SelectRelative(+1, _ui, _data, playAfterSelect: true, playback: _pc);
+        CmdNavigationModule.SelectRelative(+1, _ui, _data, _episodes, playAfterSelect: true, playback: _pc);
 
         _ui.NowPlayingId.Should().NotBeNull();
         _ui.LastShownDetails.Should().NotBeNull();
-        _ui.LastWindowTitle.Should().Be(_data.Episodes[1].Title);
+        _ui.LastWindowTitle.Should().Be(_feedEpisodes[1].Title);
     }
 
     // ── JumpUnplayed ────────────────────────────────────────────────────────
@@ -200,7 +210,7 @@ public sealed class CmdNavigationModuleTests
     public void JumpUnplayed_no_feed_is_noop()
     {
         _ui.SelectedFeedId = null;
-        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data);
+        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data, _episodes);
         _ui.NowPlayingId.Should().BeNull();
     }
 
@@ -208,7 +218,7 @@ public sealed class CmdNavigationModuleTests
     public void JumpUnplayed_empty_list_is_noop()
     {
         _ui.SelectedFeedId = Guid.NewGuid();
-        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data);
+        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data, _episodes);
         _ui.NowPlayingId.Should().BeNull();
     }
 
@@ -216,7 +226,7 @@ public sealed class CmdNavigationModuleTests
     public void JumpUnplayed_all_played_is_noop()
     {
         MakeFeedWithEpisodes(3, manuallyPlayed: true);
-        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data);
+        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data, _episodes);
         _ui.NowPlayingId.Should().BeNull();
     }
 
@@ -224,7 +234,7 @@ public sealed class CmdNavigationModuleTests
     public void JumpUnplayed_picks_first_unplayed_forward()
     {
         MakeFeedWithEpisodes(3);
-        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data);
+        CmdNavigationModule.JumpUnplayed(+1, _ui, _pc, _data, _episodes);
 
         _ui.NowPlayingId.Should().NotBeNull();
         _ui.LastShownDetails.Should().NotBeNull();

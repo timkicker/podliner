@@ -12,10 +12,13 @@ public sealed class MprisObjectCommandTests
 {
     static (MprisObject obj, FakeAudioPlayer player, AppData data) MakeObject()
     {
-        var data   = new AppData();
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        return (new MprisObject(data, player, pc), player, data);
+        var data     = new AppData();
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        return (new MprisObject(data, player, pc, episodes, feeds), player, data);
     }
 
     // ── PauseAsync ────────────────────────────────────────────────────────────

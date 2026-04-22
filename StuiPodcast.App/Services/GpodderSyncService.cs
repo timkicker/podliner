@@ -15,14 +15,11 @@ sealed class GpodderSyncService : IDisposable
     private readonly PlaybackCoordinator _playback;
     private readonly Func<Task>?         _saveAsync;
     private readonly IKeyring            _keyring;
-    // Marshals data mutations to the UI thread to avoid races with UI reads of _data.Feeds.
+    // Marshals feed-store mutations to the UI thread to avoid races with UI reads.
     // Defaults to synchronous (test-friendly); Program.cs wires it to Application.MainLoop.Invoke.
     private readonly Func<Action, Task>  _uiDispatch;
-    // Optional O(1) lookups for QueuePlayAction / PullAsync dedup. Fall back
-    // to scanning AppData collections when null so existing tests and cold
-    // boot paths keep working.
-    private readonly IEpisodeStore?      _episodes;
-    private readonly IFeedStore?         _feedStore;
+    private readonly IEpisodeStore       _episodes;
+    private readonly IFeedStore          _feedStore;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -35,11 +32,11 @@ sealed class GpodderSyncService : IDisposable
         IGpodderClient      client,
         AppData             data,
         PlaybackCoordinator playback,
+        IEpisodeStore       episodes,
+        IFeedStore          feedStore,
         Func<Task>?         saveAsync  = null,
         IKeyring?           keyring    = null,
-        Func<Action, Task>? uiDispatch = null,
-        IEpisodeStore?      episodes   = null,
-        IFeedStore?         feedStore  = null)
+        Func<Action, Task>? uiDispatch = null)
     {
         _store      = store;
         _client     = client;
@@ -48,8 +45,8 @@ sealed class GpodderSyncService : IDisposable
         _saveAsync  = saveAsync;
         _keyring    = keyring    ?? new OsKeyring();
         _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
-        _episodes   = episodes;
-        _feedStore  = feedStore;
+        _episodes   = episodes  ?? throw new ArgumentNullException(nameof(episodes));
+        _feedStore  = feedStore ?? throw new ArgumentNullException(nameof(feedStore));
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
@@ -170,31 +167,29 @@ sealed class GpodderSyncService : IDisposable
             int added = 0, removed = 0;
             List<string> snapshotUrls = new();
 
-            // Mutate _data.Feeds on the UI thread so concurrent UI reads don't trip over us.
+            // Mutate feeds on the UI thread so concurrent UI reads don't trip over us.
             await _uiDispatch(() =>
             {
                 foreach (var url in delta.Add)
                 {
                     if (string.IsNullOrWhiteSpace(url)) continue;
-                    if (_data.Feeds.Any(f => string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase)))
-                        continue;
+                    if (_feedStore.ContainsUrl(url)) continue;
 
                     // Best-effort placeholder; user can refresh later to fetch episodes.
-                    _data.Feeds.Add(new Feed { Title = url, Url = url });
+                    _feedStore.AddOrUpdate(new Feed { Title = url, Url = url });
                     added++;
                 }
 
                 foreach (var url in delta.Remove)
                 {
                     if (string.IsNullOrWhiteSpace(url)) continue;
-                    var feed = _data.Feeds.FirstOrDefault(f =>
-                        string.Equals(f.Url, url, StringComparison.OrdinalIgnoreCase));
+                    var feed = _feedStore.FindByUrl(url);
                     if (feed == null) continue;
-                    _data.Feeds.Remove(feed);
+                    _feedStore.Remove(feed.Id);
                     removed++;
                 }
 
-                snapshotUrls = _data.Feeds
+                snapshotUrls = _feedStore.Snapshot()
                     .Where(f => !string.IsNullOrEmpty(f.Url))
                     .Select(f => f.Url)
                     .ToList();
@@ -233,7 +228,7 @@ sealed class GpodderSyncService : IDisposable
             HashSet<string> currentUrls = new(StringComparer.OrdinalIgnoreCase);
             await _uiDispatch(() =>
             {
-                foreach (var f in _data.Feeds)
+                foreach (var f in _feedStore.Snapshot())
                     if (!string.IsNullOrEmpty(f.Url)) currentUrls.Add(f.Url);
             }).ConfigureAwait(false);
 
@@ -327,10 +322,8 @@ sealed class GpodderSyncService : IDisposable
 
     private void QueuePlayAction(Guid episodeId)
     {
-        var ep   = _episodes?.Find(episodeId)
-                   ?? _data.Episodes.FirstOrDefault(e => e.Id == episodeId);
-        var feed = ep == null ? null
-            : (_feedStore?.Find(ep.FeedId) ?? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId));
+        var ep   = _episodes.Find(episodeId);
+        var feed = ep == null ? null : _feedStore.Find(ep.FeedId);
         if (ep == null || feed == null || string.IsNullOrEmpty(feed.Url)) return;
 
         _store.Current.PendingActions.Add(new PendingGpodderAction

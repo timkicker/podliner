@@ -12,7 +12,7 @@ internal sealed class CmdNetStateHandler : ICmdHandler
         {
             case TopCommand.Net:         CmdNetModule.ExecNet(cmd.Args, ui, data, ctx.Persist, ctx.Episodes); return;
             case TopCommand.PlaySource:  CmdNetModule.ExecPlaySource(cmd.Args, ui, data, ctx.Persist); return;
-            case TopCommand.Save:        CmdStateModule.ExecSave(cmd.Args, ui, data, ctx.Persist); return;
+            case TopCommand.Save:        CmdStateModule.ExecSave(cmd.Args, ui, data, ctx.Persist, ctx.Episodes); return;
         }
     }
 }

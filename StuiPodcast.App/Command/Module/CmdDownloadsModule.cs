@@ -1,4 +1,5 @@
 using StuiPodcast.App.Bootstrap;
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
@@ -7,7 +8,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdDownloadsModule
 {
-    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
+    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync, IEpisodeStore episodes)
     {
         cmd = (cmd ?? "").Trim();
 
@@ -33,7 +34,7 @@ internal static class CmdDownloadsModule
                     if (kv.Value.State == DownloadState.Failed) { dlm.Enqueue(kv.Key); n++; }
                 }
                 _ = saveAsync();
-                ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
                 ui.ShowOsd($"downloads: retried {n} failed", 1500);
                 return true;
             }
@@ -42,7 +43,7 @@ internal static class CmdDownloadsModule
             {
                 var n = dlm.ClearQueue();
                 _ = saveAsync();
-                ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
                 ui.ShowOsd($"downloads: cleared queue ({n})", 1200);
                 return true;
             }
@@ -102,11 +103,11 @@ internal static class CmdDownloadsModule
         }
 
         _ = saveAsync();
-        ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+        ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
         return true;
     }
 
-    public static void DlToggle(string arg, IUiShell ui, AppData data, Func<Task> persist, DownloadManager dlm)
+    public static void DlToggle(string arg, IUiShell ui, AppData data, Func<Task> persist, DownloadManager dlm, IEpisodeStore episodes)
     {
         var ep = ui.GetSelectedEpisode();
         if (ep is null) return;
@@ -129,7 +130,7 @@ internal static class CmdDownloadsModule
         }
 
         _ = persist();
-        CmdViewModule.ApplyList(ui, data);
+        CmdViewModule.ApplyList(ui, data, episodes);
     }
 
     private static string? GuessDownloadDir(DownloadManager dlm)

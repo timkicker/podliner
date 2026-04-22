@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Opml;
@@ -6,7 +7,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdOpmlModule
 {
-    public static void ExecOpml(string[] args, IUiShell ui, AppData data, Func<Task> persist)
+    public static void ExecOpml(string[] args, IUiShell ui, AppData data, Func<Task> persist, IFeedStore feeds)
     {
         var argv = args ?? Array.Empty<string>();
         if (argv.Length == 0) { ui.ShowOsd("usage: :opml import <path> [--update-titles] | :opml export [<path>]"); return; }
@@ -27,7 +28,7 @@ internal static class CmdOpmlModule
             try { doc = OpmlParser.Parse(xml); }
             catch (Exception ex) { ui.ShowOsd($"import: parse error ({ex.Message})", 2000); return; }
 
-            var plan = OpmlImportPlanner.Plan(doc, data.Feeds, updateTitles);
+            var plan = OpmlImportPlanner.Plan(doc, feeds.Snapshot(), updateTitles);
             ui.ShowOsd($"OPML: new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 1600);
 
             if (plan.NewCount == 0) return;
@@ -55,7 +56,7 @@ internal static class CmdOpmlModule
                 path = OpmlIo.GetDefaultExportPath(baseName: "podliner-feeds.opml");
 
             string xml;
-            try { xml = OpmlExporter.BuildXml(data.Feeds, "podliner feeds"); }
+            try { xml = OpmlExporter.BuildXml(feeds.Snapshot(), "podliner feeds"); }
             catch (Exception ex) { ui.ShowOsd($"export: build error ({ex.Message})", 2000); return; }
 
             try

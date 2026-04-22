@@ -16,16 +16,19 @@ public sealed class GpodderSyncLoginDiagnosticsTests
 {
     static (GpodderSyncService svc, FakeGpodderClient client, string dir) MakeSetup()
     {
-        var dir    = Path.Combine(Path.GetTempPath(), "podliner-tests", Guid.NewGuid().ToString("n"));
+        var dir      = Path.Combine(Path.GetTempPath(), "podliner-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(dir);
-        var data   = new AppData { NetworkOnline = true };
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        var store  = new GpodderStore(dir);
+        var data     = new AppData { NetworkOnline = true };
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        var store    = new GpodderStore(dir);
         store.Load();
         var client  = new FakeGpodderClient();
         var keyring = new FakeKeyring { AlwaysFail = true };
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        var svc     = new GpodderSyncService(store, client, data, pc, episodes, feeds, keyring: keyring);
         return (svc, client, dir);
     }
 

@@ -13,10 +13,8 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     private readonly AppData _data;
     private readonly IAudioPlayer _player;
     private readonly PlaybackCoordinator _playback;
-    // Optional O(1) lookups. Fall back to AppData.Episodes/Feeds scanning
-    // when null so legacy ctor paths keep working during the migration.
-    private readonly IEpisodeStore? _episodes;
-    private readonly IFeedStore? _feeds;
+    private readonly IEpisodeStore _episodes;
+    private readonly IFeedStore _feeds;
 
     public ObjectPath ObjectPath => Path;
 
@@ -25,19 +23,13 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     public event Action<PropertyChanges>? PlayerPropertiesChanged;
     public event Action<long>? SeekedSignal;
 
-    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback)
-        : this(data, player, playback, null, null) { }
-
-    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes)
-        : this(data, player, playback, episodes, null) { }
-
-    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes, IFeedStore? feeds)
+    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore episodes, IFeedStore feeds)
     {
-        _data = data;
-        _player = player;
-        _playback = playback;
-        _episodes = episodes;
-        _feeds = feeds;
+        _data = data ?? throw new ArgumentNullException(nameof(data));
+        _player = player ?? throw new ArgumentNullException(nameof(player));
+        _playback = playback ?? throw new ArgumentNullException(nameof(playback));
+        _episodes = episodes ?? throw new ArgumentNullException(nameof(episodes));
+        _feeds = feeds ?? throw new ArgumentNullException(nameof(feeds));
     }
 
     // ── IMprisMediaPlayer2 ──────────────────────────────────────────────────
@@ -223,12 +215,10 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
 
         if (state.EpisodeId.HasValue)
         {
-            var ep = _episodes?.Find(state.EpisodeId.Value)
-                     ?? _data.Episodes.FirstOrDefault(e => e.Id == state.EpisodeId.Value);
+            var ep = _episodes.Find(state.EpisodeId.Value);
             if (ep != null)
             {
-                var feed = _feeds?.Find(ep.FeedId)
-                           ?? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+                var feed = _feeds.Find(ep.FeedId);
                 meta["mpris:trackid"] = new ObjectPath($"/org/podliner/track/{ep.Id:N}");
                 meta["mpris:length"]  = ep.DurationMs * 1000L;
                 meta["xesam:title"]   = ep.Title;

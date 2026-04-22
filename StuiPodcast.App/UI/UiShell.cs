@@ -314,9 +314,9 @@ public sealed class UiShell : IUiShell
     #endregion
 
     #region feeds/episodes api
-    public void SetFeeds(List<Feed> feeds, Guid? selectId = null)
+    public void SetFeeds(IReadOnlyList<Feed> feeds, Guid? selectId = null)
     {
-        if (feeds is null) feeds = new List<Feed>();
+        if (feeds is null) feeds = Array.Empty<Feed>();
 
         var viewList = BuildFeedsWithBarrier(feeds);
 

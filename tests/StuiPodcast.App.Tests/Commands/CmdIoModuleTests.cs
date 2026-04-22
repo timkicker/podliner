@@ -14,6 +14,7 @@ public sealed class CmdIoModuleTests
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeFeedStore _feeds = new();
 
     [Fact]
     public void ExecCopy_no_episode_shows_error()
@@ -87,7 +88,7 @@ public sealed class CmdIoModuleTests
     public void ExecOpen_no_episode_shows_error()
     {
         _ui.SelectedEpisode = null;
-        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data);
+        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data, _feeds);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("no episode selected"));
     }
 
@@ -97,7 +98,7 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "t", AudioUrl = "" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data);
+        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data, _feeds);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("no URL"));
     }

@@ -10,6 +10,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeFeedStore _feeds = new();
     private readonly string _tmpDir;
     private bool _persisted;
     private Task Persist() { _persisted = true; return Task.CompletedTask; }
@@ -28,21 +29,21 @@ public sealed class CmdOpmlModuleTests : IDisposable
     [Fact]
     public void Empty_args_shows_usage()
     {
-        CmdOpmlModule.ExecOpml(Array.Empty<string>(), _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(Array.Empty<string>(), _ui, _data, Persist, _feeds);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage") && m.Text.Contains("opml"));
     }
 
     [Fact]
     public void Import_without_path_shows_usage()
     {
-        CmdOpmlModule.ExecOpml(new[] { "import" }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "import" }, _ui, _data, Persist, _feeds);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage") && m.Text.Contains("import"));
     }
 
     [Fact]
     public void Import_nonexistent_file_shows_read_error()
     {
-        CmdOpmlModule.ExecOpml(new[] { "import", "/does/not/exist.opml" }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "import", "/does/not/exist.opml" }, _ui, _data, Persist, _feeds);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("read error"));
     }
 
@@ -52,7 +53,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
         var path = Path.Combine(_tmpDir, "bad.opml");
         File.WriteAllText(path, "<opml><body><outline");
 
-        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist, _feeds);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("parse error") || m.Text.Contains("import"));
     }
@@ -71,7 +72,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
 </opml>
 """);
 
-        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist, _feeds);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("new 2"));
         _ui.LastRequestedAddFeedUrl.Should().NotBeNull();
@@ -82,7 +83,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
     public void Import_with_zero_new_feeds_skips_add_requests()
     {
         // Feed already present.
-        _data.Feeds.Add(new Feed { Title = "Existing", Url = "https://existing.com/rss" });
+        _feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Existing", Url = "https://existing.com/rss" });
 
         var path = Path.Combine(_tmpDir, "dup.opml");
         File.WriteAllText(path, """
@@ -93,7 +94,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
 </opml>
 """);
 
-        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "import", path }, _ui, _data, Persist, _feeds);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("dup 1"));
         _ui.LastRequestedAddFeedUrl.Should().BeNull();
@@ -102,10 +103,10 @@ public sealed class CmdOpmlModuleTests : IDisposable
     [Fact]
     public void Export_writes_to_provided_path()
     {
-        _data.Feeds.Add(new Feed { Title = "Feed A", Url = "https://a.com/rss" });
+        _feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Feed A", Url = "https://a.com/rss" });
         var outPath = Path.Combine(_tmpDir, "out.opml");
 
-        CmdOpmlModule.ExecOpml(new[] { "export", outPath }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "export", outPath }, _ui, _data, Persist, _feeds);
 
         File.Exists(outPath).Should().BeTrue();
         var xml = File.ReadAllText(outPath);
@@ -118,7 +119,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
     {
         var outPath = "/this/dir/does/not/exist/and/cannot/be/written/out.opml";
 
-        CmdOpmlModule.ExecOpml(new[] { "export", outPath }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "export", outPath }, _ui, _data, Persist, _feeds);
 
         _ui.OsdMessages.Should().Contain(m =>
             m.Text.Contains("error") || m.Text.Contains("Exported"));
@@ -128,7 +129,7 @@ public sealed class CmdOpmlModuleTests : IDisposable
     [Fact]
     public void Unknown_subcommand_shows_usage()
     {
-        CmdOpmlModule.ExecOpml(new[] { "banana" }, _ui, _data, Persist);
+        CmdOpmlModule.ExecOpml(new[] { "banana" }, _ui, _data, Persist, _feeds);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 }

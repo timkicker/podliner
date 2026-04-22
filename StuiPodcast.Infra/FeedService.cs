@@ -21,8 +21,8 @@ namespace StuiPodcast.Infra
         private readonly AppData _data;
         private readonly AppFacade _app;
         private readonly HttpClient _http;
-        // Marshals _data.Feeds/_data.Episodes mutations to the UI thread so concurrent UI
-        // reads don't race our thread-pool continuations. Defaults to synchronous for tests.
+        // Marshals LibraryStore mutations to the UI thread so concurrent UI reads
+        // don't race our thread-pool continuations. Defaults to synchronous for tests.
         private readonly Func<Action, Task> _uiDispatch;
 
         public FeedService(AppData data, AppFacade app, Func<Action, Task>? uiDispatch = null)
@@ -61,7 +61,7 @@ namespace StuiPodcast.Infra
             HashSet<Guid> epIds = new();
             await _uiDispatch(() =>
             {
-                epIds = _data.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
+                epIds = _app.Episodes.Where(e => e.FeedId == feedId).Select(e => e.Id).ToHashSet();
             }).ConfigureAwait(false);
 
             var removedFeed = _app.RemoveFeed(feedId);
@@ -70,9 +70,6 @@ namespace StuiPodcast.Infra
 
             await _uiDispatch(() =>
             {
-                _data.Feeds.RemoveAll(f => f.Id == feedId);
-                _data.Episodes.RemoveAll(e => e.FeedId == feedId);
-                _data.Queue.RemoveAll(id => epIds.Contains(id));
                 if (_data.LastSelectedFeedId == feedId) _data.LastSelectedFeedId = null;
             }).ConfigureAwait(false);
 
@@ -118,10 +115,8 @@ namespace StuiPodcast.Infra
             }
 
             // persistent upsert to get a stable id
-            var saved = _app.AddOrUpdateFeed(probeFeed);
-
-            // update ui cache
-            await UpsertFeedIntoDataAsync(saved).ConfigureAwait(false);
+            CoreFeed saved = null!;
+            await _uiDispatch(() => saved = _app.AddOrUpdateFeed(probeFeed)).ConfigureAwait(false);
 
             // best effort first refresh
             try { await RefreshFeedAsync(saved).ConfigureAwait(false); }
@@ -134,7 +129,7 @@ namespace StuiPodcast.Infra
         {
             // snapshot the feed list on the UI thread to avoid enumerating a live list
             List<CoreFeed> snapshot = new();
-            await _uiDispatch(() => snapshot = _data.Feeds.ToList()).ConfigureAwait(false);
+            await _uiDispatch(() => snapshot = _app.Feeds.ToList()).ConfigureAwait(false);
 
             // intentionally sequential
             foreach (var feed in snapshot)
@@ -155,12 +150,11 @@ namespace StuiPodcast.Infra
                 // make it visible that the fetch failed (403/401 etc.)
                 Log.Warning("feed/refresh no content url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
-                var persistedFail = _app.AddOrUpdateFeed(feed);
-                await UpsertFeedIntoDataAsync(persistedFail).ConfigureAwait(false);
+                await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
                 return;
             }
 
-            
+
             try
             {
                 f = FeedReader.ReadFromString(xml);
@@ -171,8 +165,7 @@ namespace StuiPodcast.Infra
             {
                 Log.Warning(ex, "feed/refresh parse fail url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
-                var persistedFail = _app.AddOrUpdateFeed(feed);
-                await UpsertFeedIntoDataAsync(persistedFail).ConfigureAwait(false);
+                await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
                 return;
             }
 
@@ -181,20 +174,20 @@ namespace StuiPodcast.Infra
                 feed.Title = f.Title ?? feed.Url;
             feed.LastChecked = DateTimeOffset.Now;
 
-            var persistedFeed = _app.AddOrUpdateFeed(feed);
-            await UpsertFeedIntoDataAsync(persistedFeed).ConfigureAwait(false);
+            CoreFeed persistedFeed = null!;
+            await _uiDispatch(() => persistedFeed = _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
 
             int added = 0, updated = 0, skippedNoAudio = 0;
             var items = (f.Items ?? Array.Empty<FeedItem>()).ToList();
 
-            // Parse + decide + mutate _data.Episodes on the UI thread so concurrent UI
-            // enumerations of _data.Episodes don't trip over us.
+            // Parse + decide + mutate the library on the UI thread so concurrent UI
+            // enumerations of the episode list don't trip over us.
             await _uiDispatch(() =>
             {
                 // Build a URL → Episode lookup once so dedup is O(1) per item
                 // instead of O(total episodes) per item inside the loop.
                 var byUrl = new Dictionary<string, Episode>(StringComparer.OrdinalIgnoreCase);
-                foreach (var e in _data.Episodes)
+                foreach (var e in _app.Episodes)
                     if (e.FeedId == persistedFeed.Id && !string.IsNullOrEmpty(e.AudioUrl))
                         byUrl[e.AudioUrl] = e;
 
@@ -226,7 +219,6 @@ namespace StuiPodcast.Infra
                         };
 
                         var persistedEp = _app.AddOrUpdateEpisode(ep);
-                        _data.Episodes.Add(persistedEp);
                         byUrl[audioUrl] = persistedEp; // keep dedup state fresh for rest of loop
                         added++;
                     }
@@ -254,19 +246,6 @@ namespace StuiPodcast.Infra
         #endregion
 
         #region helpers
-
-        // Upsert a feed into _data.Feeds on the UI thread so UI readers don't race.
-        Task UpsertFeedIntoDataAsync(CoreFeed saved) => _uiDispatch(() =>
-        {
-            var df = _data.Feeds.FirstOrDefault(x => x.Id == saved.Id);
-            if (df == null) _data.Feeds.Add(saved);
-            else
-            {
-                df.Title = saved.Title;
-                df.Url = saved.Url;
-                df.LastChecked = saved.LastChecked;
-            }
-        });
 
         static DateTimeOffset? ParseDate(FeedItem item)
         {

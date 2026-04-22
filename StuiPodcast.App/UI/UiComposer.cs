@@ -20,7 +20,7 @@ static class UiComposer
 {
     #region startup helpers
     // scroll feeds/episodes to top on first idle
-    public static void ScrollAllToTopOnIdle(UiShell ui, AppData data)
+    public static void ScrollAllToTopOnIdle(UiShell ui, AppData data, IEpisodeStore episodes)
     {
         Application.MainLoop?.AddIdle(() =>
         {
@@ -36,7 +36,7 @@ static class UiComposer
         {
             try
             {
-                ui.SetEpisodesForFeed(ui.AllFeedId, data.Episodes);
+                ui.SetEpisodesForFeed(ui.AllFeedId, episodes.Snapshot());
                 Application.MainLoop!.AddIdle(() =>
                 {
                     try { ui.ScrollEpisodesToTopAndFocus(); } catch { }
@@ -49,13 +49,7 @@ static class UiComposer
     #endregion
 
     #region window title
-    // Kept as an overload for callers that don't yet hold an IEpisodeStore.
-    public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data)
-        => UpdateWindowTitleWithDownloads(ui, data, episodes: null);
-
-    // Preferred overload: resolves the now-playing episode via the store's
-    // O(1) index instead of a linear scan over data.Episodes.
-    public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data, IEpisodeStore? episodes)
+    public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data, IEpisodeStore episodes)
     {
         var offlinePrefix = !data.NetworkOnline ? "[OFFLINE] " : "";
         string baseTitle = "Podliner";
@@ -64,8 +58,7 @@ static class UiComposer
             var nowId = ui.GetNowPlayingId();
             if (nowId != null)
             {
-                var ep = episodes?.Find(nowId.Value)
-                         ?? data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                var ep = episodes.Find(nowId.Value);
                 if (ep != null && !string.IsNullOrWhiteSpace(ep.Title))
                     baseTitle = ep.Title!;
             }
@@ -86,14 +79,14 @@ static class UiComposer
         return pos >= (long)(len * 0.995) || len - pos <= 2000;
     }
 
-    public static IEnumerable<Feed> ApplyFeedSort(IEnumerable<Feed> feeds, AppData data)
+    public static IEnumerable<Feed> ApplyFeedSort(IEnumerable<Feed> feeds, AppData data, IEpisodeStore episodeStore)
     {
         if (feeds == null) return Enumerable.Empty<Feed>();
         var by  = (data.FeedSortBy  ?? "title").Trim().ToLowerInvariant();
         var dir = (data.FeedSortDir ?? "asc").Trim().ToLowerInvariant();
         bool desc = dir == "desc";
 
-        var episodes = data.Episodes ?? Enumerable.Empty<Episode>();
+        var episodes = (IEnumerable<Episode>)episodeStore.Snapshot();
 
         switch (by)
         {
@@ -121,7 +114,7 @@ static class UiComposer
         }
     }
 
-    public static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data)
+    public static IEnumerable<Episode> ApplySort(IEnumerable<Episode> eps, AppData data, IFeedStore feedStore)
     {
         if (eps == null) return Enumerable.Empty<Episode>();
         var by  = (data.SortBy  ?? "pubdate").Trim().ToLowerInvariant();
@@ -137,11 +130,7 @@ static class UiComposer
             return Math.Clamp(r, 0.0, 1.0);
         }
 
-        string FeedTitle(Episode e)
-        {
-            var f = ProgramData().Feeds.FirstOrDefault(x => x.Id == e.FeedId);
-            return f?.Title ?? "";
-        }
+        string FeedTitle(Episode e) => feedStore.Find(e.FeedId)?.Title ?? "";
 
         IOrderedEnumerable<Episode> ordered;
         switch (by)
@@ -178,14 +167,11 @@ static class UiComposer
                 break;
         }
         return ordered;
-
-        // local accessor to avoid passing data around in the sort key
-        AppData ProgramData() => data;
     }
     #endregion
 
     #region downloader
-    public static void AttachDownloaderUi(DownloadManager downloader, UiShell? ui, AppData data)
+    public static void AttachDownloaderUi(DownloadManager downloader, UiShell? ui, AppData data, IEpisodeStore episodes)
 {
     // per-download state cache
     var byId = new Dictionary<Guid, DownloadState>();
@@ -274,10 +260,10 @@ static class UiComposer
         {
             Application.MainLoop?.Invoke(() =>
             {
-                ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui?.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
                 if (ui != null)
                 {
-                    UpdateWindowTitleWithDownloads(ui, data, episodes: null);
+                    UpdateWindowTitleWithDownloads(ui, data, episodes);
                     switch (st.State)
                     {
                         case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
@@ -300,7 +286,7 @@ static class UiComposer
             lastPulse = DateTime.UtcNow;
             Application.MainLoop?.Invoke(() =>
             {
-                ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui?.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
                 updateBadge();
             });
         }
@@ -320,13 +306,16 @@ static class UiComposer
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
-        var ui           = ctx.Ui;
-        var data         = ctx.Data;
-        var app          = ctx.App;
-        var feeds        = ctx.Feeds;
-        var playback     = ctx.Playback;
-        var audioPlayer  = ctx.Player;
-        var syncService  = ctx.Gpodder;
+        var ui            = ctx.Ui;
+        var data          = ctx.Data;
+        var app           = ctx.App;
+        var feeds         = ctx.Feeds;
+        var playback      = ctx.Playback;
+        var audioPlayer   = ctx.Player;
+        var syncService   = ctx.Gpodder;
+        var episodeStore  = ctx.Episodes;
+        var feedStore     = ctx.FeedStore;
+        var queueService  = ctx.Queue;
         // quit
         ui.QuitRequested += () =>
         {
@@ -360,8 +349,8 @@ static class UiComposer
                 data.LastSelectedFeedId = f.Id;
                 _ = save();
 
-                ui.SetFeeds(data.Feeds, f.Id);
-                ui.SetEpisodesForFeed(f.Id, data.Episodes);
+                ui.SetFeeds(feedStore.Snapshot(), f.Id);
+                ui.SetEpisodesForFeed(f.Id, episodeStore.Snapshot());
                 ui.SelectEpisodeIndex(0);
 
                 ui.ShowOsd("feed added ✓", 1200);
@@ -383,10 +372,11 @@ static class UiComposer
                 await feeds?.RemoveFeedAsync(fid.Value)!;   // ← persist + update app data + save
 
                 // reset ui
-                var next = data.Feeds.FirstOrDefault()?.Id;
-                ui.SetFeeds(data.Feeds, next);
-                if (next != null) { ui.SetEpisodesForFeed(next.Value, data.Episodes); ui.SelectEpisodeIndex(0); }
-                else              { ui.SetEpisodesForFeed(ui.AllFeedId, data.Episodes); }
+                var snapshot = feedStore.Snapshot();
+                var next = snapshot.FirstOrDefault()?.Id;
+                ui.SetFeeds(snapshot, next);
+                if (next != null) { ui.SetEpisodesForFeed(next.Value, episodeStore.Snapshot()); ui.SelectEpisodeIndex(0); }
+                else              { ui.SetEpisodesForFeed(ui.AllFeedId, episodeStore.Snapshot()); }
 
                 ui.ShowOsd("feed removed ✓", 1200);
             }
@@ -405,13 +395,13 @@ static class UiComposer
             await feeds!.RefreshAllAsync();
 
             var selected = ui.GetSelectedFeedId() ?? data.LastSelectedFeedId;
-            ui.SetFeeds(data.Feeds, selected);
+            ui.SetFeeds(feedStore.Snapshot(), selected);
 
             if (selected != null)
             {
-                ui.SetEpisodesForFeed(selected.Value, data.Episodes);
+                ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
             }
-            CmdRouter.ApplyList(ui, data);
+            CmdRouter.ApplyList(ui, data, episodeStore);
         };
 
         // feed selection change
@@ -422,7 +412,7 @@ static class UiComposer
 
             if (fid != null)
             {
-                ui.SetEpisodesForFeed(fid.Value, data.Episodes);
+                ui.SetEpisodesForFeed(fid.Value, episodeStore.Snapshot());
                 ui.SelectEpisodeIndex(0);
             }
 
@@ -445,23 +435,10 @@ static class UiComposer
 
             if (curFeed is Guid fid && fid == VirtualFeedsCatalog.Queue)
             {
-                // Route the trim through IQueueService when available so the
-                // snapshot cache and Changed event stay consistent. Fallback
-                // preserves the original mutation during migration.
-                var trimmed = ctx.Queue?.TrimUpToInclusive(ep.Id) ?? false;
-                if (!trimmed)
+                if (queueService.TrimUpToInclusive(ep.Id))
                 {
-                    int ix = data.Queue.FindIndex(id => id == ep.Id);
-                    if (ix >= 0)
-                    {
-                        data.Queue.RemoveRange(0, ix + 1);
-                        trimmed = true;
-                    }
-                }
-                if (trimmed)
-                {
-                    ui.SetQueueOrder(data.Queue);
-                    ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+                    ui.SetQueueOrder(queueService.Snapshot());
+                    ui.RefreshEpisodesForSelectedFeed(episodeStore.Snapshot());
                     _ = save();
                 }
             }
@@ -567,7 +544,7 @@ static class UiComposer
             _ = save();
 
             var fid = ui.GetSelectedFeedId();
-            if (fid != null) ui.SetEpisodesForFeed(fid.Value, data.Episodes);
+            if (fid != null) ui.SetEpisodesForFeed(fid.Value, episodeStore.Snapshot());
             ui.ShowDetails(ep);
         };
 
@@ -577,24 +554,24 @@ static class UiComposer
             Log.Debug("cmd {Cmd}", cmd);
             if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
 
-            if (CmdRouter.HandleQueue(cmd, ui, data, save, ctx.Queue))
+            if (CmdRouter.HandleQueue(cmd, ui, data, save, episodeStore, queueService))
             {
-                ui.SetQueueOrder(data.Queue);
-                ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+                ui.SetQueueOrder(queueService.Snapshot());
+                ui.RefreshEpisodesForSelectedFeed(episodeStore.Snapshot());
                 return;
             }
 
-            if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save))
+            if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save, episodeStore))
                 return;
 
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService, ctx.Episodes, ctx.FeedStore, ctx.Queue);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, episodeStore, feedStore, queueService, engineSwitch, syncService);
         };
 
         // search
         ui.SearchApplied += query =>
         {
             var fid = ui?.GetSelectedFeedId();
-            IEnumerable<Episode> list = data.Episodes;
+            IEnumerable<Episode> list = episodeStore.Snapshot();
             if (fid != null) list = list.Where(e => e.FeedId == fid.Value);
 
             if (!string.IsNullOrWhiteSpace(query))
@@ -613,18 +590,20 @@ static class UiComposer
     {
         var ui = ctx.Ui;
         var data = ctx.Data;
-        CmdViewModule.ApplyFeedList(ui, data);
+        var episodeStore = ctx.Episodes;
+        var feedStore = ctx.FeedStore;
+        CmdViewModule.ApplyFeedList(ui, data, feedStore, episodeStore);
         ui.SetUnplayedHint(data.UnplayedOnly);
-        CmdRouter.ApplyList(ui, data);
+        CmdRouter.ApplyList(ui, data, episodeStore);
 
         var initialFeed = ui.GetSelectedFeedId();
         if (initialFeed != null)
         {
-            ui.SetEpisodesForFeed(initialFeed.Value, data.Episodes);
+            ui.SetEpisodesForFeed(initialFeed.Value, episodeStore.Snapshot());
             ui.SelectEpisodeIndex(0);
         }
 
-        var last = data.Episodes
+        var last = episodeStore.Snapshot()
             .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
             .ThenByDescending(e => e.Progress.LastPosMs)
             .FirstOrDefault()
@@ -633,10 +612,9 @@ static class UiComposer
         if (last != null)
         {
             ui.SelectFeed(last.FeedId);
-            ui.SetEpisodesForFeed(last.FeedId, data.Episodes);
+            ui.SetEpisodesForFeed(last.FeedId, episodeStore.Snapshot());
 
-            var list = data.Episodes
-                .Where(e => e.FeedId == last.FeedId)
+            var list = episodeStore.WhereByFeed(last.FeedId)
                 .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
                 .ToList();
 
@@ -650,8 +628,8 @@ static class UiComposer
         var playback = ctx.Playback;
 
         // Track the last episode whose title we pushed to the window label so
-        // we don't re-scan data.Episodes and re-set the same string 4×/sec.
-        // Network transitions update the title via NetworkMonitor separately.
+        // we don't re-resolve and re-set the same string 4×/sec. Network
+        // transitions update the title via NetworkMonitor separately.
         Guid? lastTitleId = null;
         playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
         {
@@ -719,8 +697,7 @@ static class UiComposer
                         eps => {
                             var fid = ui.GetSelectedFeedId();
                             if (fid != null) ui.SetEpisodesForFeed(fid.Value, eps);
-                        },
-                        data.Episodes);
+                        });
                     ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
                 }
             }

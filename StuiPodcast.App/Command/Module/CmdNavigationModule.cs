@@ -7,16 +7,16 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdNavigationModule
 {
-    public static void ExecGoto(string[] args, IUiShell ui, AppData data)
+    public static void ExecGoto(string[] args, IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var arg = (args.Length > 0 ? args[0] : "").ToLowerInvariant();
-        if (arg is "top" or "start") { SelectAbsolute(0, ui, data); return; }
-        if (arg is "bottom" or "end") { SelectAbsolute(int.MaxValue, ui, data); return; }
+        if (arg is "top" or "start") { SelectAbsolute(0, ui, data, episodes); return; }
+        if (arg is "bottom" or "end") { SelectAbsolute(int.MaxValue, ui, data, episodes); return; }
     }
 
-    public static void SelectRelative(int dir, IUiShell ui, AppData data, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
+    public static void SelectRelative(int dir, IUiShell ui, AppData data, IEpisodeStore episodes, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data);
+        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
         if (list.Count == 0) return;
 
         var cur = ui.GetSelectedEpisode();
@@ -40,28 +40,28 @@ internal static class CmdNavigationModule
         }
     }
 
-    public static void SelectAbsolute(int index, IUiShell ui, AppData data)
+    public static void SelectAbsolute(int index, IUiShell ui, AppData data, IEpisodeStore episodes)
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data);
+        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
         if (list.Count == 0) return;
         int target = Math.Clamp(index, 0, list.Count - 1);
         ui.SelectEpisodeIndex(target);
     }
 
-    public static void SelectMiddle(IUiShell ui, AppData data)
+    public static void SelectMiddle(IUiShell ui, AppData data, IEpisodeStore episodes)
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data);
+        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
         if (list.Count == 0) return;
         int target = list.Count / 2;
         ui.SelectEpisodeIndex(target);
     }
 
-    public static void JumpUnplayed(int dir, IUiShell ui, PlaybackCoordinator playback, AppData data)
+    public static void JumpUnplayed(int dir, IUiShell ui, PlaybackCoordinator playback, AppData data, IEpisodeStore episodes)
     {
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
 
-        IEnumerable<Episode> baseList = data.Episodes;
+        IEnumerable<Episode> baseList = episodes.Snapshot();
 
         if (feedId == VirtualFeedsCatalog.Saved) baseList = baseList.Where(e => e.Saved);
         else if (feedId == VirtualFeedsCatalog.Downloaded) baseList = baseList.Where(e => Program.IsDownloaded(e.Id));

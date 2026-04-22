@@ -3,6 +3,7 @@ using StuiPodcast.App.Command.Module;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
+using StuiPodcast.Infra.Storage;
 using Xunit;
 
 namespace StuiPodcast.App.Tests.Commands;
@@ -11,8 +12,10 @@ public sealed class CmdDownloadsModuleTests : IDisposable
 {
     private readonly string _dir;
     private readonly AppData _data;
+    private readonly LibraryStore _lib;
     private readonly DownloadManager _dlm;
     private readonly FakeUiShell _ui;
+    private readonly FakeEpisodeStore _episodes = new();
     private bool _saved;
 
     public CmdDownloadsModuleTests()
@@ -20,13 +23,16 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "podliner-cmddl-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
         _data = new AppData();
-        _dlm = new DownloadManager(_data, _dir);
+        _lib = new LibraryStore(_dir);
+        _lib.Load();
+        _dlm = new DownloadManager(_data, _lib, _dir);
         _ui = new FakeUiShell();
     }
 
     public void Dispose()
     {
         try { _dlm.Dispose(); } catch { }
+        try { _lib.Dispose(); } catch { }
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
@@ -34,8 +40,8 @@ public sealed class CmdDownloadsModuleTests : IDisposable
 
     private Episode MakeEpisode(DownloadState? state = null)
     {
-        var ep = new Episode { Title = "Test", AudioUrl = "https://x.com/e.mp3" };
-        _data.Episodes.Add(ep);
+        var ep = new Episode { Id = Guid.NewGuid(), Title = "Test", AudioUrl = "https://x.com/e.mp3" };
+        _episodes.Seed(ep);
         _ui.SelectedEpisode = ep;
         if (state.HasValue)
             _data.DownloadMap[ep.Id] = new DownloadStatus { State = state.Value };
@@ -52,7 +58,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         _data.DownloadMap[Guid.NewGuid()] = new DownloadStatus { State = DownloadState.Running };
         _data.DownloadMap[Guid.NewGuid()] = new DownloadStatus { State = DownloadState.Failed };
 
-        CmdDownloadsModule.HandleDownloads(":downloads", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m =>
             m.Text.Contains("queue 1") && m.Text.Contains("running 2") && m.Text.Contains("failed 1"));
@@ -69,7 +75,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         _data.DownloadMap[f2] = new DownloadStatus { State = DownloadState.Failed };
         _data.DownloadMap[Guid.NewGuid()] = new DownloadStatus { State = DownloadState.Done };
 
-        CmdDownloadsModule.HandleDownloads(":downloads retry-failed", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads retry-failed", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("retried 2"));
         _saved.Should().BeTrue();
@@ -80,7 +86,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         _data.DownloadMap[Guid.NewGuid()] = new DownloadStatus { State = DownloadState.Done };
 
-        CmdDownloadsModule.HandleDownloads(":downloads retry-failed", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads retry-failed", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("retried 0"));
     }
@@ -92,7 +98,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         _data.DownloadQueue.AddRange(new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() });
 
-        CmdDownloadsModule.HandleDownloads(":downloads clear-queue", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads clear-queue", _ui, _data, _dlm, Save, _episodes);
 
         _data.DownloadQueue.Should().BeEmpty();
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared queue (3)"));
@@ -101,7 +107,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     [Fact]
     public void Clear_queue_on_empty_reports_zero()
     {
-        CmdDownloadsModule.HandleDownloads(":downloads clear-queue", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads clear-queue", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared queue (0)"));
     }
@@ -111,7 +117,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     [Fact]
     public void Unknown_subcommand_shows_usage()
     {
-        CmdDownloadsModule.HandleDownloads(":downloads bogus", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":downloads bogus", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m =>
             m.Text.Contains("retry-failed") && m.Text.Contains("clear-queue") && m.Text.Contains("open-dir"));
@@ -125,7 +131,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         var ep = MakeEpisode(DownloadState.Done);
         _data.DownloadQueue.Add(ep.Id);
 
-        CmdDownloadsModule.HandleDownloads(":dl cancel", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":dl cancel", _ui, _data, _dlm, Save, _episodes);
 
         _data.DownloadMap.ContainsKey(ep.Id).Should().BeFalse();
         _data.DownloadQueue.Should().NotContain(ep.Id);
@@ -139,7 +145,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         var ep = MakeEpisode();
 
-        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save, _episodes);
 
         _dlm.GetState(ep.Id).Should().BeOneOf(DownloadState.Queued, DownloadState.Running, DownloadState.Failed);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("queued"));
@@ -150,7 +156,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         var ep = MakeEpisode(DownloadState.Failed);
 
-        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("queued"));
     }
@@ -160,7 +166,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         var ep = MakeEpisode(DownloadState.Canceled);
 
-        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save);
+        CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("queued"));
     }
@@ -172,7 +178,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         _ui.SelectedEpisode = null;
 
-        var handled = CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save);
+        var handled = CmdDownloadsModule.HandleDownloads(":dl", _ui, _data, _dlm, Save, _episodes);
 
         handled.Should().BeTrue();
         _ui.OsdMessages.Should().BeEmpty();
@@ -183,8 +189,8 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     [Fact]
     public void Unrelated_command_returns_false()
     {
-        CmdDownloadsModule.HandleDownloads(":help", _ui, _data, _dlm, Save).Should().BeFalse();
-        CmdDownloadsModule.HandleDownloads(":toggle", _ui, _data, _dlm, Save).Should().BeFalse();
+        CmdDownloadsModule.HandleDownloads(":help", _ui, _data, _dlm, Save, _episodes).Should().BeFalse();
+        CmdDownloadsModule.HandleDownloads(":toggle", _ui, _data, _dlm, Save, _episodes).Should().BeFalse();
     }
 
     // ── DlToggle helper ──────────────────────────────────────────────────────
@@ -195,7 +201,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         var ep = MakeEpisode(DownloadState.Done);
         _data.DownloadQueue.Add(ep.Id);
 
-        CmdDownloadsModule.DlToggle("off", _ui, _data, Save, _dlm);
+        CmdDownloadsModule.DlToggle("off", _ui, _data, Save, _dlm, _episodes);
 
         _data.DownloadMap.ContainsKey(ep.Id).Should().BeFalse();
         _data.DownloadQueue.Should().NotContain(ep.Id);
@@ -206,7 +212,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         var ep = MakeEpisode();
 
-        CmdDownloadsModule.DlToggle("on", _ui, _data, Save, _dlm);
+        CmdDownloadsModule.DlToggle("on", _ui, _data, Save, _dlm, _episodes);
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("queued"));
     }
@@ -216,7 +222,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         _ui.SelectedEpisode = null;
 
-        CmdDownloadsModule.DlToggle("on", _ui, _data, Save, _dlm);
+        CmdDownloadsModule.DlToggle("on", _ui, _data, Save, _dlm, _episodes);
 
         _ui.OsdMessages.Should().BeEmpty();
     }

@@ -10,7 +10,7 @@ internal sealed class CmdFeedsHandler : ICmdHandler
         switch (cmd.Kind)
         {
             case TopCommand.AddFeed:   CmdFeedsModule.ExecAddFeed(cmd.Args, ctx.Ui); return;
-            case TopCommand.Feed:      CmdFeedsModule.ExecFeed(cmd.Args, ctx.Ui, ctx.Data, ctx.Persist); return;
+            case TopCommand.Feed:      CmdFeedsModule.ExecFeed(cmd.Args, ctx.Ui, ctx.Data, ctx.Persist, ctx.Episodes); return;
             case TopCommand.RemoveFeed: CmdFeedsModule.RemoveSelectedFeed(ctx.Ui, ctx.Data, ctx.Persist); return;
         }
     }

@@ -10,7 +10,6 @@ public sealed class QueueServiceTests : IDisposable
 {
     private readonly string _dir;
     private readonly LibraryStore _lib;
-    private readonly AppData _data;
     private readonly QueueService _sut;
 
     public QueueServiceTests()
@@ -19,8 +18,7 @@ public sealed class QueueServiceTests : IDisposable
         Directory.CreateDirectory(_dir);
         _lib = new LibraryStore(_dir);
         _lib.Load();
-        _data = new AppData();
-        _sut = new QueueService(_data, _lib);
+        _sut = new QueueService(_lib);
     }
 
     public void Dispose()
@@ -107,7 +105,7 @@ public sealed class QueueServiceTests : IDisposable
     public void Dedup_removes_duplicates_keeping_first_occurrence()
     {
         var a = Guid.NewGuid(); var b = Guid.NewGuid();
-        _data.Queue.AddRange(new[] { a, b, a, a, b });
+        _lib.Current.Queue.AddRange(new[] { a, b, a, a, b });
 
         _sut.Dedup().Should().Be(3);
         _sut.Snapshot().Should().Equal(a, b);
@@ -136,17 +134,15 @@ public sealed class QueueServiceTests : IDisposable
     }
 
     [Fact]
-    public void AppData_and_LibraryStore_queue_stay_in_sync()
+    public void Mutations_persist_to_LibraryStore()
     {
         var a = Guid.NewGuid(); var b = Guid.NewGuid();
         _sut.Append(a);
         _sut.Append(b);
 
-        _data.Queue.Should().Equal(a, b);
         _lib.Current.Queue.Should().Equal(a, b);
 
         _sut.Remove(a);
-        _data.Queue.Should().Equal(b);
         _lib.Current.Queue.Should().Equal(b);
     }
 }

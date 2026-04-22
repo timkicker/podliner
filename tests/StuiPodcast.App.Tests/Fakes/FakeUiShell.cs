@@ -76,7 +76,7 @@ sealed class FakeUiShell : IUiShell
     public void TogglePlayerPlacement() => PlayerPlacementToggled = true;
     public void SetPlayerPlacement(bool atTop) => LastPlayerPlacement = atTop;
 
-    public void SetFeeds(List<Feed> feeds, Guid? selectId = null)
+    public void SetFeeds(IReadOnlyList<Feed> feeds, Guid? selectId = null)
     {
         LastSetFeeds.Clear();
         LastSetFeeds.AddRange(feeds);

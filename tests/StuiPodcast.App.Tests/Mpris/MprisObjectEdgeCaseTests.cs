@@ -10,12 +10,15 @@ namespace StuiPodcast.App.Tests.Mpris;
 
 public sealed class MprisObjectEdgeCaseTests
 {
-    static (MprisObject obj, FakeAudioPlayer player, AppData data) MakeObject()
+    static (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject()
     {
-        var data   = new AppData();
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        return (new MprisObject(data, player, pc), player, data);
+        var data     = new AppData();
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        return (new MprisObject(data, player, pc, episodes, feeds), player, data, episodes, feeds);
     }
 
     // ── Metadata edge cases ───────────────────────────────────────────────────
@@ -23,10 +26,10 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task Metadata_has_partial_data_when_episode_exists_but_feed_is_missing()
     {
-        var (obj, player, data) = MakeObject();
-        // Episode exists but its feed is NOT in data.Feeds
-        var ep = new Episode { FeedId = Guid.NewGuid(), Title = "Orphan", AudioUrl = "https://x.com/a.mp3", DurationMs = 10_000 };
-        data.Episodes.Add(ep);
+        var (obj, player, _, episodes, _) = MakeObject();
+        // Episode exists but its feed is NOT in the feed store
+        var ep = new Episode { Id = Guid.NewGuid(), FeedId = Guid.NewGuid(), Title = "Orphan", AudioUrl = "https://x.com/a.mp3", DurationMs = 10_000 };
+        episodes.Seed(ep);
         player.State.EpisodeId = ep.Id;
 
         var props    = await ((IMprisPlayer)obj).GetAllAsync();
@@ -45,7 +48,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task SetAsync_Volume_zero_calls_SetVolume_0()
     {
-        var (obj, player, _) = MakeObject();
+        var (obj, player, _, _, _) = MakeObject();
 
         await ((IMprisPlayer)obj).SetAsync("Volume", 0.0);
 
@@ -55,7 +58,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task SetAsync_Volume_one_calls_SetVolume_100()
     {
-        var (obj, player, _) = MakeObject();
+        var (obj, player, _, _, _) = MakeObject();
 
         await ((IMprisPlayer)obj).SetAsync("Volume", 1.0);
 
@@ -67,7 +70,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task MediaPlayer2_GetAllAsync_contains_Identity_and_CanQuit()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var props = await ((IMprisMediaPlayer2)obj).GetAllAsync();
 
@@ -84,7 +87,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task NotifyPlayerPropertiesChanged_fires_PlayerPropertiesChanged_event()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var tcs = new TaskCompletionSource<PropertyChanges>();
         obj.PlayerPropertiesChanged += changes => tcs.TrySetResult(changes);
@@ -101,7 +104,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task NotifySeeked_fires_SeekedSignal_event()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var tcs = new TaskCompletionSource<long>();
         obj.SeekedSignal += posUs => tcs.TrySetResult(posUs);
@@ -115,7 +118,7 @@ public sealed class MprisObjectEdgeCaseTests
     [Fact]
     public async Task NotifyPlayerPropertiesChanged_no_op_for_empty_dict()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         bool eventFired = false;
         obj.PlayerPropertiesChanged += _ => eventFired = true;

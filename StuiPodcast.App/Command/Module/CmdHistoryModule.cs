@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
@@ -5,19 +6,19 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdHistoryModule
 {
-    public static void ExecHistory(string[] args, IUiShell ui, AppData data, Func<Task> persist)
+    public static void ExecHistory(string[] args, IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore episodes)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
 
         if (arg.StartsWith("clear"))
         {
             int count = 0;
-            foreach (var e in data.Episodes)
+            foreach (var e in episodes.Snapshot())
             {
                 if (e.Progress.LastPlayedAt != null) { e.Progress.LastPlayedAt = null; count++; }
             }
             _ = persist();
-            CmdViewModule.ApplyList(ui, data);
+            CmdViewModule.ApplyList(ui, data, episodes);
             ui.ShowOsd($"History cleared ({count})");
             return;
         }
@@ -31,7 +32,7 @@ internal static class CmdHistoryModule
                 _ = persist();
 
                 ui.SetHistoryLimit(data.HistorySize);
-                CmdViewModule.ApplyList(ui, data);
+                CmdViewModule.ApplyList(ui, data, episodes);
                 ui.ShowOsd($"History size = {data.HistorySize}");
                 return;
             }

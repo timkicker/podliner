@@ -26,7 +26,7 @@ internal interface IUiShell
     void SetTheme(ThemeMode mode);
     void TogglePlayerPlacement();
     void SetPlayerPlacement(bool atTop);
-    void SetFeeds(List<Feed> feeds, Guid? selectId = null);
+    void SetFeeds(IReadOnlyList<Feed> feeds, Guid? selectId = null);
     void ShowKeysHelp();
     void ShowLogsOverlay(int tail = 500);
     void SetHistoryLimit(int n);

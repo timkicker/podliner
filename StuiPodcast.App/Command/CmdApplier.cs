@@ -22,6 +22,9 @@ static class  CmdApplier
         Func<Task> save,
         DownloadManager? downloader,
         Func<string, Task> engineSwitch,
+        IEpisodeStore episodes,
+        IFeedStore feedStore,
+        IQueueService queue,
         GpodderSyncService? syncService = null)
     {
         Application.MainLoop?.Invoke(() =>
@@ -31,16 +34,16 @@ static class  CmdApplier
                 if (ui == null || audioPlayer == null || playback == null || downloader == null) return;
 
                 if (cli.Offline)
-                    CmdRouter.Handle(":net offline", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                    CmdRouter.Handle(":net offline", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
 
                 if (!string.IsNullOrWhiteSpace(cli.Engine))
-                    CmdRouter.Handle($":engine {cli.Engine}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                    CmdRouter.Handle($":engine {cli.Engine}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlExport))
                 {
                     var path = cli.OpmlExport!;
                     Log.Information("cli/opml export path={Path}", path);
-                    CmdRouter.Handle($":opml export {path}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                    CmdRouter.Handle($":opml export {path}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlImport))
@@ -53,7 +56,7 @@ static class  CmdApplier
                         {
                             var xml = OpmlIo.ReadFile(cli.OpmlImport!);
                             var doc = OpmlParser.Parse(xml);
-                            var plan = OpmlImportPlanner.Plan(doc, data.Feeds, updateTitles: false);
+                            var plan = OpmlImportPlanner.Plan(doc, feedStore.Snapshot(), updateTitles: false);
                             Log.Information("cli/opml dryrun path={Path} new={New} dup={Dup} invalid={Invalid}",
                                 cli.OpmlImport, plan.NewCount, plan.DuplicateCount, plan.InvalidCount);
                             ui.ShowOsd($"OPML dry-run → new {plan.NewCount}, dup {plan.DuplicateCount}, invalid {plan.InvalidCount}", 2400);
@@ -70,29 +73,32 @@ static class  CmdApplier
                         if (mode == "replace")
                         {
                             Log.Information("cli/opml replace clearing existing feeds/episodes");
-                            data.Feeds.Clear();
-                            data.Episodes.Clear();
+                            foreach (var f in feedStore.Snapshot().ToList())
+                            {
+                                episodes.RemoveByFeed(f.Id);
+                                feedStore.Remove(f.Id);
+                            }
                             data.LastSelectedFeedId = ui.AllFeedId;
                             _ = save();
 
-                            ui.SetFeeds(data.Feeds, data.LastSelectedFeedId);
-                            CmdRouter.ApplyList(ui, data);
+                            ui.SetFeeds(feedStore.Snapshot(), data.LastSelectedFeedId);
+                            CmdRouter.ApplyList(ui, data, episodes);
                         }
 
                         var path = cli.OpmlImport!.Contains(' ') ? $"\"{cli.OpmlImport}\"" : cli.OpmlImport!;
-                        CmdRouter.Handle($":opml import {path}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                        CmdRouter.Handle($":opml import {path}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
                     }
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Feed))
                 {
                     var f = cli.Feed!.Trim();
-                    CmdRouter.Handle($":feed {f}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                    CmdRouter.Handle($":feed {f}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Search))
                 {
-                    CmdRouter.Handle($":search {cli.Search}", audioPlayer, playback, ui, memLog, data, save, downloader, engineSwitch, syncService);
+                    CmdRouter.Handle($":search {cli.Search}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
                 }
             }
             catch { }

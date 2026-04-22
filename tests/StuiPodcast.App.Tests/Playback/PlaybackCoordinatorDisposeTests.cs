@@ -15,9 +15,11 @@ public sealed class PlaybackCoordinatorDisposeTests
 {
     private static (PlaybackCoordinator pc, FakeAudioPlayer player, AppData data) Make()
     {
-        var data   = new AppData();
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var data     = new AppData();
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
         return (pc, player, data);
     }
 

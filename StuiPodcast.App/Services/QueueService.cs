@@ -3,43 +3,40 @@ using StuiPodcast.Infra.Storage;
 
 namespace StuiPodcast.App.Services;
 
-// Thread-safe queue implementation backed by both AppData.Queue (runtime
-// view) and LibraryStore.Current.Queue (persisted copy). During the
-// migration both paths stay in sync so legacy code still reading from
-// AppData.Queue keeps observing the right state.
+// Thread-safe queue backed directly by LibraryStore.Current.Queue — the same
+// pattern as EpisodeStore and FeedStore. Single source of truth; mutations
+// trigger a debounced save via SaveAsync.
 internal sealed class QueueService : IQueueService
 {
-    readonly AppData _data;
     readonly LibraryStore _lib;
     readonly object _gate = new();
     IReadOnlyList<Guid>? _snapshot;
 
     public event Action? Changed;
 
-    public QueueService(AppData data, LibraryStore lib)
+    public QueueService(LibraryStore lib)
     {
-        _data = data ?? throw new ArgumentNullException(nameof(data));
-        _lib  = lib  ?? throw new ArgumentNullException(nameof(lib));
+        _lib = lib ?? throw new ArgumentNullException(nameof(lib));
     }
 
     public int Count
     {
-        get { lock (_gate) return _data.Queue.Count; }
+        get { lock (_gate) return _lib.Current.Queue.Count; }
     }
 
     public IReadOnlyList<Guid> Snapshot()
     {
-        lock (_gate) return _snapshot ??= _data.Queue.ToArray();
+        lock (_gate) return _snapshot ??= _lib.Current.Queue.ToArray();
     }
 
     public bool Contains(Guid id)
     {
-        lock (_gate) return _data.Queue.Contains(id);
+        lock (_gate) return _lib.Current.Queue.Contains(id);
     }
 
     public int IndexOf(Guid id)
     {
-        lock (_gate) return _data.Queue.IndexOf(id);
+        lock (_gate) return _lib.Current.Queue.IndexOf(id);
     }
 
     public bool Append(Guid id)
@@ -47,9 +44,9 @@ internal sealed class QueueService : IQueueService
         bool changed;
         lock (_gate)
         {
-            if (_data.Queue.Contains(id)) return false;
-            _data.Queue.Add(id);
-            SyncToLib_Locked();
+            if (_lib.Current.Queue.Contains(id)) return false;
+            _lib.Current.Queue.Add(id);
+            _lib.SaveAsync();
             _snapshot = null;
             changed = true;
         }
@@ -61,9 +58,9 @@ internal sealed class QueueService : IQueueService
     {
         lock (_gate)
         {
-            if (_data.Queue.Remove(id)) { SyncToLib_Locked(); _snapshot = null; goto done; }
-            _data.Queue.Add(id);
-            SyncToLib_Locked();
+            if (_lib.Current.Queue.Remove(id)) { _lib.SaveAsync(); _snapshot = null; goto done; }
+            _lib.Current.Queue.Add(id);
+            _lib.SaveAsync();
             _snapshot = null;
         }
         done:
@@ -76,8 +73,8 @@ internal sealed class QueueService : IQueueService
         bool changed;
         lock (_gate)
         {
-            changed = _data.Queue.Remove(id);
-            if (changed) { SyncToLib_Locked(); _snapshot = null; }
+            changed = _lib.Current.Queue.Remove(id);
+            if (changed) { _lib.SaveAsync(); _snapshot = null; }
         }
         if (changed) Fire();
         return changed;
@@ -85,17 +82,15 @@ internal sealed class QueueService : IQueueService
 
     public bool MoveToFront(Guid id)
     {
-        bool changed;
         lock (_gate)
         {
-            _data.Queue.Remove(id);
-            _data.Queue.Insert(0, id);
-            SyncToLib_Locked();
+            _lib.Current.Queue.Remove(id);
+            _lib.Current.Queue.Insert(0, id);
+            _lib.SaveAsync();
             _snapshot = null;
-            changed = true;
         }
         Fire();
-        return changed;
+        return true;
     }
 
     public bool Move(Guid id, int toIndex)
@@ -103,14 +98,14 @@ internal sealed class QueueService : IQueueService
         bool changed;
         lock (_gate)
         {
-            int from = _data.Queue.IndexOf(id);
+            int from = _lib.Current.Queue.IndexOf(id);
             if (from < 0) return false;
-            int last = _data.Queue.Count - 1;
+            int last = _lib.Current.Queue.Count - 1;
             int target = Math.Clamp(toIndex, 0, last);
             if (target == from) return false;
-            _data.Queue.RemoveAt(from);
-            _data.Queue.Insert(target, id);
-            SyncToLib_Locked();
+            _lib.Current.Queue.RemoveAt(from);
+            _lib.Current.Queue.Insert(target, id);
+            _lib.SaveAsync();
             _snapshot = null;
             changed = true;
         }
@@ -123,10 +118,10 @@ internal sealed class QueueService : IQueueService
         int n;
         lock (_gate)
         {
-            n = _data.Queue.Count;
+            n = _lib.Current.Queue.Count;
             if (n == 0) return 0;
-            _data.Queue.Clear();
-            SyncToLib_Locked();
+            _lib.Current.Queue.Clear();
+            _lib.SaveAsync();
             _snapshot = null;
         }
         Fire();
@@ -139,14 +134,14 @@ internal sealed class QueueService : IQueueService
         lock (_gate)
         {
             var seen = new HashSet<Guid>();
-            var compact = new List<Guid>(_data.Queue.Count);
-            foreach (var id in _data.Queue)
+            var compact = new List<Guid>(_lib.Current.Queue.Count);
+            foreach (var id in _lib.Current.Queue)
                 if (seen.Add(id)) compact.Add(id);
-            removed = _data.Queue.Count - compact.Count;
+            removed = _lib.Current.Queue.Count - compact.Count;
             if (removed == 0) return 0;
-            _data.Queue.Clear();
-            _data.Queue.AddRange(compact);
-            SyncToLib_Locked();
+            _lib.Current.Queue.Clear();
+            _lib.Current.Queue.AddRange(compact);
+            _lib.SaveAsync();
             _snapshot = null;
         }
         Fire();
@@ -158,15 +153,15 @@ internal sealed class QueueService : IQueueService
         int n;
         lock (_gate)
         {
-            n = _data.Queue.Count;
+            n = _lib.Current.Queue.Count;
             if (n <= 1) return 0;
             var rnd = new Random();
-            for (int i = _data.Queue.Count - 1; i > 0; i--)
+            for (int i = _lib.Current.Queue.Count - 1; i > 0; i--)
             {
                 int j = rnd.Next(i + 1);
-                (_data.Queue[i], _data.Queue[j]) = (_data.Queue[j], _data.Queue[i]);
+                (_lib.Current.Queue[i], _lib.Current.Queue[j]) = (_lib.Current.Queue[j], _lib.Current.Queue[i]);
             }
-            SyncToLib_Locked();
+            _lib.SaveAsync();
             _snapshot = null;
         }
         Fire();
@@ -175,27 +170,16 @@ internal sealed class QueueService : IQueueService
 
     public bool TrimUpToInclusive(Guid targetId)
     {
-        bool changed;
         lock (_gate)
         {
-            int idx = _data.Queue.IndexOf(targetId);
+            int idx = _lib.Current.Queue.IndexOf(targetId);
             if (idx < 0) return false;
-            _data.Queue.RemoveRange(0, idx + 1);
-            SyncToLib_Locked();
+            _lib.Current.Queue.RemoveRange(0, idx + 1);
+            _lib.SaveAsync();
             _snapshot = null;
-            changed = true;
         }
         Fire();
-        return changed;
-    }
-
-    // Mirror AppData.Queue into LibraryStore.Current.Queue so persisted
-    // state matches. SaveAsync flushes on debounce.
-    void SyncToLib_Locked()
-    {
-        _lib.Current.Queue.Clear();
-        _lib.Current.Queue.AddRange(_data.Queue);
-        _lib.SaveAsync();
+        return true;
     }
 
     void Fire()

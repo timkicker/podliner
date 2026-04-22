@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using System.Linq;
@@ -6,36 +7,36 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdViewModule
 {
-    public static void ApplyList(IUiShell ui, AppData data)
+    public static void ApplyList(IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var feedId = ui.GetSelectedFeedId();
         if (feedId is null) return;
 
-        IEnumerable<Episode> list = data.Episodes;
+        IEnumerable<Episode> list = episodes.Snapshot();
         if (data.UnplayedOnly) list = list.Where(e => !e.ManuallyMarkedPlayed);
         if (feedId is Guid fid) ui.SetEpisodesForFeed(fid, list);
     }
 
-    public static void ApplyFeedList(IUiShell ui, AppData data)
+    public static void ApplyFeedList(IUiShell ui, AppData data, IFeedStore feeds, IEpisodeStore episodes)
     {
-        var sorted = UiComposer.ApplyFeedSort(data.Feeds, data).ToList();
+        var sorted = UiComposer.ApplyFeedSort(feeds.Snapshot(), data, episodes).ToList();
         ui.SetFeeds(sorted, data.LastSelectedFeedId);
     }
 
-    public static void ExecSearch(string[] args, IUiShell ui, AppData data)
+    public static void ExecSearch(string[] args, IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var query = string.Join(' ', args ?? Array.Empty<string>()).Trim();
 
         if (string.Equals(query, "clear", StringComparison.OrdinalIgnoreCase))
         {
             var fid = ui.GetSelectedFeedId();
-            if (fid != null) ui.SetEpisodesForFeed(fid.Value, data.Episodes);
+            if (fid != null) ui.SetEpisodesForFeed(fid.Value, episodes.Snapshot());
             ui.ShowOsd("search cleared", 800);
             return;
         }
 
         var feedId = ui.GetSelectedFeedId();
-        var list = data.Episodes.AsEnumerable();
+        IEnumerable<Episode> list = episodes.Snapshot();
 
         if (feedId != null) list = list.Where(e => e.FeedId == feedId.Value);
 
@@ -50,13 +51,13 @@ internal static class CmdViewModule
         ui.ShowOsd($"search: {query}", 900);
     }
 
-    public static void ExecSort(string[] args, IUiShell ui, AppData data, Func<Task> persist)
+    public static void ExecSort(string[] args, IUiShell ui, AppData data, Func<Task> persist, IFeedStore feeds, IEpisodeStore episodes)
     {
         var parts = args ?? Array.Empty<string>();
         if (parts.Length > 0 && parts[0].Equals("feeds", StringComparison.OrdinalIgnoreCase))
         {
             var feedArg = string.Join(' ', parts.Skip(1)).Trim();
-            HandleFeedSort(feedArg, ui, data, persist);
+            HandleFeedSort(feedArg, ui, data, persist, feeds, episodes);
             return;
         }
         var arg = string.Join(' ', parts).Trim();
@@ -112,7 +113,7 @@ internal static class CmdViewModule
     }
 
     // --- feed sort helper
-    private static void HandleFeedSort(string arg, IUiShell ui, AppData data, Func<Task> persist)
+    private static void HandleFeedSort(string arg, IUiShell ui, AppData data, Func<Task> persist, IFeedStore feeds, IEpisodeStore episodes)
     {
         if (arg.Equals("show", StringComparison.OrdinalIgnoreCase))
         { ui.ShowOsd($"sort feeds: {data.FeedSortBy} {data.FeedSortDir}"); return; }
@@ -120,7 +121,7 @@ internal static class CmdViewModule
         if (arg.Equals("reset", StringComparison.OrdinalIgnoreCase))
         {
             data.FeedSortBy = "title"; data.FeedSortDir = "asc";
-            _ = persist(); ApplyFeedList(ui, data);
+            _ = persist(); ApplyFeedList(ui, data, feeds, episodes);
             ui.ShowOsd("sort feeds: title asc"); return;
         }
 
@@ -136,7 +137,7 @@ internal static class CmdViewModule
                 data.FeedSortBy = key;
                 if (parts.Length >= 3)
                 { var dir = parts[2].ToLowerInvariant(); if (dir is "asc" or "desc") data.FeedSortDir = dir; }
-                _ = persist(); ApplyFeedList(ui, data);
+                _ = persist(); ApplyFeedList(ui, data, feeds, episodes);
                 ui.ShowOsd($"sort feeds: {data.FeedSortBy} {data.FeedSortDir}"); return;
             }
         }

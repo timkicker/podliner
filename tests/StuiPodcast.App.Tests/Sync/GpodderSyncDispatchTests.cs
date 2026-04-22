@@ -9,28 +9,31 @@ using Xunit;
 
 namespace StuiPodcast.App.Tests.Sync;
 
-// Regression for the UI-thread race fix: PullAsync/PushAsync now marshal
-// _data.Feeds mutations/reads through an injectable dispatcher. These tests
-// verify the dispatcher is actually used for the critical code paths and
-// that the default (null) falls back to synchronous execution.
+// Regression for the UI-thread race fix: PullAsync/PushAsync now marshal feed
+// mutations/reads through an injectable dispatcher. These tests verify the
+// dispatcher is actually used for the critical code paths and that the default
+// (null) falls back to synchronous execution.
 public sealed class GpodderSyncDispatchTests
 {
-    static (GpodderSyncService svc, FakeGpodderClient client, AppData data, string dir) Make(Func<Action, Task>? uiDispatch)
+    static (GpodderSyncService svc, FakeGpodderClient client, FakeFeedStore feeds, string dir) Make(Func<Action, Task>? uiDispatch)
     {
-        var dir    = Path.Combine(Path.GetTempPath(), "podliner-dispatch-" + Guid.NewGuid().ToString("N"));
+        var dir      = Path.Combine(Path.GetTempPath(), "podliner-dispatch-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
-        var data   = new AppData { NetworkOnline = true };
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        var store  = new GpodderStore(dir);
+        var data     = new AppData { NetworkOnline = true };
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        var store    = new GpodderStore(dir);
         store.Load();
         store.Current.ServerUrl = "https://gpodder.net";
         store.Current.Username  = "user";
         store.Current.Password  = "pass";
         var client  = new FakeGpodderClient();
         var keyring = new FakeKeyring { AlwaysFail = true };
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring, uiDispatch: uiDispatch);
-        return (svc, client, data, dir);
+        var svc     = new GpodderSyncService(store, client, data, pc, episodes, feeds, keyring: keyring, uiDispatch: uiDispatch);
+        return (svc, client, feeds, dir);
     }
 
     [Fact]
@@ -61,15 +64,15 @@ public sealed class GpodderSyncDispatchTests
         int dispatchCount = 0;
         Func<Action, Task> dispatcher = a => { dispatchCount++; a(); return Task.CompletedTask; };
 
-        var (svc, _, data, dir) = Make(dispatcher);
+        var (svc, _, feeds, dir) = Make(dispatcher);
         try
         {
-            data.Feeds.Add(new Feed { Title = "X", Url = "https://x.com/rss" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "X", Url = "https://x.com/rss" });
 
             await svc.PushAsync();
 
             dispatchCount.Should().BeGreaterThan(0,
-                "Push must snapshot _data.Feeds via dispatcher to avoid racing UI reads");
+                "Push must snapshot feeds via dispatcher to avoid racing UI reads");
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }
@@ -78,7 +81,7 @@ public sealed class GpodderSyncDispatchTests
     public async Task Null_dispatcher_falls_back_to_synchronous_execution()
     {
         // No dispatcher → default synchronous fallback. Pull should still work.
-        var (svc, client, data, dir) = Make(uiDispatch: null);
+        var (svc, client, feeds, dir) = Make(uiDispatch: null);
         try
         {
             client.NextDelta = new SubscriptionDelta(
@@ -89,7 +92,7 @@ public sealed class GpodderSyncDispatchTests
             var (ok, _) = await svc.PullAsync();
 
             ok.Should().BeTrue();
-            data.Feeds.Should().ContainSingle(f => f.Url == "https://feed.com/rss");
+            feeds.Snapshot().Should().ContainSingle(f => f.Url == "https://feed.com/rss");
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }

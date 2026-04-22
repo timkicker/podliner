@@ -47,29 +47,21 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
-    // Optional services for O(1) lookups / queue mutations through a single
-    // owner. Legacy ctor without them falls back to scanning _data.Episodes
-    // and mutating _data.Queue directly.
-    private readonly StuiPodcast.App.Services.IEpisodeStore? _episodes;
-    private readonly StuiPodcast.App.Services.IQueueService? _queue;
-
-    public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem)
-        : this(data, audioPlayer, saveAsync, mem, null, null) { }
+    // Services are the single source of truth for episodes and the playback
+    // queue. The coordinator no longer falls back to AppData collections.
+    private readonly StuiPodcast.App.Services.IEpisodeStore _episodes;
+    private readonly StuiPodcast.App.Services.IQueueService _queue;
 
     public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
-                               StuiPodcast.App.Services.IEpisodeStore? episodes)
-        : this(data, audioPlayer, saveAsync, mem, episodes, null) { }
-
-    public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
-                               StuiPodcast.App.Services.IEpisodeStore? episodes,
-                               StuiPodcast.App.Services.IQueueService? queue)
+                               StuiPodcast.App.Services.IEpisodeStore episodes,
+                               StuiPodcast.App.Services.IQueueService queue)
     {
-        _data = data;
-        _audioPlayer = audioPlayer;
-        _saveAsync = saveAsync;
+        _data = data ?? throw new ArgumentNullException(nameof(data));
+        _audioPlayer = audioPlayer ?? throw new ArgumentNullException(nameof(audioPlayer));
+        _saveAsync = saveAsync ?? throw new ArgumentNullException(nameof(saveAsync));
         _mem = mem;
-        _episodes = episodes;
-        _queue = queue;
+        _episodes = episodes ?? throw new ArgumentNullException(nameof(episodes));
+        _queue = queue ?? throw new ArgumentNullException(nameof(queue));
     }
 
     #endregion
@@ -166,8 +158,7 @@ public sealed class PlaybackCoordinator : IDisposable
 
     public void PersistProgressTick(
         PlayerState s,
-        Action<IEnumerable<Episode>> refreshUi,
-        IEnumerable<Episode> allEpisodes)
+        Action<IEnumerable<Episode>> refreshUi)
     {
         if (_current is null) return;
 
@@ -244,7 +235,7 @@ public sealed class PlaybackCoordinator : IDisposable
         if ((now - _lastUiRefresh) > TimeSpan.FromSeconds(5))
         {
             _lastUiRefresh = now;
-            try { refreshUi(allEpisodes); } catch { }
+            try { refreshUi(_episodes.Snapshot()); } catch { }
         }
 
         // Periodic progress persistence. Saves rewrite the entire library JSON
@@ -371,17 +362,14 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private bool TryFindNext(Episode current, out Episode next)
     {
-        // Consume the queue front first. When an IQueueService is injected
-        // we route through it so its snapshot cache + Changed event stay
-        // coherent; otherwise we mutate _data.Queue directly.
-        while (_data.Queue.Count > 0)
+        // Consume the queue front first.
+        while (_queue.Count > 0)
         {
-            var nextId = _data.Queue[0];
-            if (_queue != null) _queue.Remove(nextId);
-            else { _data.Queue.RemoveAt(0); }
+            var nextId = _queue.Snapshot()[0];
+            _queue.Remove(nextId);
             QueueChangedSafe();
 
-            var cand = _episodes?.Find(nextId) ?? _data.Episodes.FirstOrDefault(e => e.Id == nextId);
+            var cand = _episodes.Find(nextId);
             if (cand != null)
             {
                 next = cand;
@@ -391,8 +379,7 @@ public sealed class PlaybackCoordinator : IDisposable
         }
 
         next = null!;
-        var list = _data.Episodes
-            .Where(e => e.FeedId == current.FeedId)
+        var list = _episodes.WhereByFeed(current.FeedId)
             .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
             .ToList();
 
@@ -433,18 +420,8 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private void ConsumeQueueUpToInclusive(Guid targetId)
     {
-        if (_data.Queue.Count == 0) return;
-
-        if (_queue != null)
-        {
-            if (!_queue.TrimUpToInclusive(targetId)) return;
-        }
-        else
-        {
-            var ix = _data.Queue.IndexOf(targetId);
-            if (ix < 0) return;
-            _data.Queue.RemoveRange(0, ix + 1);
-        }
+        if (_queue.Count == 0) return;
+        if (!_queue.TrimUpToInclusive(targetId)) return;
 
         QueueChangedSafe();
         _ = _saveAsync();
@@ -480,8 +457,7 @@ public sealed class PlaybackCoordinator : IDisposable
     {
         if (_current == null) { prev = null; return false; }
 
-        var list = _data.Episodes
-            .Where(e => e.FeedId == _current.FeedId)
+        var list = _episodes.WhereByFeed(_current.FeedId)
             .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
             .ToList();
 

@@ -13,7 +13,7 @@ internal static class CmdFeedsModule
         else ui.ShowOsd("usage: :add <rss-url>");
     }
 
-    public static void ExecFeed(string[] args, IUiShell ui, AppData data, Func<Task> persist)
+    public static void ExecFeed(string[] args, IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore episodes)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         Guid? target = arg switch
@@ -31,7 +31,7 @@ internal static class CmdFeedsModule
             data.LastSelectedFeedId = fid;
             _ = persist();
             ui.SelectFeed(fid);
-            ui.SetEpisodesForFeed(fid, data.Episodes);
+            ui.SetEpisodesForFeed(fid, episodes.Snapshot());
         }
         else ui.ShowOsd("usage: :feed all|saved|downloaded|history|queue");
     }

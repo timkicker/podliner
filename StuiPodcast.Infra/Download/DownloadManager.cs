@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Serilog;
 using StuiPodcast.Core;
+using StuiPodcast.Infra.Storage;
 
 namespace StuiPodcast.Infra.Download
 {
@@ -33,6 +34,7 @@ namespace StuiPodcast.Infra.Download
         private Timer? _persistTimer;
 
         private readonly AppData _data;
+        private readonly LibraryStore _lib;
         private readonly HttpClient _http;
 
         private readonly object _gate = new();
@@ -55,9 +57,10 @@ namespace StuiPodcast.Infra.Download
 
         #region ctor and setup
 
-        public DownloadManager(AppData data, string configDir)
+        public DownloadManager(AppData data, LibraryStore lib, string configDir)
         {
             _data = data;
+            _lib = lib ?? throw new ArgumentNullException(nameof(lib));
 
             _indexPath    = Path.Combine(configDir, "downloads.json");
             _indexTmpPath = _indexPath + ".tmp";
@@ -389,8 +392,7 @@ namespace StuiPodcast.Infra.Download
                 Log.Debug("dl/worker pick id={Id} queueLeft={Queue}", nextId, _data.DownloadQueue.Count);
 
                 Episode? ep;
-                lock (_gate)
-                    ep = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
+                _lib.TryGetEpisode(nextId, out ep);
 
                 if (ep == null)
                 {
@@ -493,7 +495,7 @@ namespace StuiPodcast.Infra.Download
 
             string FeedTitle()
             {
-                var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+                var feed = _lib.Current.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
                 return feed?.Title ?? "podcast";
             }
 

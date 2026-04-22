@@ -10,13 +10,14 @@ public sealed class CmdNetModuleTests
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeEpisodeStore _episodes = new();
     private Task SaveAsync() => Task.CompletedTask;
 
     [Fact]
     public void Net_offline_sets_flag()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeFalse();
         _ui.OsdMessages.Should().Contain(m => m.Text == "Offline");
     }
@@ -25,7 +26,7 @@ public sealed class CmdNetModuleTests
     public void Net_online_sets_flag()
     {
         _data.NetworkOnline = false;
-        CmdNetModule.ExecNet(new[] { "online" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "online" }, _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeTrue();
         _ui.OsdMessages.Should().Contain(m => m.Text == "Online");
     }
@@ -34,7 +35,7 @@ public sealed class CmdNetModuleTests
     public void Net_toggle_flips()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "toggle" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "toggle" }, _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeFalse();
     }
 
@@ -42,14 +43,14 @@ public sealed class CmdNetModuleTests
     public void Net_empty_toggles()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(Array.Empty<string>(), _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(Array.Empty<string>(), _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeFalse();
     }
 
     [Fact]
     public void Net_invalid_shows_usage()
     {
-        CmdNetModule.ExecNet(new[] { "banana" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "banana" }, _ui, _data, SaveAsync, _episodes);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 
@@ -57,7 +58,7 @@ public sealed class CmdNetModuleTests
     public void Net_off_alias_works()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "off" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "off" }, _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeFalse();
     }
 
@@ -65,7 +66,7 @@ public sealed class CmdNetModuleTests
     public void Net_on_alias_works()
     {
         _data.NetworkOnline = false;
-        CmdNetModule.ExecNet(new[] { "on" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "on" }, _ui, _data, SaveAsync, _episodes);
         _data.NetworkOnline.Should().BeTrue();
     }
 
@@ -102,12 +103,12 @@ public sealed class CmdNetModuleTests
     [Fact]
     public void Offline_updates_window_title_for_playing_episode()
     {
-        var ep = new Episode { Title = "My Episode", AudioUrl = "x" };
-        _data.Episodes.Add(ep);
+        var ep = new Episode { Id = Guid.NewGuid(), Title = "My Episode", AudioUrl = "x" };
+        _episodes.Seed(ep);
         _ui.NowPlayingId = ep.Id;
         _data.NetworkOnline = true;
 
-        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync);
+        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync, _episodes);
         _ui.LastWindowTitle.Should().Contain("[OFFLINE]");
         _ui.LastWindowTitle.Should().Contain("My Episode");
     }

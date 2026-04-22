@@ -6,7 +6,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdNetModule
 {
-    public static void ExecNet(string[] args, IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore? episodes = null)
+    public static void ExecNet(string[] args, IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore episodes)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (arg is "online" or "on") { data.NetworkOnline = true; _ = persist(); ui.ShowOsd("Online", 600); }
@@ -14,14 +14,13 @@ internal static class CmdNetModule
         else if (string.IsNullOrEmpty(arg) || arg == "toggle") { data.NetworkOnline = !data.NetworkOnline; _ = persist(); ui.ShowOsd(data.NetworkOnline ? "Online" : "Offline", 600); }
         else { ui.ShowOsd("usage: :net online|offline|toggle", 1200); }
 
-        CmdViewModule.ApplyList(ui, data);
-        ui.RefreshEpisodesForSelectedFeed(data.Episodes);
+        CmdViewModule.ApplyList(ui, data, episodes);
+        ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
 
         var nowId = ui.GetNowPlayingId();
         if (nowId != null)
         {
-            var playing = episodes?.Find(nowId.Value)
-                          ?? data.Episodes.FirstOrDefault(x => x.Id == nowId);
+            var playing = episodes.Find(nowId.Value);
             if (playing != null)
                 ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (playing.Title ?? "—"));
         }

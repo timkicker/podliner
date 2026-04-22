@@ -34,11 +34,11 @@ internal static class CmdPlaybackModule
         Replay(arg, audioPlayer, ui);
     }
 
-    public static void ExecNow(IUiShell ui, AppData data)
+    public static void ExecNow(IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var nowId = ui.GetNowPlayingId();
         if (nowId == null) { ui.ShowOsd("no episode playing"); return; }
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data);
+        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
         var idx = list.FindIndex(e => e.Id == nowId);
         if (idx < 0) { ui.ShowOsd("playing episode not in current view"); return; }
         ui.SelectEpisodeIndex(idx);

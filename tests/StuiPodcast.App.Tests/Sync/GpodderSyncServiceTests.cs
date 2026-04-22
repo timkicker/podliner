@@ -19,13 +19,16 @@ public sealed class GpodderSyncServiceTests
     }
 
     static (GpodderSyncService svc, FakeGpodderClient client, GpodderStore store,
-            PlaybackCoordinator pc, AppData data, string dir) MakeSetup()
+            PlaybackCoordinator pc, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds, string dir) MakeSetup()
     {
-        var dir    = TempDir();
-        var data   = new AppData { NetworkOnline = true };
-        var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        var store  = new GpodderStore(dir);
+        var dir      = TempDir();
+        var data     = new AppData { NetworkOnline = true };
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
+        var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        var store    = new GpodderStore(dir);
         store.Load();
         store.Current.ServerUrl = "https://gpodder.net";
         store.Current.Username  = "user";
@@ -34,8 +37,8 @@ public sealed class GpodderSyncServiceTests
         // AlwaysFail=true: keyring is unavailable → password stays in store.Current.Password.
         // This preserves all existing test assertions that check store.Current.Password.
         var keyring = new FakeKeyring { AlwaysFail = true };
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
-        return (svc, client, store, pc, data, dir);
+        var svc     = new GpodderSyncService(store, client, data, pc, episodes, feeds, keyring: keyring);
+        return (svc, client, store, pc, data, episodes, feeds, dir);
     }
 
     // ── login flow ────────────────────────────────────────────────────────────
@@ -43,7 +46,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task LoginAsync_persists_credentials_on_success()
     {
-        var (svc, client, store, _, _, dir) = MakeSetup();
+        var (svc, client, store, _, _, _, _, dir) = MakeSetup();
         try
         {
             client.LoginResult = true;
@@ -61,7 +64,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task LoginAsync_returns_false_when_offline()
     {
-        var (svc, _, _, _, data, dir) = MakeSetup();
+        var (svc, _, _, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             data.NetworkOnline = false;
@@ -77,7 +80,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task LoginAsync_returns_false_when_client_rejects()
     {
-        var (svc, client, _, _, _, dir) = MakeSetup();
+        var (svc, client, _, _, _, _, _, dir) = MakeSetup();
         try
         {
             client.LoginResult = false;
@@ -95,10 +98,10 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_puts_new_local_feed_in_add_array()
     {
-        var (svc, client, store, _, data, dir) = MakeSetup();
+        var (svc, client, store, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
-            data.Feeds.Add(new Feed { Title = "New Feed", Url = "https://new.com/rss" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "New Feed", Url = "https://new.com/rss" });
             // LastKnownServerFeeds is empty → the URL is new
             store.Current.LastKnownServerFeeds = new();
 
@@ -113,12 +116,12 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_puts_stale_server_feed_in_remove_array()
     {
-        var (svc, client, store, _, data, dir) = MakeSetup();
+        var (svc, client, store, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             // Server knows about a URL that is not in local feeds
             store.Current.LastKnownServerFeeds = new() { "https://stale.com/rss" };
-            // data.Feeds is empty
+            // feed store is empty
 
             await svc.PushAsync();
 
@@ -131,10 +134,10 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_skips_subscription_call_when_sets_are_equal()
     {
-        var (svc, client, store, _, data, dir) = MakeSetup();
+        var (svc, client, store, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
-            data.Feeds.Add(new Feed { Title = "Feed", Url = "https://feed.com/rss" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Feed", Url = "https://feed.com/rss" });
             store.Current.LastKnownServerFeeds = new() { "https://feed.com/rss" };
 
             await svc.PushAsync();
@@ -147,10 +150,10 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_updates_LastKnownServerFeeds_after_push()
     {
-        var (svc, client, store, _, data, dir) = MakeSetup();
+        var (svc, client, store, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
-            data.Feeds.Add(new Feed { Title = "Feed", Url = "https://feed.com/rss" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Feed", Url = "https://feed.com/rss" });
             store.Current.LastKnownServerFeeds = new();
 
             await svc.PushAsync();
@@ -163,10 +166,10 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_updates_SubsTimestamp_from_push_response()
     {
-        var (svc, client, store, _, data, dir) = MakeSetup();
+        var (svc, client, store, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
-            data.Feeds.Add(new Feed { Title = "Feed", Url = "https://feed.com/rss" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Feed", Url = "https://feed.com/rss" });
             store.Current.LastKnownServerFeeds = new();
             client.NextTimestamp = 42;
 
@@ -182,7 +185,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_clears_pending_actions_on_success()
     {
-        var (svc, client, store, _, _, dir) = MakeSetup();
+        var (svc, client, store, _, _, _, _, dir) = MakeSetup();
         try
         {
             store.Current.PendingActions.AddRange([
@@ -200,7 +203,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_preserves_pending_actions_on_failure()
     {
-        var (svc, client, store, _, _, dir) = MakeSetup();
+        var (svc, client, store, _, _, _, _, dir) = MakeSetup();
         try
         {
             // No subscription changes (empty on both sides) so only episode push is called
@@ -222,7 +225,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_returns_false_when_not_configured()
     {
-        var (svc, _, store, _, _, dir) = MakeSetup();
+        var (svc, _, store, _, _, _, _, dir) = MakeSetup();
         try
         {
             store.Current.ServerUrl = null;
@@ -240,7 +243,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PushAsync_returns_false_when_offline()
     {
-        var (svc, _, _, _, data, dir) = MakeSetup();
+        var (svc, _, _, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             data.NetworkOnline = false;
@@ -258,15 +261,15 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PullAsync_adds_placeholder_feed_for_url_in_delta_add()
     {
-        var (svc, client, _, _, data, dir) = MakeSetup();
+        var (svc, client, _, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             client.NextDelta = new SubscriptionDelta(["https://new.com/feed"], [], 77);
 
             await svc.PullAsync();
 
-            data.Feeds.Should().HaveCount(1);
-            data.Feeds[0].Url.Should().Be("https://new.com/feed");
+            feeds.Snapshot().Should().HaveCount(1);
+            feeds.Snapshot()[0].Url.Should().Be("https://new.com/feed");
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }
@@ -274,15 +277,15 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PullAsync_skips_feed_already_present_locally()
     {
-        var (svc, client, _, _, data, dir) = MakeSetup();
+        var (svc, client, _, _, data, episodes, feeds, dir) = MakeSetup();
         try
         {
-            data.Feeds.Add(new Feed { Title = "Existing", Url = "https://existing.com/feed" });
+            feeds.Seed(new Feed { Id = Guid.NewGuid(), Title = "Existing", Url = "https://existing.com/feed" });
             client.NextDelta = new SubscriptionDelta(["https://existing.com/feed"], [], 77);
 
             await svc.PullAsync();
 
-            data.Feeds.Should().HaveCount(1);
+            feeds.Snapshot().Should().HaveCount(1);
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }
@@ -290,7 +293,7 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public async Task PullAsync_updates_SubsTimestamp_to_delta_timestamp()
     {
-        var (svc, client, store, _, _, dir) = MakeSetup();
+        var (svc, client, store, _, _, _, _, dir) = MakeSetup();
         try
         {
             client.NextDelta = new SubscriptionDelta([], [], 77);
@@ -307,15 +310,15 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public void QueuePlayAction_enqueued_when_session_changes()
     {
-        var (svc, _, store, pc, data, dir) = MakeSetup();
+        var (svc, _, store, pc, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             var feedId = Guid.NewGuid();
-            data.Feeds.Add(new Feed { Id = feedId, Title = "Feed", Url = "https://feed.com/rss" });
+            feeds.Seed(new Feed { Id = feedId, Title = "Feed", Url = "https://feed.com/rss" });
 
             var ep1 = new Episode { FeedId = feedId, Title = "Ep1", AudioUrl = "https://ep1.com/audio.mp3" };
             var ep2 = new Episode { FeedId = feedId, Title = "Ep2", AudioUrl = "https://ep2.com/audio.mp3" };
-            data.Episodes.AddRange([ep1, ep2]);
+            episodes.Seed(ep1, ep2);
 
             // Play ep1: snapshot fires → _lastSessionId set to 1, _lastEpisodeId = ep1.Id
             pc.Play(ep1);
@@ -331,11 +334,11 @@ public sealed class GpodderSyncServiceTests
     [Fact]
     public void QueuePlayAction_enqueued_when_episode_ends()
     {
-        var (svc, _, store, pc, data, dir) = MakeSetup();
+        var (svc, _, store, pc, data, episodes, feeds, dir) = MakeSetup();
         try
         {
             var feedId = Guid.NewGuid();
-            data.Feeds.Add(new Feed { Id = feedId, Title = "Feed", Url = "https://feed.com/rss" });
+            feeds.Seed(new Feed { Id = feedId, Title = "Feed", Url = "https://feed.com/rss" });
 
             var ep = new Episode
             {
@@ -344,7 +347,7 @@ public sealed class GpodderSyncServiceTests
                 AudioUrl  = "https://ep.com/audio.mp3",
                 DurationMs = 60_000,
             };
-            data.Episodes.Add(ep);
+            episodes.Seed(ep);
 
             // Play: snapshot fires → _lastSessionId set, _lastEpisodeId = ep.Id
             pc.Play(ep);
@@ -358,8 +361,7 @@ public sealed class GpodderSyncServiceTests
                     Length    = TimeSpan.FromSeconds(60),
                     Speed     = 1.0,
                 },
-                _ => { },
-                data.Episodes);
+                _ => { });
 
             store.Current.PendingActions.Should().HaveCount(1);
             store.Current.PendingActions[0].EpisodeUrl.Should().Be(ep.AudioUrl);
@@ -375,12 +377,12 @@ public sealed class GpodderSyncServiceTests
         var dir    = TempDir();
         var data   = new AppData { NetworkOnline = true };
         var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var pcEps  = new FakeEpisodeStore(); var pcQ = new FakeQueueService(); var pc = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), pcEps, pcQ);
         var store  = new GpodderStore(dir);
         store.Load();
         var client  = new FakeGpodderClient { LoginResult = true };
         var keyring = new FakeKeyring();   // AlwaysFail = false → keyring works
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        var svcEps = new FakeEpisodeStore(); var svcFeeds = new FakeFeedStore(); var svc = new GpodderSyncService(store, client, data, pc, svcEps, svcFeeds, keyring: keyring);
         try
         {
             var (ok, msg) = await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");
@@ -403,12 +405,12 @@ public sealed class GpodderSyncServiceTests
         var dir    = TempDir();
         var data   = new AppData { NetworkOnline = true };
         var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var pcEps  = new FakeEpisodeStore(); var pcQ = new FakeQueueService(); var pc = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), pcEps, pcQ);
         var store  = new GpodderStore(dir);
         store.Load();
         var client  = new FakeGpodderClient { LoginResult = true };
         var keyring = new FakeKeyring { AlwaysFail = true };
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        var svcEps = new FakeEpisodeStore(); var svcFeeds = new FakeFeedStore(); var svc = new GpodderSyncService(store, client, data, pc, svcEps, svcFeeds, keyring: keyring);
         try
         {
             var (ok, msg) = await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");
@@ -429,12 +431,12 @@ public sealed class GpodderSyncServiceTests
         var dir    = TempDir();
         var data   = new AppData { NetworkOnline = true };
         var player = new FakeAudioPlayer();
-        var pc     = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
+        var pcEps  = new FakeEpisodeStore(); var pcQ = new FakeQueueService(); var pc = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), pcEps, pcQ);
         var store  = new GpodderStore(dir);
         store.Load();
         var client  = new FakeGpodderClient { LoginResult = true };
         var keyring = new FakeKeyring();
-        var svc     = new GpodderSyncService(store, client, data, pc, keyring: keyring);
+        var svcEps = new FakeEpisodeStore(); var svcFeeds = new FakeFeedStore(); var svc = new GpodderSyncService(store, client, data, pc, svcEps, svcFeeds, keyring: keyring);
         try
         {
             await svc.LoginAsync("https://gpodder.net", "alice", "s3cr3t");

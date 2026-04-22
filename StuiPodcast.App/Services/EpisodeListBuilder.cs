@@ -6,10 +6,10 @@ namespace StuiPodcast.App.Services;
 
 internal static class EpisodeListBuilder
 {
-    public static List<Episode> BuildCurrentList(IUiShell ui, AppData data)
+    public static List<Episode> BuildCurrentList(IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var feedId = ui.GetSelectedFeedId();
-        IEnumerable<Episode> baseList = data.Episodes;
+        IEnumerable<Episode> baseList = episodes.Snapshot();
 
         if (feedId == null) return new List<Episode>();
         if (data.UnplayedOnly) baseList = baseList.Where(e => !e.ManuallyMarkedPlayed);

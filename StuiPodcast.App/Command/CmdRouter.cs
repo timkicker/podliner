@@ -22,17 +22,17 @@ static class CmdRouter
         AppData data,
         Func<Task> persist,
         DownloadManager dlm,
+        IEpisodeStore episodes,
+        IFeedStore feedStore,
+        IQueueService queue,
         Func<string, Task>? switchEngine = null,
-        GpodderSyncService? syncService = null,
-        IEpisodeStore? episodes = null,
-        IFeedStore? feedStore = null,
-        IQueueService? queue = null)
+        GpodderSyncService? syncService = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
         // fastpaths
-        if (HandleQueue(raw, ui, data, persist, queue)) return;
-        if (HandleDownloads(raw, ui, data, dlm, persist)) return;
+        if (HandleQueue(raw, ui, data, persist, episodes, queue)) return;
+        if (HandleDownloads(raw, ui, data, dlm, persist, episodes)) return;
 
         // fallback for :dl without sub-arg
         if (raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
@@ -41,28 +41,28 @@ static class CmdRouter
             var arg = raw.Contains(' ')
                 ? raw[(raw.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
                 : "";
-            CmdDownloadsModule.DlToggle(arg, ui, data, persist, dlm);
-            ApplyList(ui, data);
+            CmdDownloadsModule.DlToggle(arg, ui, data, persist, dlm, episodes);
+            ApplyList(ui, data, episodes);
             return;
         }
 
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService, episodes, feedStore, queue);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, episodes, feedStore, queue, syncService);
 
         // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);
     }
 
-    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IQueueService? queue = null)
-        => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync, queue);
+    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IEpisodeStore episodes, IQueueService queue)
+        => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync, episodes, queue);
 
-    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
-        => CmdDownloadsModule.HandleDownloads(cmd, ui, data, dlm, saveAsync);
+    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync, IEpisodeStore episodes)
+        => CmdDownloadsModule.HandleDownloads(cmd, ui, data, dlm, saveAsync, episodes);
 
-    public static void ApplyList(IUiShell ui, AppData data)
-        => CmdViewModule.ApplyList(ui, data);
+    public static void ApplyList(IUiShell ui, AppData data, IEpisodeStore episodes)
+        => CmdViewModule.ApplyList(ui, data, episodes);
 }
 #endregion
 

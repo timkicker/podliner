@@ -1,11 +1,10 @@
-﻿namespace StuiPodcast.Core
+namespace StuiPodcast.Core
 {
     public class AppData
     {
         public string PlaySource { get; set; } = "auto";
         public bool NetworkOnline { get; set; } = true;
 
-        public List<Guid> Queue { get; set; } = new();
         public string? ThemePref { get; set; } // "base", "menuaccent", "native" (enum name)
 
         public string? DownloadDir { get; set; }
@@ -33,8 +32,6 @@
         public int? LastSelectedEpisodeIndex { get; set; }
 
         public bool PlayerAtTop { get; set; } = false;
-        public List<Feed> Feeds { get; set; } = new();
-        public List<Episode> Episodes { get; set; } = new();
 
         public string? PreferredEngine { get; set; } = "auto"; // auto, vlc, mpv, ffplay
         public string? LastEngineUsed { get; set; }           // diagnostic, osd

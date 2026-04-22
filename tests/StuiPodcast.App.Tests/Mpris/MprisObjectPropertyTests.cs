@@ -12,18 +12,21 @@ public sealed class MprisObjectPropertyTests
 {
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    static (MprisObject obj, FakeAudioPlayer player, AppData data) MakeObject(
+    static (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject(
         bool isPlaying = false,
         Guid? episodeId = null)
     {
-        var data   = new AppData();
-        var player = new FakeAudioPlayer();
+        var data     = new AppData();
+        var player   = new FakeAudioPlayer();
+        var episodes = new FakeEpisodeStore();
+        var feeds    = new FakeFeedStore();
+        var queue    = new FakeQueueService();
         player.State.IsPlaying  = isPlaying;
         player.State.EpisodeId  = episodeId;
 
-        var pc  = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink());
-        var obj = new MprisObject(data, player, pc);
-        return (obj, player, data);
+        var pc  = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        var obj = new MprisObject(data, player, pc, episodes, feeds);
+        return (obj, player, data, episodes, feeds);
     }
 
     static async Task<IDictionary<string, object>> GetAllPlayerProps(MprisObject obj)
@@ -37,7 +40,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task PlaybackStatus_Stopped_when_no_episode()
     {
-        var (obj, _, _) = MakeObject(isPlaying: false, episodeId: null);
+        var (obj, _, _, _, _) = MakeObject(isPlaying: false, episodeId: null);
 
         var status = await GetPlayerProp(obj, "PlaybackStatus");
 
@@ -47,7 +50,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task PlaybackStatus_Playing_when_IsPlaying()
     {
-        var (obj, _, _) = MakeObject(isPlaying: true, episodeId: Guid.NewGuid());
+        var (obj, _, _, _, _) = MakeObject(isPlaying: true, episodeId: Guid.NewGuid());
 
         var status = await GetPlayerProp(obj, "PlaybackStatus");
 
@@ -57,7 +60,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task PlaybackStatus_Paused_when_episode_loaded_but_not_playing()
     {
-        var (obj, _, _) = MakeObject(isPlaying: false, episodeId: Guid.NewGuid());
+        var (obj, _, _, _, _) = MakeObject(isPlaying: false, episodeId: Guid.NewGuid());
 
         var status = await GetPlayerProp(obj, "PlaybackStatus");
 
@@ -69,7 +72,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task Metadata_NoTrack_when_no_episode()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var props    = await GetAllPlayerProps(obj);
         var metadata = (IDictionary<string, object>)props["Metadata"];
@@ -81,11 +84,11 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task Metadata_trackid_is_ObjectPath_not_string()
     {
-        var (obj, player, data) = MakeObject();
+        var (obj, player, data, episodes, feeds) = MakeObject();
         var feedId = Guid.NewGuid();
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3", DurationMs = 60_000 };
-        data.Feeds.Add(new Feed { Id = feedId, Title = "Feed" });
-        data.Episodes.Add(ep);
+        feeds.Seed(new Feed { Id = feedId, Title = "Feed" });
+        episodes.Seed(ep);
         player.State.EpisodeId = ep.Id;
 
         var props    = await GetAllPlayerProps(obj);
@@ -98,11 +101,11 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task Metadata_artist_is_string_array_not_string()
     {
-        var (obj, player, data) = MakeObject();
+        var (obj, player, data, episodes, feeds) = MakeObject();
         var feedId = Guid.NewGuid();
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3" };
-        data.Feeds.Add(new Feed { Id = feedId, Title = "My Podcast" });
-        data.Episodes.Add(ep);
+        feeds.Seed(new Feed { Id = feedId, Title = "My Podcast" });
+        episodes.Seed(ep);
         player.State.EpisodeId = ep.Id;
 
         var props    = await GetAllPlayerProps(obj);
@@ -117,11 +120,11 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task Metadata_length_is_DurationMs_times_1000()
     {
-        var (obj, player, data) = MakeObject();
+        var (obj, player, data, episodes, feeds) = MakeObject();
         var feedId = Guid.NewGuid();
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3", DurationMs = 5_000 };
-        data.Feeds.Add(new Feed { Id = feedId, Title = "F" });
-        data.Episodes.Add(ep);
+        feeds.Seed(new Feed { Id = feedId, Title = "F" });
+        episodes.Seed(ep);
         player.State.EpisodeId = ep.Id;
 
         var props    = await GetAllPlayerProps(obj);
@@ -135,7 +138,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task GetAllAsync_player_contains_all_required_keys()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var props = await GetAllPlayerProps(obj);
 
@@ -156,7 +159,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task SetAsync_Volume_calls_player_SetVolume_scaled()
     {
-        var (obj, player, _) = MakeObject();
+        var (obj, player, _, _, _) = MakeObject();
 
         await ((IMprisPlayer)obj).SetAsync("Volume", 0.5);
 
@@ -166,7 +169,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task SetAsync_Rate_calls_player_SetSpeed()
     {
-        var (obj, player, _) = MakeObject();
+        var (obj, player, _, _, _) = MakeObject();
 
         await ((IMprisPlayer)obj).SetAsync("Rate", 1.5);
 
@@ -179,7 +182,7 @@ public sealed class MprisObjectPropertyTests
     public async Task NextAsync_returns_completed_task_without_throw()
     {
         // Application.MainLoop is null in tests — the invoke is a no-op
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var act = async () => await ((IMprisPlayer)obj).NextAsync();
 
@@ -189,7 +192,7 @@ public sealed class MprisObjectPropertyTests
     [Fact]
     public async Task PreviousAsync_returns_completed_task_without_throw()
     {
-        var (obj, _, _) = MakeObject();
+        var (obj, _, _, _, _) = MakeObject();
 
         var act = async () => await ((IMprisPlayer)obj).PreviousAsync();
 

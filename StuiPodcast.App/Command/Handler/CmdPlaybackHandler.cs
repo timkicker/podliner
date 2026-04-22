@@ -22,14 +22,14 @@ internal sealed class CmdPlaybackHandler : ICmdHandler
             case TopCommand.Volume: CmdPlaybackModule.ExecVolume(cmd.Args, p, data, ctx.Persist, ui); return;
             case TopCommand.Speed:  CmdPlaybackModule.ExecSpeed(cmd.Args, p, data, ctx.Persist, ui);  return;
             case TopCommand.Replay: CmdPlaybackModule.ExecReplay(cmd.Args, p, ui); return;
-            case TopCommand.Now:    CmdPlaybackModule.ExecNow(ui, data); return;
+            case TopCommand.Now:    CmdPlaybackModule.ExecNow(ui, data, ctx.Episodes); return;
             case TopCommand.Jump:   CmdPlaybackModule.ExecJump(cmd.Args, p, ui); return;
 
             case TopCommand.PlayNext:
-                CmdNavigationModule.SelectRelative(+1, ui, data, playAfterSelect: true, ctx.Playback);
+                CmdNavigationModule.SelectRelative(+1, ui, data, ctx.Episodes, playAfterSelect: true, ctx.Playback);
                 return;
             case TopCommand.PlayPrev:
-                CmdNavigationModule.SelectRelative(-1, ui, data, playAfterSelect: true, ctx.Playback);
+                CmdNavigationModule.SelectRelative(-1, ui, data, ctx.Episodes, playAfterSelect: true, ctx.Playback);
                 return;
         }
     }

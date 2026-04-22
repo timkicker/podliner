@@ -120,7 +120,7 @@ public sealed class FeedServiceTests : IDisposable
 
         await _feeds.AddFeedAsync("https://example.com/rss");
 
-        _data.Feeds.Should().ContainSingle(f => f.Url == "https://example.com/rss");
+        _app.Feeds.Should().ContainSingle(f => f.Url == "https://example.com/rss");
     }
 
     // ── RefreshFeedAsync ──────────────────────────────────────────────────────
@@ -133,9 +133,9 @@ public sealed class FeedServiceTests : IDisposable
 
         var feed = await _feeds.AddFeedAsync("https://example.com/rss");
 
-        _data.Episodes.Should().HaveCount(2);
-        _data.Episodes.Select(e => e.AudioUrl).Should().Contain("https://example.com/ep1.mp3");
-        _data.Episodes.Select(e => e.AudioUrl).Should().Contain("https://example.com/ep2.mp3");
+        _app.Episodes.Should().HaveCount(2);
+        _app.Episodes.Select(e => e.AudioUrl).Should().Contain("https://example.com/ep1.mp3");
+        _app.Episodes.Select(e => e.AudioUrl).Should().Contain("https://example.com/ep2.mp3");
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class FeedServiceTests : IDisposable
         _handler.EnqueueXml(SampleRss); // second refresh with identical content
         await _feeds.RefreshFeedAsync(feed);
 
-        _data.Episodes.Should().HaveCount(2, "refresh must not duplicate existing episodes");
+        _app.Episodes.Should().HaveCount(2, "refresh must not duplicate existing episodes");
     }
 
     [Fact]
@@ -160,13 +160,13 @@ public sealed class FeedServiceTests : IDisposable
         var feed = await _feeds.AddFeedAsync("https://example.com/rss");
 
         // User marks one episode as saved.
-        var ep1 = _data.Episodes.First(e => e.AudioUrl == "https://example.com/ep1.mp3");
+        var ep1 = _app.Episodes.First(e => e.AudioUrl == "https://example.com/ep1.mp3");
         ep1.Saved = true;
 
         _handler.EnqueueXml(SampleRss);
         await _feeds.RefreshFeedAsync(feed);
 
-        _data.Episodes.First(e => e.AudioUrl == "https://example.com/ep1.mp3")
+        _app.Episodes.First(e => e.AudioUrl == "https://example.com/ep1.mp3")
             .Saved.Should().BeTrue("refresh must not reset the Saved flag");
     }
 
@@ -178,7 +178,7 @@ public sealed class FeedServiceTests : IDisposable
 
         await _feeds.AddFeedAsync("https://example.com/text");
 
-        _data.Episodes.Should().BeEmpty();
+        _app.Episodes.Should().BeEmpty();
     }
 
     [Fact]
@@ -188,7 +188,7 @@ public sealed class FeedServiceTests : IDisposable
         _handler.EnqueueXml(SampleRss);
         await _feeds.AddFeedAsync("https://example.com/rss");
 
-        _data.Episodes.Should().OnlyContain(e => e.PubDate.HasValue);
+        _app.Episodes.Should().OnlyContain(e => e.PubDate.HasValue);
     }
 
     [Fact]
@@ -200,8 +200,8 @@ public sealed class FeedServiceTests : IDisposable
         var feed = await _feeds.AddFeedAsync("https://example.com/bad");
 
         // Feed record exists but no episodes.
-        _data.Feeds.Should().ContainSingle(f => f.Url == "https://example.com/bad");
-        _data.Episodes.Should().BeEmpty();
+        _app.Feeds.Should().ContainSingle(f => f.Url == "https://example.com/bad");
+        _app.Episodes.Should().BeEmpty();
     }
 
     [Fact]
@@ -230,8 +230,8 @@ public sealed class FeedServiceTests : IDisposable
 
         await _feeds.RemoveFeedAsync(feed.Id);
 
-        _data.Feeds.Should().BeEmpty();
-        _data.Episodes.Should().BeEmpty();
+        _app.Feeds.Should().BeEmpty();
+        _app.Episodes.Should().BeEmpty();
     }
 
     [Fact]
@@ -241,15 +241,15 @@ public sealed class FeedServiceTests : IDisposable
         _handler.EnqueueXml(SampleRss);
         var feed = await _feeds.AddFeedAsync("https://example.com/rss");
 
-        var ep = _data.Episodes.First();
-        _data.Queue.Add(ep.Id);
+        var ep = _app.Episodes.First();
+        _app.LibraryStore.Current.Queue.Add(ep.Id);
         var otherEpId = Guid.NewGuid();
-        _data.Queue.Add(otherEpId);
+        _app.LibraryStore.Current.Queue.Add(otherEpId);
 
         await _feeds.RemoveFeedAsync(feed.Id);
 
-        _data.Queue.Should().NotContain(ep.Id);
-        _data.Queue.Should().Contain(otherEpId, "unrelated queue entries must stay");
+        _app.Queue.Should().NotContain(ep.Id);
+        _app.Queue.Should().Contain(otherEpId, "unrelated queue entries must stay");
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public sealed class FeedServiceTests : IDisposable
             await feeds2.AddFeedAsync("https://example.com/d");
 
             dispatchCount.Should().BeGreaterThan(0,
-                "mutations of _data.Feeds/Episodes must go through the dispatcher");
+                "library mutations must go through the dispatcher");
         }
         finally { feeds2.Dispose(); }
     }
@@ -337,7 +337,7 @@ public sealed class FeedServiceTests : IDisposable
         var feeds2 = new FeedService(_data, _app, _handler, dispatcher);
         try
         {
-            _data.Feeds.Add(new Feed { Title = "X", Url = "https://x.com/rss" });
+            _app.AddOrUpdateFeed(new Feed { Title = "X", Url = "https://x.com/rss" });
 
             await feeds2.RefreshAllAsync();
 

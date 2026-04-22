@@ -10,6 +10,8 @@ public sealed class CmdViewModuleTests
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeEpisodeStore _episodes = new();
+    private readonly FakeFeedStore _feeds = new();
     private bool _saved;
     private Task SaveAsync() { _saved = true; return Task.CompletedTask; }
 
@@ -61,7 +63,7 @@ public sealed class CmdViewModuleTests
     {
         _data.SortBy = "title";
         _data.SortDir = "asc";
-        CmdViewModule.ExecSort(new[] { "reset" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "reset" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _data.SortBy.Should().Be("pubdate");
         _data.SortDir.Should().Be("desc");
         _saved.Should().BeTrue();
@@ -71,16 +73,16 @@ public sealed class CmdViewModuleTests
     public void Sort_reverse_toggles_direction()
     {
         _data.SortDir = "desc";
-        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _data.SortDir.Should().Be("asc");
-        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _data.SortDir.Should().Be("desc");
     }
 
     [Fact]
     public void Sort_by_title_asc()
     {
-        CmdViewModule.ExecSort(new[] { "by", "title", "asc" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "by", "title", "asc" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _data.SortBy.Should().Be("title");
         _data.SortDir.Should().Be("asc");
     }
@@ -88,7 +90,7 @@ public sealed class CmdViewModuleTests
     [Fact]
     public void Sort_by_invalid_key_shows_error()
     {
-        CmdViewModule.ExecSort(new[] { "by", "bogus" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "by", "bogus" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("invalid"));
     }
 
@@ -97,7 +99,7 @@ public sealed class CmdViewModuleTests
     {
         _data.SortBy = "title";
         _data.SortDir = "asc";
-        CmdViewModule.ExecSort(new[] { "show" }, _ui, _data, SaveAsync);
+        CmdViewModule.ExecSort(new[] { "show" }, _ui, _data, SaveAsync, _feeds, _episodes);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("title") && m.Text.Contains("asc"));
     }
 
@@ -131,10 +133,10 @@ public sealed class CmdViewModuleTests
     {
         var feedId = Guid.NewGuid();
         _ui.SelectedFeedId = feedId;
-        _data.Episodes.Add(new Episode { FeedId = feedId, Title = "Hello World", AudioUrl = "x" });
-        _data.Episodes.Add(new Episode { FeedId = feedId, Title = "Goodbye", AudioUrl = "y" });
+        _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Hello World", AudioUrl = "x" });
+        _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Goodbye", AudioUrl = "y" });
 
-        CmdViewModule.ExecSearch(new[] { "Hello" }, _ui, _data);
+        CmdViewModule.ExecSearch(new[] { "Hello" }, _ui, _data, _episodes);
 
         _ui.SetEpisodeCalls.Should().HaveCount(1);
         _ui.SetEpisodeCalls[0].Episodes.Should().HaveCount(1);
@@ -146,9 +148,9 @@ public sealed class CmdViewModuleTests
     {
         var feedId = Guid.NewGuid();
         _ui.SelectedFeedId = feedId;
-        _data.Episodes.Add(new Episode { FeedId = feedId, Title = "Ep1", AudioUrl = "x" });
+        _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Ep1", AudioUrl = "x" });
 
-        CmdViewModule.ExecSearch(new[] { "clear" }, _ui, _data);
+        CmdViewModule.ExecSearch(new[] { "clear" }, _ui, _data, _episodes);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared"));
     }
 }

@@ -11,6 +11,7 @@ public sealed class CmdFeedsModuleTests
 {
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
+    private readonly FakeEpisodeStore _episodes = new();
     private Task SaveAsync() => Task.CompletedTask;
 
     [Fact]
@@ -30,42 +31,42 @@ public sealed class CmdFeedsModuleTests
     [Fact]
     public void Feed_all_selects_virtual_all()
     {
-        CmdFeedsModule.ExecFeed(new[] { "all" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "all" }, _ui, _data, SaveAsync, _episodes);
         _ui.SelectedFeedId.Should().Be(VirtualFeedsCatalog.All);
     }
 
     [Fact]
     public void Feed_saved_selects_virtual_saved()
     {
-        CmdFeedsModule.ExecFeed(new[] { "saved" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "saved" }, _ui, _data, SaveAsync, _episodes);
         _ui.SelectedFeedId.Should().Be(VirtualFeedsCatalog.Saved);
     }
 
     [Fact]
     public void Feed_downloaded_selects_virtual_downloaded()
     {
-        CmdFeedsModule.ExecFeed(new[] { "downloaded" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "downloaded" }, _ui, _data, SaveAsync, _episodes);
         _ui.SelectedFeedId.Should().Be(VirtualFeedsCatalog.Downloaded);
     }
 
     [Fact]
     public void Feed_history_selects_virtual_history()
     {
-        CmdFeedsModule.ExecFeed(new[] { "history" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "history" }, _ui, _data, SaveAsync, _episodes);
         _ui.SelectedFeedId.Should().Be(VirtualFeedsCatalog.History);
     }
 
     [Fact]
     public void Feed_queue_selects_virtual_queue()
     {
-        CmdFeedsModule.ExecFeed(new[] { "queue" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "queue" }, _ui, _data, SaveAsync, _episodes);
         _ui.SelectedFeedId.Should().Be(VirtualFeedsCatalog.Queue);
     }
 
     [Fact]
     public void Feed_unknown_shows_usage()
     {
-        CmdFeedsModule.ExecFeed(new[] { "banana" }, _ui, _data, SaveAsync);
+        CmdFeedsModule.ExecFeed(new[] { "banana" }, _ui, _data, SaveAsync, _episodes);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 

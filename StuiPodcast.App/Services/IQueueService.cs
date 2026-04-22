@@ -2,10 +2,10 @@ using StuiPodcast.Core;
 
 namespace StuiPodcast.App.Services;
 
-// Owner of the playback queue. Replaces the scattered `data.Queue.X`
-// mutations across CmdQueueModule, PlaybackCoordinator, UiComposer and
-// the UI's SetQueueLookup. Wraps both AppData.Queue and persistence so
-// there is one place that mutates queue state and emits events.
+// Owner of the playback queue. Replaces the scattered queue mutations
+// across CmdQueueModule, PlaybackCoordinator, UiComposer and the UI's
+// SetQueueLookup. Backed by LibraryStore.Current.Queue so persistence
+// stays aligned with every mutation.
 //
 // The queue holds Episode IDs (not Episode references) to stay small and
 // not keep removed episodes alive. Resolving IDs back to Episodes is the
