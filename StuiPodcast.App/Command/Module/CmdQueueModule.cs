@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
@@ -5,7 +6,12 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdQueueModule
 {
-    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync)
+    // When an IQueueService is supplied we route every mutation through it —
+    // a single owner means the snapshot cache + Changed event stay coherent
+    // and the legacy `data.Queue.Add/Remove` path can go away once all
+    // readers have migrated. Falls back to direct mutations when null so
+    // existing tests that don't wire a queue service keep working.
+    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IQueueService? queue = null)
     {
         if (string.IsNullOrWhiteSpace(cmd)) return false;
         var t = cmd.Trim();
@@ -32,33 +38,47 @@ internal static class CmdQueueModule
             case "add":
             case "toggle":
                 if (ep == null) return true;
-                if (data.Queue.Contains(ep.Id)) data.Queue.Remove(ep.Id);
-                else data.Queue.Add(ep.Id);
+                if (queue != null) queue.Toggle(ep.Id);
+                else
+                {
+                    if (data.Queue.Contains(ep.Id)) data.Queue.Remove(ep.Id);
+                    else data.Queue.Add(ep.Id);
+                }
                 Refresh(); _ = PersistLocal(); return true;
 
             case "rm":
             case "remove":
                 if (ep == null) return true;
-                data.Queue.Remove(ep.Id);
+                if (queue != null) queue.Remove(ep.Id);
+                else data.Queue.Remove(ep.Id);
                 Refresh(); _ = PersistLocal(); return true;
 
             case "clear":
-                data.Queue.Clear();
+                if (queue != null) queue.Clear();
+                else data.Queue.Clear();
                 Refresh(); _ = PersistLocal(); return true;
 
             case "shuffle":
             {
-                var rnd = new Random();
-                for (int i = data.Queue.Count - 1; i > 0; i--)
-                { int j = rnd.Next(i + 1); (data.Queue[i], data.Queue[j]) = (data.Queue[j], data.Queue[i]); }
+                if (queue != null) queue.Shuffle();
+                else
+                {
+                    var rnd = new Random();
+                    for (int i = data.Queue.Count - 1; i > 0; i--)
+                    { int j = rnd.Next(i + 1); (data.Queue[i], data.Queue[j]) = (data.Queue[j], data.Queue[i]); }
+                }
                 Refresh(); _ = PersistLocal(); ui.ShowOsd("queue: shuffled", 900); return true;
             }
             case "uniq":
             {
-                var seen = new HashSet<Guid>();
-                var compact = new List<Guid>(data.Queue.Count);
-                foreach (var id in data.Queue) if (seen.Add(id)) compact.Add(id);
-                data.Queue.Clear(); data.Queue.AddRange(compact);
+                if (queue != null) queue.Dedup();
+                else
+                {
+                    var seen = new HashSet<Guid>();
+                    var compact = new List<Guid>(data.Queue.Count);
+                    foreach (var id in data.Queue) if (seen.Add(id)) compact.Add(id);
+                    data.Queue.Clear(); data.Queue.AddRange(compact);
+                }
                 Refresh(); _ = PersistLocal(); ui.ShowOsd("queue: uniq", 900); return true;
             }
 
@@ -79,9 +99,16 @@ internal static class CmdQueueModule
 
                 if (target != idx)
                 {
-                    var id = data.Queue[idx];
-                    data.Queue.RemoveAt(idx);
-                    data.Queue.Insert(target, id);
+                    if (queue != null)
+                    {
+                        queue.Move(sel.Id, target);
+                    }
+                    else
+                    {
+                        var id = data.Queue[idx];
+                        data.Queue.RemoveAt(idx);
+                        data.Queue.Insert(target, id);
+                    }
                     Refresh(); _ = PersistLocal();
                     ui.ShowOsd(target < idx ? "Moved ↑" : "Moved ↓");
                 }

@@ -18,9 +18,11 @@ sealed class GpodderSyncService : IDisposable
     // Marshals data mutations to the UI thread to avoid races with UI reads of _data.Feeds.
     // Defaults to synchronous (test-friendly); Program.cs wires it to Application.MainLoop.Invoke.
     private readonly Func<Action, Task>  _uiDispatch;
-    // Optional O(1) episode lookup for QueuePlayAction. Falls back to scanning
-    // AppData.Episodes when null so existing tests and cold boot keep working.
+    // Optional O(1) lookups for QueuePlayAction / PullAsync dedup. Fall back
+    // to scanning AppData collections when null so existing tests and cold
+    // boot paths keep working.
     private readonly IEpisodeStore?      _episodes;
+    private readonly IFeedStore?         _feedStore;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -36,7 +38,8 @@ sealed class GpodderSyncService : IDisposable
         Func<Task>?         saveAsync  = null,
         IKeyring?           keyring    = null,
         Func<Action, Task>? uiDispatch = null,
-        IEpisodeStore?      episodes   = null)
+        IEpisodeStore?      episodes   = null,
+        IFeedStore?         feedStore  = null)
     {
         _store      = store;
         _client     = client;
@@ -46,6 +49,7 @@ sealed class GpodderSyncService : IDisposable
         _keyring    = keyring    ?? new OsKeyring();
         _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
         _episodes   = episodes;
+        _feedStore  = feedStore;
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
@@ -325,7 +329,8 @@ sealed class GpodderSyncService : IDisposable
     {
         var ep   = _episodes?.Find(episodeId)
                    ?? _data.Episodes.FirstOrDefault(e => e.Id == episodeId);
-        var feed = ep != null ? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId) : null;
+        var feed = ep == null ? null
+            : (_feedStore?.Find(ep.FeedId) ?? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId));
         if (ep == null || feed == null || string.IsNullOrEmpty(feed.Url)) return;
 
         _store.Current.PendingActions.Add(new PendingGpodderAction

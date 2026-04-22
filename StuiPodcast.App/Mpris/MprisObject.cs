@@ -13,9 +13,10 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     private readonly AppData _data;
     private readonly IAudioPlayer _player;
     private readonly PlaybackCoordinator _playback;
-    // Optional O(1) episode lookup. Falls back to AppData.Episodes scanning
-    // when null so legacy ctor path keeps working during the migration.
+    // Optional O(1) lookups. Fall back to AppData.Episodes/Feeds scanning
+    // when null so legacy ctor paths keep working during the migration.
     private readonly IEpisodeStore? _episodes;
+    private readonly IFeedStore? _feeds;
 
     public ObjectPath ObjectPath => Path;
 
@@ -25,14 +26,18 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     public event Action<long>? SeekedSignal;
 
     public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback)
-        : this(data, player, playback, null) { }
+        : this(data, player, playback, null, null) { }
 
     public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes)
+        : this(data, player, playback, episodes, null) { }
+
+    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes, IFeedStore? feeds)
     {
         _data = data;
         _player = player;
         _playback = playback;
         _episodes = episodes;
+        _feeds = feeds;
     }
 
     // ── IMprisMediaPlayer2 ──────────────────────────────────────────────────
@@ -222,7 +227,8 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
                      ?? _data.Episodes.FirstOrDefault(e => e.Id == state.EpisodeId.Value);
             if (ep != null)
             {
-                var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+                var feed = _feeds?.Find(ep.FeedId)
+                           ?? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
                 meta["mpris:trackid"] = new ObjectPath($"/org/podliner/track/{ep.Id:N}");
                 meta["mpris:length"]  = ep.DurationMs * 1000L;
                 meta["xesam:title"]   = ep.Title;

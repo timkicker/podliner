@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
@@ -5,7 +6,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdIoModule
 {
-    public static void ExecOpen(string[] args, IUiShell ui, AppData data)
+    public static void ExecOpen(string[] args, IUiShell ui, AppData data, IFeedStore? feedStore = null)
     {
         var mode = (args.Length > 0 ? args[0] : "site").Trim().ToLowerInvariant(); // "site" | "audio"
         var ep = ui.GetSelectedEpisode();
@@ -19,7 +20,8 @@ internal static class CmdIoModule
             url = GetPropString(ep, "Link", "PageUrl", "Website", "WebsiteUrl", "HtmlUrl");
             if (string.IsNullOrWhiteSpace(url))
             {
-                var feed = data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
+                var feed = feedStore?.Find(ep.FeedId)
+                           ?? data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);
                 url = GetPropString(feed, "Link", "Website", "WebsiteUrl", "HtmlUrl", "Home");
             }
             if (string.IsNullOrWhiteSpace(url)) url = ep.AudioUrl;

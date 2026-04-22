@@ -29,6 +29,8 @@ internal class Program
     private static ConfigStore?      _configStore;
     private static LibraryStore?     _libraryStore;
     private static IEpisodeStore?    _episodes;
+    private static IFeedStore?       _feedStore;
+    private static IQueueService?    _queue;
     private static AppData           _data = new();
     private static FeedService?      _feeds;
 
@@ -102,9 +104,13 @@ internal class Program
 
         AppBridge.SyncFromFacadeToAppData(_app, _data);
 
-        // EpisodeStore is the new single source of truth for episode reads/
-        // writes. Built early so any later service can receive it.
-        _episodes = new EpisodeStore(_libraryStore);
+        // Runtime stores are the new single source of truth for feed /
+        // episode / queue reads. Built early so any later service can
+        // receive them. Writes on legacy paths continue to update
+        // LibraryStore directly, which the stores read through.
+        _episodes  = new EpisodeStore(_libraryStore);
+        _feedStore = new FeedStore(_libraryStore);
+        _queue     = new QueueService(_data, _libraryStore);
 
         // apply cli engine preference before creating audio player
         if (!string.IsNullOrWhiteSpace(cli.Engine))
@@ -116,7 +122,7 @@ internal class Program
 
         // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
-        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog, _episodes);
+        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog, _episodes, _queue);
         _feeds    = new FeedService(_data, _app, uiDispatch: DispatchToUi);
 
         // gpodder sync (opt-in; no-op if not configured)
@@ -124,7 +130,7 @@ internal class Program
         _gpodderStore.Load();
         _gpodder = new GpodderSyncService(
             _gpodderStore, new GpodderClient(), _data, _playback, _saver.RequestSaveAsync,
-            uiDispatch: DispatchToUi, episodes: _episodes);
+            uiDispatch: DispatchToUi, episodes: _episodes, feedStore: _feedStore);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);
         Log.Information("lib at {Lib}", _libraryStore.FilePath);
@@ -135,7 +141,7 @@ internal class Program
         // mpris2 d-bus service (linux only)
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
-            _mpris = new MprisService(_data, _player, _playback, _episodes);
+            _mpris = new MprisService(_data, _player, _playback, _episodes, _feedStore);
             _ = Task.Run(async () =>
             {
                 try { await _mpris.StartAsync(); }
@@ -186,7 +192,10 @@ internal class Program
         _ui.UpdateSpeedEnabled((_player.Capabilities & PlayerCapabilities.Speed) != 0);
 
         // lookups
-        _ui.SetQueueLookup(id => _data.Queue.Contains(id));
+        // Queue lookup goes through IQueueService so the UI sees a consistent
+        // view whether mutations came via legacy data.Queue paths or the new
+        // service API.
+        _ui.SetQueueLookup(id => _queue!.Contains(id));
         _ui.SetDownloadStateLookup(id => _app!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);
         _ui.SetOfflineLookup(() => !_data.NetworkOnline);
 
@@ -208,7 +217,7 @@ internal class Program
         var services = new AppServices(
             Ui: _ui, Data: _data, App: _app!,
             ConfigStore: _configStore!, LibraryStore: _libraryStore!,
-            Episodes: _episodes!,
+            Episodes: _episodes!, FeedStore: _feedStore!, Queue: _queue!,
             Feeds: _feeds!, Player: _player!, Playback: _playback!,
             Downloader: _downloader!, DownloadLookup: _downloadLookup!,
             MemLog: _memLog, GpodderStore: _gpodderStore!, Gpodder: _gpodder,
@@ -391,21 +400,9 @@ internal class Program
         return Path.Combine(baseConfigDir, "podliner");
     }
 
-    // check if feed with url already exists
+    // check if feed with url already exists (O(1) via FeedStore URL index)
     private static bool HasFeedWithUrl(string url)
-    {
-        return _data.Feeds.Any(f =>
-        {
-            var t = f.GetType();
-            var prop = t.GetProperty("Url")
-                       ?? t.GetProperty("FeedUrl")
-                       ?? t.GetProperty("XmlUrl")
-                       ?? t.GetProperty("SourceUrl")
-                       ?? t.GetProperty("RssUrl");
-            var val = prop?.GetValue(f) as string;
-            return val != null && string.Equals(val, url, StringComparison.OrdinalIgnoreCase);
-        });
-    }
+        => _feedStore?.ContainsUrl(url) ?? false;
 
     // print version to stdout
     private static void PrintVersion()

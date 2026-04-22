@@ -18,16 +18,21 @@ internal sealed class CmdContext
     public DownloadManager Dlm { get; }
     public Func<string, Task>? SwitchEngine { get; }
     public GpodderSyncService? Sync { get; }
-    // New: episode store for O(1) lookups. Nullable so callers that haven't
-    // been plumbed through can keep working with AppData.Episodes.
+    // New: runtime stores. Nullable so callers that haven't been plumbed
+    // through can keep working with AppData collections.
     public IEpisodeStore? Episodes { get; }
+    public IFeedStore?    FeedStore { get; }
+    public IQueueService? Queue { get; }
 
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, IUiShell ui, MemoryLogSink mem,
         AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine,
-        GpodderSyncService? sync = null, IEpisodeStore? episodes = null)
+        GpodderSyncService? sync = null, IEpisodeStore? episodes = null,
+        IFeedStore? feedStore = null, IQueueService? queue = null)
     {
         AudioPlayer = audioPlayer; Playback = playback; Ui = ui; Mem = mem;
         Data = data; Persist = persist; Dlm = dlm; SwitchEngine = switchEngine; Sync = sync;
         Episodes = episodes;
+        FeedStore = feedStore;
+        Queue = queue;
     }
 }

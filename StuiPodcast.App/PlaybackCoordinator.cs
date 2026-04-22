@@ -47,21 +47,29 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
-    // Optional episode store for O(1) lookups in TryFindNext/TryFindPrev.
-    // Legacy ctor without it falls back to linear scans over _data.Episodes.
+    // Optional services for O(1) lookups / queue mutations through a single
+    // owner. Legacy ctor without them falls back to scanning _data.Episodes
+    // and mutating _data.Queue directly.
     private readonly StuiPodcast.App.Services.IEpisodeStore? _episodes;
+    private readonly StuiPodcast.App.Services.IQueueService? _queue;
 
     public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem)
-        : this(data, audioPlayer, saveAsync, mem, null) { }
+        : this(data, audioPlayer, saveAsync, mem, null, null) { }
 
     public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
                                StuiPodcast.App.Services.IEpisodeStore? episodes)
+        : this(data, audioPlayer, saveAsync, mem, episodes, null) { }
+
+    public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
+                               StuiPodcast.App.Services.IEpisodeStore? episodes,
+                               StuiPodcast.App.Services.IQueueService? queue)
     {
         _data = data;
         _audioPlayer = audioPlayer;
         _saveAsync = saveAsync;
         _mem = mem;
         _episodes = episodes;
+        _queue = queue;
     }
 
     #endregion
@@ -363,10 +371,14 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private bool TryFindNext(Episode current, out Episode next)
     {
+        // Consume the queue front first. When an IQueueService is injected
+        // we route through it so its snapshot cache + Changed event stay
+        // coherent; otherwise we mutate _data.Queue directly.
         while (_data.Queue.Count > 0)
         {
             var nextId = _data.Queue[0];
-            _data.Queue.RemoveAt(0);
+            if (_queue != null) _queue.Remove(nextId);
+            else { _data.Queue.RemoveAt(0); }
             QueueChangedSafe();
 
             var cand = _episodes?.Find(nextId) ?? _data.Episodes.FirstOrDefault(e => e.Id == nextId);
@@ -423,10 +435,17 @@ public sealed class PlaybackCoordinator : IDisposable
     {
         if (_data.Queue.Count == 0) return;
 
-        var ix = _data.Queue.IndexOf(targetId);
-        if (ix < 0) return;
+        if (_queue != null)
+        {
+            if (!_queue.TrimUpToInclusive(targetId)) return;
+        }
+        else
+        {
+            var ix = _data.Queue.IndexOf(targetId);
+            if (ix < 0) return;
+            _data.Queue.RemoveRange(0, ix + 1);
+        }
 
-        _data.Queue.RemoveRange(0, ix + 1);
         QueueChangedSafe();
         _ = _saveAsync();
     }

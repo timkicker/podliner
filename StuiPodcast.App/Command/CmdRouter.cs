@@ -24,12 +24,14 @@ static class CmdRouter
         DownloadManager dlm,
         Func<string, Task>? switchEngine = null,
         GpodderSyncService? syncService = null,
-        IEpisodeStore? episodes = null)
+        IEpisodeStore? episodes = null,
+        IFeedStore? feedStore = null,
+        IQueueService? queue = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
         // fastpaths
-        if (HandleQueue(raw, ui, data, persist)) return;
+        if (HandleQueue(raw, ui, data, persist, queue)) return;
         if (HandleDownloads(raw, ui, data, dlm, persist)) return;
 
         // fallback for :dl without sub-arg
@@ -47,14 +49,14 @@ static class CmdRouter
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService, episodes);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService, episodes, feedStore, queue);
 
         // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);
     }
 
-    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync)
-        => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync);
+    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IQueueService? queue = null)
+        => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync, queue);
 
     public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync)
         => CmdDownloadsModule.HandleDownloads(cmd, ui, data, dlm, saveAsync);

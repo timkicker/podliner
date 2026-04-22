@@ -445,10 +445,21 @@ static class UiComposer
 
             if (curFeed is Guid fid && fid == VirtualFeedsCatalog.Queue)
             {
-                int ix = data.Queue.FindIndex(id => id == ep.Id);
-                if (ix >= 0)
+                // Route the trim through IQueueService when available so the
+                // snapshot cache and Changed event stay consistent. Fallback
+                // preserves the original mutation during migration.
+                var trimmed = ctx.Queue?.TrimUpToInclusive(ep.Id) ?? false;
+                if (!trimmed)
                 {
-                    data.Queue.RemoveRange(0, ix + 1);
+                    int ix = data.Queue.FindIndex(id => id == ep.Id);
+                    if (ix >= 0)
+                    {
+                        data.Queue.RemoveRange(0, ix + 1);
+                        trimmed = true;
+                    }
+                }
+                if (trimmed)
+                {
                     ui.SetQueueOrder(data.Queue);
                     ui.RefreshEpisodesForSelectedFeed(data.Episodes);
                     _ = save();
@@ -566,7 +577,7 @@ static class UiComposer
             Log.Debug("cmd {Cmd}", cmd);
             if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
 
-            if (CmdRouter.HandleQueue(cmd, ui, data, save))
+            if (CmdRouter.HandleQueue(cmd, ui, data, save, ctx.Queue))
             {
                 ui.SetQueueOrder(data.Queue);
                 ui.RefreshEpisodesForSelectedFeed(data.Episodes);
@@ -576,7 +587,7 @@ static class UiComposer
             if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save))
                 return;
 
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService, ctx.Episodes);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService, ctx.Episodes, ctx.FeedStore, ctx.Queue);
         };
 
         // search

@@ -9,7 +9,7 @@ internal sealed class CmdIoHandler : ICmdHandler
     {
         switch (cmd.Kind)
         {
-            case TopCommand.Open: CmdIoModule.ExecOpen(cmd.Args, ctx.Ui, ctx.Data); return;
+            case TopCommand.Open: CmdIoModule.ExecOpen(cmd.Args, ctx.Ui, ctx.Data, ctx.FeedStore); return;
             case TopCommand.Copy: CmdIoModule.ExecCopy(cmd.Args, ctx.Ui, ctx.Data); return;
         }
     }

@@ -11,22 +11,25 @@ sealed class MprisService : IAsyncDisposable
     private readonly IAudioPlayer _player;
     private readonly PlaybackCoordinator _playback;
     private readonly IEpisodeStore? _episodes;
+    private readonly IFeedStore? _feeds;
 
     private MprisObject? _obj;
     private Connection? _conn;
     private PlaybackSnapshot _lastSnapshot;
 
-    public MprisService(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes = null)
+    public MprisService(AppData data, IAudioPlayer player, PlaybackCoordinator playback,
+                        IEpisodeStore? episodes = null, IFeedStore? feeds = null)
     {
         _data = data;
         _player = player;
         _playback = playback;
         _episodes = episodes;
+        _feeds = feeds;
     }
 
     public async Task StartAsync()
     {
-        _obj = new MprisObject(_data, _player, _playback, _episodes);
+        _obj = new MprisObject(_data, _player, _playback, _episodes, _feeds);
         _conn = new Connection(Address.Session);
         await _conn.ConnectAsync();
         await _conn.RegisterObjectAsync(_obj);
