@@ -23,7 +23,8 @@ static class CmdRouter
         Func<Task> persist,
         DownloadManager dlm,
         Func<string, Task>? switchEngine = null,
-        GpodderSyncService? syncService = null)
+        GpodderSyncService? syncService = null,
+        IEpisodeStore? episodes = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
@@ -46,7 +47,7 @@ static class CmdRouter
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, syncService, episodes);
 
         // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);

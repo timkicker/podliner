@@ -18,6 +18,9 @@ sealed class GpodderSyncService : IDisposable
     // Marshals data mutations to the UI thread to avoid races with UI reads of _data.Feeds.
     // Defaults to synchronous (test-friendly); Program.cs wires it to Application.MainLoop.Invoke.
     private readonly Func<Action, Task>  _uiDispatch;
+    // Optional O(1) episode lookup for QueuePlayAction. Falls back to scanning
+    // AppData.Episodes when null so existing tests and cold boot keep working.
+    private readonly IEpisodeStore?      _episodes;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -32,7 +35,8 @@ sealed class GpodderSyncService : IDisposable
         PlaybackCoordinator playback,
         Func<Task>?         saveAsync  = null,
         IKeyring?           keyring    = null,
-        Func<Action, Task>? uiDispatch = null)
+        Func<Action, Task>? uiDispatch = null,
+        IEpisodeStore?      episodes   = null)
     {
         _store      = store;
         _client     = client;
@@ -41,6 +45,7 @@ sealed class GpodderSyncService : IDisposable
         _saveAsync  = saveAsync;
         _keyring    = keyring    ?? new OsKeyring();
         _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
+        _episodes   = episodes;
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
@@ -318,7 +323,8 @@ sealed class GpodderSyncService : IDisposable
 
     private void QueuePlayAction(Guid episodeId)
     {
-        var ep   = _data.Episodes.FirstOrDefault(e => e.Id == episodeId);
+        var ep   = _episodes?.Find(episodeId)
+                   ?? _data.Episodes.FirstOrDefault(e => e.Id == episodeId);
         var feed = ep != null ? _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId) : null;
         if (ep == null || feed == null || string.IsNullOrEmpty(feed.Url)) return;
 

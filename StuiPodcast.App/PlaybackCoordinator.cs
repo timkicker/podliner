@@ -47,12 +47,21 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
+    // Optional episode store for O(1) lookups in TryFindNext/TryFindPrev.
+    // Legacy ctor without it falls back to linear scans over _data.Episodes.
+    private readonly StuiPodcast.App.Services.IEpisodeStore? _episodes;
+
     public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem)
+        : this(data, audioPlayer, saveAsync, mem, null) { }
+
+    public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
+                               StuiPodcast.App.Services.IEpisodeStore? episodes)
     {
         _data = data;
         _audioPlayer = audioPlayer;
         _saveAsync = saveAsync;
         _mem = mem;
+        _episodes = episodes;
     }
 
     #endregion
@@ -360,7 +369,7 @@ public sealed class PlaybackCoordinator : IDisposable
             _data.Queue.RemoveAt(0);
             QueueChangedSafe();
 
-            var cand = _data.Episodes.FirstOrDefault(e => e.Id == nextId);
+            var cand = _episodes?.Find(nextId) ?? _data.Episodes.FirstOrDefault(e => e.Id == nextId);
             if (cand != null)
             {
                 next = cand;

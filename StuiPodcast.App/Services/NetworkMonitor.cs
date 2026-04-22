@@ -11,6 +11,10 @@ sealed class NetworkMonitor
     readonly AppData _data;
     readonly UiShell _ui;
     readonly Func<Task> _saveAsync;
+    // Optional: when supplied, the now-playing episode lookup on state flips
+    // goes through the store's O(1) index. Falls back to AppData.Episodes
+    // when null so legacy construction paths keep working.
+    readonly IEpisodeStore? _episodes;
 
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
@@ -25,11 +29,12 @@ sealed class NetworkMonitor
     DateTimeOffset _lastHeartbeat = DateTimeOffset.MinValue;
     static readonly TimeSpan _heartbeatEvery = TimeSpan.FromMinutes(2);
 
-    public NetworkMonitor(AppData data, UiShell ui, Func<Task> saveAsync)
+    public NetworkMonitor(AppData data, UiShell ui, Func<Task> saveAsync, IEpisodeStore? episodes = null)
     {
         _data = data;
         _ui = ui;
         _saveAsync = saveAsync;
+        _episodes = episodes;
     }
 
     public void Start(out object? timerToken)
@@ -120,7 +125,8 @@ sealed class NetworkMonitor
             var nowId = _ui.GetNowPlayingId();
             if (nowId != null)
             {
-                var ep = _data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                var ep = _episodes?.Find(nowId.Value)
+                         ?? _data.Episodes.FirstOrDefault(x => x.Id == nowId);
                 if (ep != null)
                     _ui.SetWindowTitle((!_data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
             }

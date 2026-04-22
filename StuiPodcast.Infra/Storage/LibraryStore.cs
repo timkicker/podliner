@@ -267,6 +267,19 @@ namespace StuiPodcast.Infra.Storage
             return cnt;
         }
 
+        // Single-episode removal that keeps the internal index + list in sync
+        // and persists. Symmetric counterpart to AddOrUpdateEpisode.
+        public bool RemoveEpisode(Guid episodeId)
+        {
+            var removed = Current.Episodes.RemoveAll(e => e.Id == episodeId) > 0;
+            if (removed)
+            {
+                _episodesById.Remove(episodeId);
+                InvokeChangedAndSave();
+            }
+            return removed;
+        }
+
         public int QueueRemoveByEpisodeIds(IEnumerable<Guid> episodeIds)
         {
             var set = episodeIds is HashSet<Guid> h ? h : new HashSet<Guid>(episodeIds);

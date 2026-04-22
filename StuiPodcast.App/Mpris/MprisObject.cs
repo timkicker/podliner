@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
 using Terminal.Gui;
@@ -12,6 +13,9 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     private readonly AppData _data;
     private readonly IAudioPlayer _player;
     private readonly PlaybackCoordinator _playback;
+    // Optional O(1) episode lookup. Falls back to AppData.Episodes scanning
+    // when null so legacy ctor path keeps working during the migration.
+    private readonly IEpisodeStore? _episodes;
 
     public ObjectPath ObjectPath => Path;
 
@@ -21,10 +25,14 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     public event Action<long>? SeekedSignal;
 
     public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback)
+        : this(data, player, playback, null) { }
+
+    public MprisObject(AppData data, IAudioPlayer player, PlaybackCoordinator playback, IEpisodeStore? episodes)
     {
         _data = data;
         _player = player;
         _playback = playback;
+        _episodes = episodes;
     }
 
     // ── IMprisMediaPlayer2 ──────────────────────────────────────────────────
@@ -210,7 +218,8 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
 
         if (state.EpisodeId.HasValue)
         {
-            var ep = _data.Episodes.FirstOrDefault(e => e.Id == state.EpisodeId.Value);
+            var ep = _episodes?.Find(state.EpisodeId.Value)
+                     ?? _data.Episodes.FirstOrDefault(e => e.Id == state.EpisodeId.Value);
             if (ep != null)
             {
                 var feed = _data.Feeds.FirstOrDefault(f => f.Id == ep.FeedId);

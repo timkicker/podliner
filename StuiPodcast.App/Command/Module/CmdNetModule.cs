@@ -1,3 +1,4 @@
+using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
@@ -5,7 +6,7 @@ namespace StuiPodcast.App.Command.Module;
 
 internal static class CmdNetModule
 {
-    public static void ExecNet(string[] args, IUiShell ui, AppData data, Func<Task> persist)
+    public static void ExecNet(string[] args, IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore? episodes = null)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (arg is "online" or "on") { data.NetworkOnline = true; _ = persist(); ui.ShowOsd("Online", 600); }
@@ -19,7 +20,8 @@ internal static class CmdNetModule
         var nowId = ui.GetNowPlayingId();
         if (nowId != null)
         {
-            var playing = data.Episodes.FirstOrDefault(x => x.Id == nowId);
+            var playing = episodes?.Find(nowId.Value)
+                          ?? data.Episodes.FirstOrDefault(x => x.Id == nowId);
             if (playing != null)
                 ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (playing.Title ?? "—"));
         }

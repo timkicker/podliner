@@ -26,6 +26,7 @@ internal sealed record AppServices(
     AppFacade             App,
     ConfigStore           ConfigStore,
     LibraryStore          LibraryStore,
+    IEpisodeStore         Episodes,
     FeedService           Feeds,
     SwappableAudioPlayer  Player,
     PlaybackCoordinator   Playback,

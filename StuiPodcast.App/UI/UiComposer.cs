@@ -49,7 +49,13 @@ static class UiComposer
     #endregion
 
     #region window title
+    // Kept as an overload for callers that don't yet hold an IEpisodeStore.
     public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data)
+        => UpdateWindowTitleWithDownloads(ui, data, episodes: null);
+
+    // Preferred overload: resolves the now-playing episode via the store's
+    // O(1) index instead of a linear scan over data.Episodes.
+    public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data, IEpisodeStore? episodes)
     {
         var offlinePrefix = !data.NetworkOnline ? "[OFFLINE] " : "";
         string baseTitle = "Podliner";
@@ -58,7 +64,8 @@ static class UiComposer
             var nowId = ui.GetNowPlayingId();
             if (nowId != null)
             {
-                var ep = data.Episodes.FirstOrDefault(x => x.Id == nowId);
+                var ep = episodes?.Find(nowId.Value)
+                         ?? data.Episodes.FirstOrDefault(x => x.Id == nowId);
                 if (ep != null && !string.IsNullOrWhiteSpace(ep.Title))
                     baseTitle = ep.Title!;
             }
@@ -270,7 +277,7 @@ static class UiComposer
                 ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
                 if (ui != null)
                 {
-                    UpdateWindowTitleWithDownloads(ui, data);
+                    UpdateWindowTitleWithDownloads(ui, data, episodes: null);
                     switch (st.State)
                     {
                         case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
@@ -569,7 +576,7 @@ static class UiComposer
             if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save))
                 return;
 
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService);
+            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, engineSwitch, syncService, ctx.Episodes);
         };
 
         // search
@@ -651,7 +658,7 @@ static class UiComposer
                     var nowId = ui.GetNowPlayingId();
                     if (nowId is Guid nid && snap.EpisodeId == nid && nid != lastTitleId)
                     {
-                        var ep = data.Episodes.FirstOrDefault(x => x.Id == nid);
+                        var ep = ctx.Episodes.Find(nid);
                         if (ep != null)
                         {
                             ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
