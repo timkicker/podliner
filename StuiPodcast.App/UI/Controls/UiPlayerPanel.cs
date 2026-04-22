@@ -205,8 +205,13 @@ internal sealed class UiPlayerPanel : FrameView
             mid, BtnVolDown, BtnVolUp, VolPctLabel, VolBar, Progress);
     }
 
+    private bool? _speedEnabledCache;
     public void SetSpeedEnabled(bool enabled)
     {
+        // Called on every playback tick (~4×/sec); skip the Terminal.Gui
+        // property churn when the state hasn't actually changed.
+        if (_speedEnabledCache == enabled) return;
+        _speedEnabledCache = enabled;
         BtnSpeedDown.Enabled = enabled;
         BtnSpeedUp.Enabled   = enabled;
     }

@@ -230,7 +230,14 @@ public sealed class PlaybackCoordinator : IDisposable
             try { refreshUi(allEpisodes); } catch { }
         }
 
-        if ((now - _lastPeriodicSave) > TimeSpan.FromSeconds(3))
+        // Periodic progress persistence. Saves rewrite the entire library JSON
+        // (feeds + episodes + queue + history), so doing this every 3s during
+        // playback means writing multi-MB files ~1200 times per hour. 30s is
+        // a better tradeoff: max 30s of progress lost on hard crash, orders
+        // of magnitude less disk churn. Critical state changes (episode
+        // marked played, queue mutations, etc.) still save immediately via
+        // their own paths.
+        if ((now - _lastPeriodicSave) > TimeSpan.FromSeconds(30))
         {
             _lastPeriodicSave = now;
             _ = _saveAsync();

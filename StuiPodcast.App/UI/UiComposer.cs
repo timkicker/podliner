@@ -245,53 +245,57 @@ static class UiComposer
 
     downloader.StatusChanged += (id, st) =>
     {
-        // update state cache
+        // During an active download, DownloadManager fires StatusChanged ~every
+        // 400ms with state=Running for progress pulses. We want UI side-effects
+        // (OSD, full list refresh) only on real state transitions; progress
+        // byte updates still flow into the `progress` dictionary for the badge.
+        var prevState = byId.TryGetValue(id, out var ps) ? (DownloadState?)ps : null;
+        bool isTransition = prevState != st.State;
+
         byId[id] = st.State;
-        
-        // maintain progress entries
         progress[id] = (st.BytesReceived, st.TotalBytes, st.State);
 
         // prune progress on failed/canceled
         if (st.State == DownloadState.Failed || st.State == DownloadState.Canceled)
-        {
             progress.Remove(id);
-        }
 
         // ensure done reports 100% if bytes < total
         if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is { } T)
-        {
             progress[id] = (T, T, DownloadState.Done);
+
+        if (isTransition)
+        {
+            Application.MainLoop?.Invoke(() =>
+            {
+                ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
+                if (ui != null)
+                {
+                    UpdateWindowTitleWithDownloads(ui, data);
+                    switch (st.State)
+                    {
+                        case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
+                        case DownloadState.Running: ui.ShowOsd("dl ⇣", 300); break;
+                        case DownloadState.Verifying: ui.ShowOsd("dl ≈", 300); break;
+                        case DownloadState.Done: ui.ShowOsd("dl ✓", 500); break;
+                        case DownloadState.Failed: ui.ShowOsd("dl !", 900); break;
+                        case DownloadState.Canceled: ui.ShowOsd("dl ×", 400); break;
+                    }
+                }
+                updateBadge();
+            });
         }
 
-
-        Application.MainLoop?.Invoke(() =>
-        {
-            ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
-            if (ui != null)
-            {
-                UpdateWindowTitleWithDownloads(ui, data);
-
-                // small status osd
-                switch (st.State)
-                {
-                    case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
-                    case DownloadState.Running: ui.ShowOsd("dl ⇣", 300); break;
-                    case DownloadState.Verifying: ui.ShowOsd("dl ≈", 300); break;
-                    case DownloadState.Done: ui.ShowOsd("dl ✓", 500); break;
-                    case DownloadState.Failed: ui.ShowOsd("dl !", 900); break;
-                    case DownloadState.Canceled: ui.ShowOsd("dl ×", 400); break;
-                }
-            }
-
-            // update badge
-            updateBadge();
-        });
-
-        // light ui pulse while running
-        if (st.State == DownloadState.Running && DateTime.UtcNow - lastPulse > TimeSpan.FromMilliseconds(500))
+        // Light ui pulse while running: refresh at most every 2s to reflect
+        // changing byte counts on the episode row. Was every 500ms — too spammy
+        // for multi-GB downloads with thousands of episodes.
+        if (st.State == DownloadState.Running && DateTime.UtcNow - lastPulse > TimeSpan.FromSeconds(2))
         {
             lastPulse = DateTime.UtcNow;
-            Application.MainLoop?.Invoke(() => ui?.RefreshEpisodesForSelectedFeed(data.Episodes));
+            Application.MainLoop?.Invoke(() =>
+            {
+                ui?.RefreshEpisodesForSelectedFeed(data.Episodes);
+                updateBadge();
+            });
         }
     };
 
@@ -632,6 +636,10 @@ static class UiComposer
         var playback = (PlaybackCoordinator)typeof(Program)
             .GetField("_playback", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null)!;
 
+        // Track the last episode whose title we pushed to the window label so
+        // we don't re-scan data.Episodes and re-set the same string 4×/sec.
+        // Network transitions update the title via NetworkMonitor separately.
+        Guid? lastTitleId = null;
         playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
         {
             try
@@ -646,11 +654,18 @@ static class UiComposer
                     ui.RefreshActiveProgress(snap);
 
                     var nowId = ui.GetNowPlayingId();
-                    if (nowId is Guid nid && snap.EpisodeId == nid)
+                    if (nowId is Guid nid && snap.EpisodeId == nid && nid != lastTitleId)
                     {
                         var ep = data.Episodes.FirstOrDefault(x => x.Id == nid);
                         if (ep != null)
+                        {
                             ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
+                            lastTitleId = nid;
+                        }
+                    }
+                    else if (nowId == null && lastTitleId != null)
+                    {
+                        lastTitleId = null; // reset so next play re-sets title
                     }
                 }
             }
