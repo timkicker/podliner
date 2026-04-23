@@ -22,9 +22,12 @@ internal sealed class UiEpisodesPane
     // ui elements initialized in ctor; non-null after construction
     public TabView Tabs { get; }
     public TabView.Tab EpisodesTab { get; }
+    public TabView.Tab DetailsTab { get; }
+    public TabView.Tab ChaptersTab { get; }
     public TextView Details { get; }
     public ListView List { get; }
     public Label EmptyHint { get; }
+    public UiChaptersList ChaptersList { get; }
 
     private readonly View _host;
     private readonly FrameView _detailsFrame;
@@ -90,9 +93,22 @@ internal sealed class UiEpisodesPane
         Details = new TextView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), ReadOnly = true, WordWrap = true };
         _detailsFrame.Add(Details);
 
+        ChaptersList = new UiChaptersList();
+        ChaptersList.ShowPlaceholder("Select an episode to see chapters");
+
         EpisodesTab = new TabView.Tab("Episodes", _host);
+        DetailsTab  = new TabView.Tab("Details", _detailsFrame);
+        ChaptersTab = new TabView.Tab("Chapters", ChaptersList.Host);
         Tabs.AddTab(EpisodesTab, true);
-        Tabs.AddTab(new TabView.Tab("Details", _detailsFrame), false);
+        Tabs.AddTab(DetailsTab,  false);
+        Tabs.AddTab(ChaptersTab, false);
+    }
+
+    // Updates the "Chapters (N)" suffix. Called after chapter loads/clears.
+    public void SetChaptersTabCount(int? count)
+    {
+        ChaptersTab.Text = count is null ? "Chapters" : $"Chapters ({count.Value})";
+        Tabs.SetNeedsDisplay();
     }
 
     #region feeds and metadata

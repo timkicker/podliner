@@ -99,4 +99,81 @@ public sealed class CmdFeedsModuleTests
         _sut.RemoveSelectedFeed();
         _ui.RemoveFeedRequested.Should().BeTrue();
     }
+
+    // ── Per-feed settings: :feed speed, :feed auto-download ─────────────────
+
+    private (FeedUseCase sut, FakeFeedStore feeds, Feed feed) MakeWithFeedStore()
+    {
+        var store = new FakeFeedStore();
+        var feed = new Feed { Id = Guid.NewGuid(), Title = "Example", Url = "https://ex/rss" };
+        store.Seed(feed);
+        _ui.SelectedFeedId = feed.Id;
+        Task SaveAsync() => Task.CompletedTask;
+        var sut = new FeedUseCase(_ui, _data, SaveAsync, _episodes, store);
+        return (sut, store, feed);
+    }
+
+    [Fact]
+    public void Feed_speed_with_no_args_shows_status_inherit()
+    {
+        var (sut, _, _) = MakeWithFeedStore();
+        sut.ExecFeed(new[] { "speed" });
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("inheriting"));
+    }
+
+    [Fact]
+    public void Feed_speed_sets_override_and_clamps()
+    {
+        var (sut, store, feed) = MakeWithFeedStore();
+        sut.ExecFeed(new[] { "speed", "1.5" });
+        store.Find(feed.Id)!.SpeedOverride.Should().Be(1.5);
+
+        sut.ExecFeed(new[] { "speed", "99" });
+        store.Find(feed.Id)!.SpeedOverride.Should().Be(3.0, "values are clamped to [0.25, 3.0]");
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("clear")]
+    [InlineData("none")]
+    public void Feed_speed_off_clears_override(string off)
+    {
+        var (sut, store, feed) = MakeWithFeedStore();
+        sut.ExecFeed(new[] { "speed", "1.25" });
+        store.Find(feed.Id)!.SpeedOverride.Should().NotBeNull();
+
+        sut.ExecFeed(new[] { "speed", off });
+        store.Find(feed.Id)!.SpeedOverride.Should().BeNull();
+    }
+
+    [Fact]
+    public void Feed_speed_bad_value_shows_usage()
+    {
+        var (sut, _, _) = MakeWithFeedStore();
+        sut.ExecFeed(new[] { "speed", "banana" });
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
+    }
+
+    [Fact]
+    public void Feed_speed_on_virtual_feed_shows_error()
+    {
+        var (sut, _, _) = MakeWithFeedStore();
+        _ui.SelectedFeedId = VirtualFeedsCatalog.All;
+        sut.ExecFeed(new[] { "speed", "1.5" });
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("virtual"));
+    }
+
+    [Fact]
+    public void Feed_auto_download_toggle_flips_flag()
+    {
+        var (sut, store, feed) = MakeWithFeedStore();
+        sut.ExecFeed(new[] { "auto-download", "on" });
+        store.Find(feed.Id)!.AutoDownload.Should().BeTrue();
+
+        sut.ExecFeed(new[] { "auto-download", "off" });
+        store.Find(feed.Id)!.AutoDownload.Should().BeFalse();
+
+        sut.ExecFeed(new[] { "auto-download" }); // toggle
+        store.Find(feed.Id)!.AutoDownload.Should().BeTrue();
+    }
 }

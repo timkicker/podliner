@@ -509,4 +509,78 @@ public sealed class LibraryStoreTests : IDisposable
         var lib = _store.Load();
         lib.Episodes.Should().HaveCount(2);
     }
+
+    // ── URL-based feed dedup (brownfield heal + AddOrUpdateFeed guard) ──────
+
+    [Fact]
+    public void AddOrUpdateFeed_dedups_by_url_when_called_with_fresh_guid()
+    {
+        _store.Load();
+        var first  = new Feed { Title = "Darknet", Url = "https://feeds.example.com/d" };
+        var second = new Feed { Title = "Darknet Diaries", Url = "https://feeds.example.com/d" };
+
+        var a = _store.AddOrUpdateFeed(first);
+        var b = _store.AddOrUpdateFeed(second);
+
+        b.Id.Should().Be(a.Id, "identical URL should return the existing row");
+        b.Title.Should().Be("Darknet Diaries", "new title should overwrite placeholder");
+        _store.Current.Feeds.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Load_drops_feeds_with_non_http_urls()
+    {
+        var feedId = Guid.NewGuid();
+        var badId  = Guid.NewGuid();
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{feedId}}", "Title": "Real",  "Url": "https://example.com/feed" },
+            { "Id": "{{badId}}",  "Title": "<feed>", "Url": "<feed>" }
+          ],
+          "Episodes": [],
+          "Queue": [],
+          "History": []
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+        lib.Feeds.Should().ContainSingle().Which.Title.Should().Be("Real");
+    }
+
+    [Fact]
+    public void Load_collapses_url_duplicates_and_rewrites_episode_feed_ids()
+    {
+        var winnerId = Guid.NewGuid();
+        var loserId  = Guid.NewGuid();
+        var ep1Id    = Guid.NewGuid();
+        var ep2Id    = Guid.NewGuid();
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{winnerId}}", "Title": "A", "Url": "https://example.com/d" },
+            { "Id": "{{loserId}}",  "Title": "A", "Url": "https://example.com/d" }
+          ],
+          "Episodes": [
+            { "Id": "{{ep1Id}}", "FeedId": "{{winnerId}}", "Title": "Ep1", "AudioUrl": "https://a/1.mp3", "Progress": { "LastPosMs": 0 } },
+            { "Id": "{{ep2Id}}", "FeedId": "{{loserId}}",  "Title": "Ep2", "AudioUrl": "https://a/2.mp3", "Progress": { "LastPosMs": 0 } }
+          ],
+          "Queue": [],
+          "History": []
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+
+        lib.Feeds.Should().ContainSingle().Which.Id.Should().Be(winnerId);
+        lib.Episodes.Should().HaveCount(2);
+        lib.Episodes.Should().OnlyContain(e => e.FeedId == winnerId,
+            "loser-linked episodes must be rewritten to the winning feed id");
+    }
 }

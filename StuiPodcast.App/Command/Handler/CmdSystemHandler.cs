@@ -6,7 +6,7 @@ internal sealed class CmdSystemHandler : ICmdHandler
 {
     public bool CanHandle(TopCommand k) => k is TopCommand.Help or TopCommand.Quit or TopCommand.Logs or TopCommand.Osd
         or TopCommand.Write or TopCommand.WriteQuit or TopCommand.WriteQuitBang or TopCommand.QuitBang
-        or TopCommand.Refresh;
+        or TopCommand.Refresh or TopCommand.Undo;
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
@@ -31,6 +31,8 @@ internal sealed class CmdSystemHandler : ICmdHandler
                 ctx.Ui.ShowOsd("Refreshing…", 600);
                 ctx.Ui.RequestRefresh();
                 return;
+
+            case TopCommand.Undo: ctx.Cases.Undo.Exec(cmd.Args); return;
         }
     }
 }

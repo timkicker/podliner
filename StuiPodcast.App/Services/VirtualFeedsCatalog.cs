@@ -9,4 +9,7 @@ public static class VirtualFeedsCatalog
     public static readonly Guid Queue      = Guid.Parse("00000000-0000-0000-0000-00000000C0DE");
     public static readonly Guid Seperator  = Guid.Parse("00000000-0000-0000-0000-00000000BEEF");
 
+    public static bool IsVirtual(Guid id)
+        => id == All || id == Saved || id == Downloaded || id == History
+           || id == Queue || id == Seperator;
 }

@@ -33,6 +33,17 @@ namespace StuiPodcast.Infra
         // episodes dict in parallel.
         private int _refreshingAll;
 
+        // Fires after a refresh adds new episodes. Listeners (e.g.
+        // Program.cs wiring auto-download) receive the feed + new episode
+        // ids so they can decide what to do. Errors in listeners are
+        // swallowed so one bad subscriber can't break refreshes.
+        public event Action<CoreFeed, IReadOnlyList<Guid>>? NewEpisodesDetected;
+
+        // Fires when a single feed refresh fails. The reason is a short
+        // human-friendly string ("HTTP 404", "timed out", "parse failed")
+        // suitable for an OSD. Subscribers should throttle / aggregate.
+        public event Action<CoreFeed, string>? FeedRefreshFailed;
+
         public FeedService(AppData data, AppFacade app, Func<Action, Task>? uiDispatch = null)
             : this(data, app, new FeedHttpFetcher(), uiDispatch) { }
 
@@ -85,6 +96,13 @@ namespace StuiPodcast.Infra
         public async Task<CoreFeed> AddFeedAsync(string url)
         {
             Log.Information("feed/add url={Url}", url);
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) ||
+                (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps))
+            {
+                Log.Warning("feed/add rejected non-http url={Url}", url);
+                throw new ArgumentException($"feed URL must be http(s): '{url}'", nameof(url));
+            }
 
             // quick probe, best effort
             var probeFeed = new CoreFeed { Url = url, Title = url, LastChecked = DateTimeOffset.Now };
@@ -152,21 +170,43 @@ namespace StuiPodcast.Infra
         {
             RssFeed f;
 
-            // http fetch with ua
-            var xml = await _fetcher.FetchXmlAsync(feed.Url).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(xml))
+            // Conditional GET: send back last-seen ETag + Last-Modified.
+            // 304 = no change, skip parse entirely (still bumps LastChecked
+            // so the user sees progress).
+            var fetch = await _fetcher.FetchAsync(feed.Url, feed.LastEtag, feed.LastModified).ConfigureAwait(false);
+
+            if (fetch.IsNotModified)
             {
-                // make it visible that the fetch failed (403/401 etc.)
-                Log.Warning("feed/refresh no content url={Url}", feed.Url);
+                Log.Debug("feed/refresh 304 url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
                 await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
                 return;
             }
 
+            if (fetch.IsFailure)
+            {
+                var reason = FormatFailure(fetch);
+                Log.Warning("feed/refresh failed url={Url} reason={Reason}", feed.Url, reason);
+                feed.LastChecked = DateTimeOffset.Now;
+                await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
+                try { FeedRefreshFailed?.Invoke(feed, reason); }
+                catch (Exception ex) { Log.Debug(ex, "feed/failure subscriber threw id={Id}", feed.Id); }
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(fetch.Xml))
+            {
+                // Last-chance branch — shouldn't fire once FetchResult always
+                // carries a failure category, but keep a safety net.
+                Log.Warning("feed/refresh empty body url={Url}", feed.Url);
+                feed.LastChecked = DateTimeOffset.Now;
+                await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
+                return;
+            }
 
             try
             {
-                f = FeedReader.ReadFromString(xml);
+                f = FeedReader.ReadFromString(fetch.Xml!);
                 Log.Information("feed/refresh ok id={Id} title={Title} items={Items}",
                     feed.Id, f.Title ?? feed.Title, f.Items?.Count ?? 0);
             }
@@ -175,6 +215,8 @@ namespace StuiPodcast.Infra
                 Log.Warning(ex, "feed/refresh parse fail url={Url}", feed.Url);
                 feed.LastChecked = DateTimeOffset.Now;
                 await _uiDispatch(() => _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
+                try { FeedRefreshFailed?.Invoke(feed, "feed parse failed"); }
+                catch (Exception ex2) { Log.Debug(ex2, "feed/failure subscriber threw id={Id}", feed.Id); }
                 return;
             }
 
@@ -182,11 +224,16 @@ namespace StuiPodcast.Infra
             if (string.IsNullOrWhiteSpace(feed.Title))
                 feed.Title = f.Title ?? feed.Url;
             feed.LastChecked = DateTimeOffset.Now;
+            // Store freshness hints only on a real 200 — 304 keeps the old
+            // values by construction (falls through via early-return above).
+            if (!string.IsNullOrWhiteSpace(fetch.Etag))         feed.LastEtag     = fetch.Etag;
+            if (!string.IsNullOrWhiteSpace(fetch.LastModified)) feed.LastModified = fetch.LastModified;
 
             CoreFeed persistedFeed = null!;
             await _uiDispatch(() => persistedFeed = _app.AddOrUpdateFeed(feed)).ConfigureAwait(false);
 
             int added = 0, updated = 0, skippedNoAudio = 0;
+            var newEpisodeIds = new List<Guid>();
             var items = (f.Items ?? Array.Empty<FeedItem>()).ToList();
 
             // Parse + decide + mutate the library on the UI thread so concurrent UI
@@ -229,6 +276,7 @@ namespace StuiPodcast.Infra
                     var lenMs = RssParser.TryGetDurationMs(item) ?? 0;
                     var desc  = RssParser.HtmlToText(item.Content ?? item.Description ?? "");
                     var title = item.Title ?? "(untitled)";
+                    var chaptersUrl = RssParser.TryGetChaptersUrl(item);
 
                     Episode? existing = null;
                     if (!string.IsNullOrEmpty(guid)) byGuid.TryGetValue(guid, out existing);
@@ -248,6 +296,7 @@ namespace StuiPodcast.Infra
                             PubDate = pub,
                             DurationMs = lenMs,
                             DescriptionText = desc,
+                            ChaptersUrl = chaptersUrl,
                             Saved = false,
                             Progress = new EpisodeProgress()
                         };
@@ -255,6 +304,7 @@ namespace StuiPodcast.Infra
                         var persistedEp = _app.AddOrUpdateEpisode(ep);
                         if (!string.IsNullOrEmpty(guid)) byGuid[guid] = persistedEp;
                         byUrl[audioUrl] = persistedEp;
+                        newEpisodeIds.Add(persistedEp.Id);
                         added++;
                     }
                     else
@@ -284,6 +334,14 @@ namespace StuiPodcast.Infra
                             existing.DescriptionText = desc;
                         if (existing.DurationMs <= 0 && lenMs > 0)
                             existing.DurationMs = lenMs;
+                        // Update chapters URL if the feed now advertises one
+                        // (or changed host). Clears the cached list so next
+                        // :chapters load refetches.
+                        if (!string.Equals(existing.ChaptersUrl, chaptersUrl, StringComparison.Ordinal))
+                        {
+                            existing.ChaptersUrl = chaptersUrl;
+                            existing.Chapters = new();
+                        }
 
                         var persistedEp = _app.AddOrUpdateEpisode(existing);
                         updated++;
@@ -293,7 +351,25 @@ namespace StuiPodcast.Infra
 
             Log.Information("feed/refresh summary id={Id} added={Added} updated={Updated} skippedNoAudio={Skipped}",
                 feed.Id, added, updated, skippedNoAudio);
+
+            if (newEpisodeIds.Count > 0)
+            {
+                try { NewEpisodesDetected?.Invoke(persistedFeed, newEpisodeIds); }
+                catch (Exception ex) { Log.Debug(ex, "feed/new-episodes subscriber threw id={Id}", persistedFeed.Id); }
+            }
         }
+
+        // Short, user-facing summary of a fetch failure. Used for OSDs.
+        internal static string FormatFailure(FetchResult r) => r.Failure switch
+        {
+            FetchFailure.NotFound    => $"HTTP 404 (feed URL moved or removed)",
+            FetchFailure.Forbidden   => $"HTTP {r.HttpStatus} (blocked — CDN or auth)",
+            FetchFailure.ServerError => $"HTTP {r.HttpStatus} (server error — retry later)",
+            FetchFailure.ClientError => $"HTTP {r.HttpStatus} {r.FailureDetail ?? ""}".TrimEnd(),
+            FetchFailure.Timeout     => "timed out",
+            FetchFailure.Unreachable => "unreachable (check network)",
+            _                        => r.FailureDetail ?? "fetch failed"
+        };
 
         #endregion
 

@@ -479,6 +479,165 @@ public sealed class FeedServiceTests : IDisposable
         finally { feeds2.Dispose(); }
     }
 
+    // ── Conditional GET ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RefreshFeedAsync_stores_etag_and_last_modified_on_200()
+    {
+        // AddFeedAsync does probe + refresh; freshness hints land via refresh.
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.Enqueue(_ =>
+        {
+            var r = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(SampleRss, System.Text.Encoding.UTF8, "application/rss+xml")
+            };
+            r.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"abc123\"");
+            r.Content.Headers.LastModified = new DateTimeOffset(2024, 1, 5, 12, 0, 0, TimeSpan.Zero);
+            return r;
+        });
+
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+
+        feed.LastEtag.Should().Be("\"abc123\"");
+        feed.LastModified.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_sends_conditional_headers_next_time()
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.Enqueue(_ =>
+        {
+            var r = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(SampleRss, System.Text.Encoding.UTF8, "application/rss+xml")
+            };
+            r.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"v1\"");
+            return r;
+        });
+
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+        _handler.Requests.Clear();
+
+        _handler.EnqueueStatus(System.Net.HttpStatusCode.NotModified);
+        await _feeds.RefreshFeedAsync(feed);
+
+        _handler.Requests.Should().HaveCount(1);
+        _handler.Requests[0].Headers.TryGetValues("If-None-Match", out var ims).Should().BeTrue();
+        ims!.Should().Contain("\"v1\"");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_304_skips_parse_and_keeps_episodes_intact()
+    {
+        _handler.EnqueueXml(SampleRss);
+        _handler.EnqueueXml(SampleRss);
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+        var beforeCount = _app.Episodes.Count;
+        var beforeLastChecked = feed.LastChecked;
+
+        _handler.EnqueueStatus(System.Net.HttpStatusCode.NotModified);
+        await _feeds.RefreshFeedAsync(feed);
+
+        _app.Episodes.Should().HaveCount(beforeCount, "304 must not touch episode list");
+        feed.LastChecked.Should().NotBe(beforeLastChecked, "LastChecked should still advance on 304");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_304_keeps_existing_etag()
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.Enqueue(_ =>
+        {
+            var r = new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(SampleRss, System.Text.Encoding.UTF8, "application/rss+xml")
+            };
+            r.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"keep-me\"");
+            return r;
+        });
+
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+
+        _handler.EnqueueStatus(System.Net.HttpStatusCode.NotModified);
+        await _feeds.RefreshFeedAsync(feed);
+
+        feed.LastEtag.Should().Be("\"keep-me\"");
+    }
+
+    // ── NewEpisodesDetected event (auto-download hook) ──────────────────────
+
+    [Fact]
+    public async Task RefreshFeedAsync_fires_NewEpisodesDetected_for_added_episodes()
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.EnqueueXml(SampleRss); // refresh-after-add
+
+        var received = new List<Guid>();
+        _feeds.NewEpisodesDetected += (_, ids) => received.AddRange(ids);
+
+        await _feeds.AddFeedAsync("https://example.com/rss");
+
+        received.Should().HaveCount(2, "both sample items were new on first sync");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_does_not_fire_when_nothing_new()
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.EnqueueXml(SampleRss); // refresh-after-add
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+
+        var received = new List<Guid>();
+        _feeds.NewEpisodesDetected += (_, ids) => received.AddRange(ids);
+
+        _handler.EnqueueXml(SampleRss); // identical content
+        await _feeds.RefreshFeedAsync(feed);
+
+        received.Should().BeEmpty();
+    }
+
+    // ── FeedRefreshFailed event + error categorization ──────────────────────
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.NotFound,          "404")]
+    [InlineData(System.Net.HttpStatusCode.Forbidden,         "403")]
+    [InlineData(System.Net.HttpStatusCode.InternalServerError, "500")]
+    public async Task RefreshFeedAsync_fires_failure_event_with_friendly_reason(
+        System.Net.HttpStatusCode status, string expectedFragment)
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.EnqueueXml(SampleRss); // refresh-after-add
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+
+        string? captured = null;
+        _feeds.FeedRefreshFailed += (_, reason) => captured = reason;
+
+        _handler.EnqueueStatus(status);
+        await _feeds.RefreshFeedAsync(feed);
+
+        captured.Should().NotBeNull();
+        captured.Should().Contain(expectedFragment);
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_fires_failure_event_on_transport_error()
+    {
+        _handler.EnqueueXml(SampleRss); // probe
+        _handler.EnqueueXml(SampleRss); // refresh-after-add
+        var feed = await _feeds.AddFeedAsync("https://example.com/rss");
+
+        string? captured = null;
+        _feeds.FeedRefreshFailed += (_, reason) => captured = reason;
+
+        _handler.EnqueueThrowing(new HttpRequestException("host unreachable"));
+        await _feeds.RefreshFeedAsync(feed);
+
+        captured.Should().NotBeNull();
+        captured.Should().Contain("unreachable");
+    }
+
     // ── Dispose ──────────────────────────────────────────────────────────────
 
     [Fact]

@@ -49,6 +49,31 @@ internal static class RssParser
         return null;
     }
 
+    // <podcast:chapters url="..." type="application/json+chapters"/>
+    // Only the URL is meaningful here; we fetch + parse the JSON lazily via
+    // ChaptersFetcher so feed refresh stays snappy.
+    public static string? TryGetChaptersUrl(FeedItem item)
+    {
+        var root = item.SpecificItem?.Element as XElement;
+        if (root == null) return null;
+
+        foreach (var node in root.Descendants())
+        {
+            if (!string.Equals(node.Name.LocalName, "chapters", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Guard: namespace must be the podcast: namespace or we accept
+            // any if no-namespace (some feeds drop namespaces entirely).
+            var ns = node.Name.NamespaceName ?? "";
+            if (!string.IsNullOrEmpty(ns) && !ns.Contains("podcast", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var url = node.Attribute("url")?.Value;
+            if (!string.IsNullOrWhiteSpace(url)) return url.Trim();
+        }
+        return null;
+    }
+
     public static string? TryGetAudioUrl(FeedItem item)
     {
         // use raw xml to include vendor extensions

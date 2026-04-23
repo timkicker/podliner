@@ -96,7 +96,7 @@ internal static class UiShellKeyBindings
 
         if (kv == 'i' || kv == 'I') { SwitchToDetailsTab(b.EpisodesPane); return true; }
 
-        if (key == Key.Esc && IsDetailsTabActive(b.EpisodesPane))
+        if (key == Key.Esc && IsNonEpisodeTabActive(b.EpisodesPane))
         {
             SwitchToListTab(b.EpisodesPane);
             return true;
@@ -123,6 +123,12 @@ internal static class UiShellKeyBindings
         if (key == (Key)('[')) { b.InvokeCommand(":speed -0.1"); return true; }
         if (key == (Key)(']')) { b.InvokeCommand(":speed +0.1"); return true; }
         if (key == (Key)('=')) { b.InvokeCommand(":speed 1.0"); return true; }
+
+        // Chapter navigation, video-player convention. Only triggered when
+        // the typed key is the standalone punctuation — we don't bind to
+        // '<' / '>' so shift-combinations stay free for future use.
+        if (key == (Key)(',')) { b.InvokeCommand(":chapter prev"); return true; }
+        if (key == (Key)('.')) { b.InvokeCommand(":chapter next"); return true; }
         if (kv == '1') { b.InvokeCommand(":speed 1.0");  return true; }
         if (kv == '2') { b.InvokeCommand(":speed 1.25"); return true; }
         if (kv == '3') { b.InvokeCommand(":speed 1.5");  return true; }
@@ -131,8 +137,10 @@ internal static class UiShellKeyBindings
 
         if (key == Key.Enter)
         {
-            if (b.IsFeedsPaneActive()) b.FocusEpisodes();
-            else if (!IsDetailsTabActive(b.EpisodesPane)) b.PlaySelected();
+            if (b.IsFeedsPaneActive()) { b.FocusEpisodes(); return true; }
+            if (IsDetailsTabActive(b.EpisodesPane)) return true;   // Details pane: no-op
+            if (IsChaptersTabActive(b.EpisodesPane)) return false;  // let ListView raise OpenSelectedItem
+            b.PlaySelected();
             return true;
         }
 
@@ -153,19 +161,25 @@ internal static class UiShellKeyBindings
     // ── episodes-pane tab helpers ────────────────────────────────────────────
 
     static bool IsDetailsTabActive(UiEpisodesPane? pane)
-        => pane?.Tabs?.SelectedTab?.Text.ToString() == "Details";
+        => pane != null && pane.Tabs.SelectedTab == pane.DetailsTab;
+
+    static bool IsChaptersTabActive(UiEpisodesPane? pane)
+        => pane != null && pane.Tabs.SelectedTab == pane.ChaptersTab;
+
+    static bool IsNonEpisodeTabActive(UiEpisodesPane? pane)
+        => IsDetailsTabActive(pane) || IsChaptersTabActive(pane);
 
     static void SwitchToListTab(UiEpisodesPane? pane)
     {
         if (pane == null) return;
-        pane.Tabs.SelectedTab = pane.Tabs.Tabs.First();
+        pane.Tabs.SelectedTab = pane.EpisodesTab;
         pane.List.SetFocus();
     }
 
     static void SwitchToDetailsTab(UiEpisodesPane? pane)
     {
         if (pane == null) return;
-        pane.Tabs.SelectedTab = pane.Tabs.Tabs.Last();
+        pane.Tabs.SelectedTab = pane.DetailsTab;
         pane.Details.SetFocus();
     }
 }

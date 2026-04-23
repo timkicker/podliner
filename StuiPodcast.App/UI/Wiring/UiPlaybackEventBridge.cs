@@ -44,6 +44,12 @@ internal static class UiPlaybackEventBridge
                 // this but rebuilt the whole list.
                 ui.RefreshActiveProgress(snap);
 
+                // Chapters tab live-highlight: only if the snapshot's
+                // episode is what the chapters tab is currently rendering.
+                // The tab (via UiShell) ignores updates for other ids.
+                if (snap.EpisodeId is Guid snapId)
+                    ui.UpdateChapterHighlight(snapId, snap.Position.TotalSeconds);
+
                 var nowId = ui.GetNowPlayingId();
                 if (nowId is Guid nid && snap.EpisodeId == nid && nid != lastTitleId)
                 {

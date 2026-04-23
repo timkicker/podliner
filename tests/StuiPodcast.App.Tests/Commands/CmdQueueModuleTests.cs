@@ -1,5 +1,6 @@
 using FluentAssertions;
 using StuiPodcast.App.Command.UseCases;
+using StuiPodcast.App.Services;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -11,13 +12,14 @@ public sealed class CmdQueueModuleTests
     private readonly FakeUiShell _ui = new();
     private readonly FakeEpisodeStore _episodes = new();
     private readonly FakeQueueService _queue = new();
+    private readonly UndoStack _undo = new();
     private readonly QueueUseCase _sut;
     private bool _saved;
     private Task SaveAsync() { _saved = true; return Task.CompletedTask; }
 
     public CmdQueueModuleTests()
     {
-        _sut = new QueueUseCase(_ui, SaveAsync, _episodes, _queue);
+        _sut = new QueueUseCase(_ui, SaveAsync, _episodes, _queue, _undo);
     }
 
     private Episode MakeEpisode()
@@ -76,6 +78,28 @@ public sealed class CmdQueueModuleTests
         _queue.Seed(ep.Id, Guid.NewGuid());
         _sut.Handle(":queue clear").Should().BeTrue();
         _queue.Snapshot().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Clear_pushes_undo_that_restores_queue()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        _queue.Seed(a, b);
+
+        _sut.Handle(":queue clear").Should().BeTrue();
+        _queue.Snapshot().Should().BeEmpty();
+        _undo.Count.Should().Be(1);
+
+        _undo.Pop().Should().Contain("restore queue");
+        _queue.Snapshot().Should().BeEquivalentTo(new[] { a, b });
+    }
+
+    [Fact]
+    public void Clear_empty_queue_does_not_push_undo()
+    {
+        _sut.Handle(":queue clear").Should().BeTrue();
+        _undo.Count.Should().Be(0);
     }
 
     [Fact]

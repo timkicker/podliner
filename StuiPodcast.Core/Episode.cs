@@ -28,6 +28,25 @@
 
         // ui-only: manually marked as played (not set automatically)
         public bool ManuallyMarkedPlayed { get; set; } = false;
+
+        // Podcast-2.0 chapters. Url points to a JSON file (application/json+chapters)
+        // per the podcast namespace spec. Chapters is filled lazily the
+        // first time it's requested — we don't fetch during refresh because
+        // that would block the sequential feed pass and a lot of feeds
+        // either don't have chapters or have them on a slow host.
+        public string? ChaptersUrl { get; set; }
+        public List<Chapter> Chapters { get; set; } = new();
+    }
+
+    public sealed class Chapter
+    {
+        // Start offset from episode start.
+        public double StartSeconds { get; set; }
+        public string Title { get; set; } = string.Empty;
+        // Optional extra fields from the JSON — kept so we can display them
+        // later (clickable URL, cover art) without a model migration.
+        public string? Url { get; set; }
+        public string? Img { get; set; }
     }
 
     public sealed class EpisodeProgress

@@ -119,10 +119,27 @@ internal static class UiFeedWiring
         var feedStore = ctx.FeedStore;
         var episodeStore = ctx.Episodes;
 
+        // Collect per-feed failures during each refresh pass and summarise
+        // at the end — OSDing every individual failure would flood the UI
+        // when the whole network is down.
+        var failures = new List<string>();
+        feeds!.FeedRefreshFailed += (feed, reason) =>
+        {
+            lock (failures) { failures.Add($"{feed.Title}: {reason}"); }
+        };
+
         var cases = ctx.Cases;
         ui.RefreshRequested += async () =>
         {
-            await feeds!.RefreshAllAsync();
+            lock (failures) failures.Clear();
+
+            if (!data.NetworkOnline)
+            {
+                ui.ShowOsd("refresh: offline — nothing fetched", 2000);
+                return;
+            }
+
+            await feeds.RefreshAllAsync();
 
             var selected = ui.GetSelectedFeedId() ?? data.LastSelectedFeedId;
             ui.SetFeeds(feedStore.Snapshot(), selected);
@@ -131,6 +148,21 @@ internal static class UiFeedWiring
                 ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
 
             cases.View.ApplyList();
+
+            List<string> snap;
+            lock (failures) snap = failures.ToList();
+            if (snap.Count == 0)
+            {
+                ui.ShowOsd("refreshed ✓", 1000);
+            }
+            else if (snap.Count == 1)
+            {
+                ui.ShowOsd($"refresh: {snap[0]}", 2800);
+            }
+            else
+            {
+                ui.ShowOsd($"refresh: {snap.Count} feeds failed — :logs for details", 2800);
+            }
         };
     }
 

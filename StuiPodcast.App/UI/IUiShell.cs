@@ -4,6 +4,17 @@ namespace StuiPodcast.App.UI;
 
 internal interface IUiShell
 {
+    // Chapters tab — fed by external loader (wired in Program.cs to
+    // ChaptersUseCase.LoadForUiAsync). UI pushes a Loading state, fires the
+    // event, listener resolves + pushes result back via SetChaptersResult.
+    event Action<Episode>? ChaptersLoadRequested;
+    void SetChaptersLoading(string message);
+    void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1);
+    void SetChaptersEmpty(Guid episodeId, string message);
+    // Called from the playback snapshot tick so the highlight tracks time.
+    // Silent no-op if the chapters tab isn't visible or nothing loaded yet.
+    void UpdateChapterHighlight(Guid episodeId, double posSeconds);
+
     void ShowOsd(string text, int ms = 1200);
     Episode? GetSelectedEpisode();
     Guid? GetSelectedFeedId();

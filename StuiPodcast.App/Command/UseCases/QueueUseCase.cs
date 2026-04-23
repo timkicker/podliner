@@ -13,13 +13,15 @@ internal sealed class QueueUseCase
     readonly Func<Task> _persist;
     readonly IEpisodeStore _episodes;
     readonly IQueueService _queue;
+    readonly UndoStack? _undo;
 
-    public QueueUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, IQueueService queue)
+    public QueueUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, IQueueService queue, UndoStack? undo = null)
     {
         _ui = ui;
         _persist = persist;
         _episodes = episodes;
         _queue = queue;
+        _undo = undo;
     }
 
     public bool Handle(string cmd)
@@ -52,8 +54,25 @@ internal sealed class QueueUseCase
                 Refresh(); _ = PersistLocal(); return true;
 
             case "clear":
+            {
+                var snapshot = _queue.Snapshot().ToArray();
                 _queue.Clear();
-                Refresh(); _ = PersistLocal(); return true;
+                Refresh(); _ = PersistLocal();
+                if (snapshot.Length > 0 && _undo != null)
+                {
+                    _undo.Push($"restore queue ({snapshot.Length} items)", () =>
+                    {
+                        foreach (var id in snapshot) _queue.Append(id);
+                        Refresh(); _ = PersistLocal();
+                    });
+                    _ui.ShowOsd($"queue cleared ({snapshot.Length}) — :undo to restore", 2000);
+                }
+                else
+                {
+                    _ui.ShowOsd("queue cleared", 1200);
+                }
+                return true;
+            }
 
             case "shuffle":
                 _queue.Shuffle();

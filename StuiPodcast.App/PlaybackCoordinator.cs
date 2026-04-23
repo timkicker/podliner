@@ -52,10 +52,12 @@ public sealed class PlaybackCoordinator : IDisposable
     // queue. The coordinator no longer falls back to AppData collections.
     private readonly StuiPodcast.App.Services.IEpisodeStore _episodes;
     private readonly StuiPodcast.App.Services.IQueueService _queue;
+    private readonly StuiPodcast.App.Services.IFeedStore? _feedStore;
 
     public PlaybackCoordinator(AppData data, IAudioPlayer audioPlayer, Func<Task> saveAsync, MemoryLogSink mem,
                                StuiPodcast.App.Services.IEpisodeStore episodes,
-                               StuiPodcast.App.Services.IQueueService queue)
+                               StuiPodcast.App.Services.IQueueService queue,
+                               StuiPodcast.App.Services.IFeedStore? feedStore = null)
     {
         _data = data ?? throw new ArgumentNullException(nameof(data));
         _audioPlayer = audioPlayer ?? throw new ArgumentNullException(nameof(audioPlayer));
@@ -63,6 +65,7 @@ public sealed class PlaybackCoordinator : IDisposable
         _mem = mem;
         _episodes = episodes ?? throw new ArgumentNullException(nameof(episodes));
         _queue = queue ?? throw new ArgumentNullException(nameof(queue));
+        _feedStore = feedStore;
     }
 
     #endregion
@@ -134,10 +137,15 @@ public sealed class PlaybackCoordinator : IDisposable
             {
                 _audioPlayer.Play(ep.AudioUrl, null);
             }
-            catch
+            catch (Exception ex)
             {
+                Log.Debug(ex, "audio play threw id={Id} url={Url}", ep.Id, ep.AudioUrl);
             }
         });
+
+        // Per-feed speed override (set via ":feed speed N"). Applied after
+        // Play() so the engine accepts the rate on an already-opened stream.
+        ApplyFeedSpeedOverride(ep, sid);
 
         if (startMs is long want && want > 0)
             StartOneShotResume(want, sid);
@@ -287,6 +295,27 @@ public sealed class PlaybackCoordinator : IDisposable
             }
             catch (TaskCanceledException) { }
             catch (Exception ex) { Log.Debug(ex, "resume task threw sid={Sid} ms={Ms}", sid, ms); }
+        });
+    }
+
+    // Applies Feed.SpeedOverride if the current episode's feed has one.
+    // Scheduled onto the main loop so the engine is guaranteed to have an
+    // open media handle — LibVLC ignores SetSpeed before media load.
+    private void ApplyFeedSpeedOverride(Episode ep, int sid)
+    {
+        if (_feedStore == null) return;
+        var feed = _feedStore.Find(ep.FeedId);
+        var speed = feed?.SpeedOverride;
+        if (speed is not { } s || s <= 0) return;
+
+        Application.MainLoop?.Invoke(() =>
+        {
+            try
+            {
+                if (sid != _sid) return;
+                _audioPlayer.SetSpeed(Math.Clamp(s, 0.25, 3.0));
+            }
+            catch (Exception ex) { Log.Debug(ex, "feed-speed-override apply failed feedId={FeedId} speed={Speed}", ep.FeedId, s); }
         });
     }
 

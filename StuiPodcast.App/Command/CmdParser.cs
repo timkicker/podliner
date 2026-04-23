@@ -51,6 +51,8 @@ namespace StuiPodcast.App.Command
             [":add"]         = TopCommand.AddFeed,
             [":refresh"]     = TopCommand.Refresh,
             [":remove-feed"] = TopCommand.RemoveFeed,
+
+            [":undo"]        = TopCommand.Undo,
         };
 
         // perfix rules
@@ -87,7 +89,10 @@ namespace StuiPodcast.App.Command
             (":feed",         TopCommand.Feed),
             (":history",      TopCommand.History),
             (":update",       TopCommand.Refresh),
-            (":sync",         TopCommand.Sync)
+            (":sync",         TopCommand.Sync),
+            (":sleep",        TopCommand.Sleep),
+            (":chapter",      TopCommand.Chapter),
+            (":chapters",     TopCommand.Chapter)
         ];
 
         #region Public API

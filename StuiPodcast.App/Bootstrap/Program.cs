@@ -51,6 +51,8 @@ internal class Program
     private static SaveScheduler?    _saver;
     private static NetworkMonitor?   _net;
     private static EngineService?    _engineSvc;
+    private static SleepTimer?       _sleepTimer;
+    private static StuiPodcast.Infra.Feeds.ChaptersFetcher? _chaptersFetcher;
     #endregion
 
     #region timers and guards
@@ -133,8 +135,24 @@ internal class Program
 
         // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
-        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog, _episodes, _queue);
+        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog, _episodes, _queue, _feedStore);
         _feeds    = new FeedService(_data, _app, uiDispatch: DispatchToUi);
+
+        // Auto-download: when a refresh adds new episodes on a feed with
+        // AutoDownload=true, enqueue the new ids. Enqueue dedups internally
+        // against already-running/queued items; failures per episode don't
+        // block the rest.
+        _feeds.NewEpisodesDetected += (feed, epIds) =>
+        {
+            if (!feed.AutoDownload || _downloader == null) return;
+            if (!_data.NetworkOnline) return;
+            foreach (var id in epIds)
+            {
+                try { _downloader.Enqueue(id); }
+                catch (Exception ex) { Log.Debug(ex, "auto-download enqueue failed feedId={Fid} epId={Eid}", feed.Id, id); }
+            }
+            Log.Information("auto-download: queued {Count} new episodes for feed {Feed}", epIds.Count, feed.Title);
+        };
 
         // gpodder sync (opt-in; no-op if not configured)
         _gpodderStore = new GpodderStore(appConfigDir);
@@ -216,11 +234,65 @@ internal class Program
             }
             catch (Exception ex) { Log.Debug(ex, "engine-switch osd dispatch failed"); }
         };
+
+        // Sleep timer: single-shot, fires stop+OSD on the UI thread.
+        _sleepTimer = new SleepTimer(onFire: () =>
+        {
+            try { _player?.TogglePause(); } catch { }
+            try { _player?.Stop(); }        catch { }
+            try { _ui?.ShowOsd("💤 sleep timer: playback stopped", 3500); } catch { }
+            Log.Information("sleep-timer fired — playback stopped");
+        });
+
+        _chaptersFetcher = new StuiPodcast.Infra.Feeds.ChaptersFetcher();
+
         var cases = new StuiPodcast.App.Command.UseCases.CmdCases(
             ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
             episodes: _episodes!, feedStore: _feedStore!, queue: _queue!,
             audioPlayer: _player!, playback: _playback!, dlm: _downloader!,
-            switchEngine: engineSwitch, sync: _gpodder);
+            switchEngine: engineSwitch, sync: _gpodder, sleepTimer: _sleepTimer,
+            chaptersFetcher: _chaptersFetcher);
+
+        // Wire the Chapters tab lazy-load: UI fires ChaptersLoadRequested,
+        // we dispatch LoadForUiAsync off the main loop and marshal the
+        // result back via SetChapters{Result,Empty}. Stale-guard lives in
+        // UiShell (compares against _chaptersActiveEpisodeId).
+        cases.Chapters.IsOnlineLookup = () => _data.NetworkOnline;
+        _ui.ChaptersLoadRequested += ep =>
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var r = await cases.Chapters.LoadForUiAsync(ep);
+                    switch (r.Outcome)
+                    {
+                        case StuiPodcast.App.Command.UseCases.ChaptersUseCase.LoadOutcome.Loaded:
+                            // Initial active-chapter index for currently-playing episode.
+                            int active = -1;
+                            if (_ui?.GetNowPlayingId() == ep.Id)
+                            {
+                                var pos = _player?.State?.Position.TotalSeconds ?? 0;
+                                active = StuiPodcast.App.UI.Controls.UiChaptersList.IndexForPosition(r.Chapters, pos);
+                            }
+                            _ui?.SetChaptersResult(ep.Id, r.Chapters, active);
+                            break;
+                        case StuiPodcast.App.Command.UseCases.ChaptersUseCase.LoadOutcome.Offline:
+                            _ui?.SetChaptersEmpty(ep.Id, "Offline — chapters unavailable");
+                            break;
+                        case StuiPodcast.App.Command.UseCases.ChaptersUseCase.LoadOutcome.NoChapters:
+                        default:
+                            _ui?.SetChaptersEmpty(ep.Id, "No chapters for this episode");
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "chapters/ui-load failed epId={Id}", ep.Id);
+                    _ui?.SetChaptersEmpty(ep.Id, "Failed to load chapters — see logs");
+                }
+            });
+        };
 
         // network monitor
         _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync, _episodes, cases.View);
@@ -364,6 +436,12 @@ internal class Program
             if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
             try { _feeds?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _chaptersFetcher?.Dispose(); }
             catch
             {
                 // ignored

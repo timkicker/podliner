@@ -28,6 +28,10 @@ internal sealed class CmdCases
     public EngineUseCase     Engine     { get; }
     public SyncUseCase       Sync       { get; }
     public SystemUseCase     System     { get; }
+    public SleepUseCase      Sleep      { get; }
+    public UndoUseCase       Undo       { get; }
+    public UndoStack         UndoStack  { get; }
+    public ChaptersUseCase   Chapters   { get; }
 
     public CmdCases(
         IUiShell ui,
@@ -40,7 +44,9 @@ internal sealed class CmdCases
         PlaybackCoordinator playback,
         DownloadManager dlm,
         Func<AudioEngine, Task>? switchEngine,
-        GpodderSyncService? sync)
+        GpodderSyncService? sync,
+        SleepTimer sleepTimer,
+        StuiPodcast.Infra.Feeds.ChaptersFetcher chaptersFetcher)
     {
         // View first — every list-mutating UseCase depends on it for the
         // post-mutation refresh.
@@ -49,7 +55,7 @@ internal sealed class CmdCases
         State      = new StateUseCase(ui, persist, episodes, View);
         Net        = new NetUseCase(ui, data, persist, episodes, View);
         Io         = new IoUseCase(ui, feedStore);
-        Feed       = new FeedUseCase(ui, data, persist, episodes);
+        Feed       = new FeedUseCase(ui, data, persist, episodes, feedStore);
         Navigation = new NavigationUseCase(ui, data, episodes, playback);
         Queue      = new QueueUseCase(ui, persist, episodes, queue);
         Download   = new DownloadUseCase(ui, persist, episodes, dlm, View);
@@ -58,5 +64,11 @@ internal sealed class CmdCases
         Engine     = new EngineUseCase(audioPlayer, ui, data, persist, switchEngine);
         Sync       = new SyncUseCase(ui, sync);
         System     = new SystemUseCase(ui, persist);
+        Sleep      = new SleepUseCase(ui, sleepTimer);
+        UndoStack  = new UndoStack();
+        Undo       = new UndoUseCase(ui, UndoStack);
+        Queue      = new QueueUseCase(ui, persist, episodes, queue, UndoStack);
+        Chapters   = new ChaptersUseCase(ui, audioPlayer, episodes, chaptersFetcher, persist,
+            localPathLookup: id => Bootstrap.Program.TryGetLocalPath(id, out var p) ? p : null);
     }
 }

@@ -33,6 +33,21 @@ sealed class FakeUiShell : IUiShell
     public Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     public Guid AllFeedId => VirtualFeedsCatalog.All;
 
+    // Chapters-tab recording.
+    public string? LastChaptersLoading { get; private set; }
+    public (Guid EpisodeId, List<Chapter> Chapters, int ActiveIdx)? LastChaptersResult { get; private set; }
+    public (Guid EpisodeId, string Message)? LastChaptersEmpty { get; private set; }
+    public (Guid EpisodeId, double PosSec)? LastChaptersHighlight { get; private set; }
+    public event Action<Episode>? ChaptersLoadRequested;
+    public void SetChaptersLoading(string message) => LastChaptersLoading = message;
+    public void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1)
+        => LastChaptersResult = (episodeId, chapters.ToList(), activeIndex);
+    public void SetChaptersEmpty(Guid episodeId, string message)
+        => LastChaptersEmpty = (episodeId, message);
+    public void UpdateChapterHighlight(Guid episodeId, double posSeconds)
+        => LastChaptersHighlight = (episodeId, posSeconds);
+    public void FireChaptersLoadRequested(Episode ep) => ChaptersLoadRequested?.Invoke(ep);
+
     // --- IUiShell implementation ---
 
     public void ShowOsd(string text, int ms = 1200) => OsdMessages.Add((text, ms));

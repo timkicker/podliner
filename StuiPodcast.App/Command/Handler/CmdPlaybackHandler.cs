@@ -6,7 +6,8 @@ internal sealed class CmdPlaybackHandler : ICmdHandler
 {
     public bool CanHandle(TopCommand k) =>
         k is TopCommand.Toggle or TopCommand.Seek or TopCommand.Volume or TopCommand.Speed or TopCommand.Replay
-            or TopCommand.Now or TopCommand.Jump or TopCommand.PlayNext or TopCommand.PlayPrev;
+            or TopCommand.Now or TopCommand.Jump or TopCommand.PlayNext or TopCommand.PlayPrev
+            or TopCommand.Sleep or TopCommand.Chapter;
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
@@ -29,6 +30,9 @@ internal sealed class CmdPlaybackHandler : ICmdHandler
 
             case TopCommand.PlayNext: nav.SelectRelative(+1, playAfterSelect: true); return;
             case TopCommand.PlayPrev: nav.SelectRelative(-1, playAfterSelect: true); return;
+
+            case TopCommand.Sleep:    ctx.Cases.Sleep.Exec(cmd.Args); return;
+            case TopCommand.Chapter:  ctx.Cases.Chapters.Exec(cmd.Args); return;
         }
     }
 }

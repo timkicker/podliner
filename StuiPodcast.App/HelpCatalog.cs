@@ -43,12 +43,13 @@ namespace StuiPodcast.App
             new("[ / ]", "Slower / faster"),
             new("= or 1", "Reset speed to 1.0×"),
             new("2 / 3", "Speed presets 1.25× / 1.5×"),
+            new(", / .", "Previous / next chapter (if available)"),
 
             new("j / k", "Move selection down / up"),
             new("h / l", "Focus feeds / episodes"),
-            new("Enter", "Play selected episode"),
+            new("Enter", "Play selected episode (seek in Chapters tab)"),
             new("i", "Open Shownotes tab"),
-            new("Esc (in Shownotes)", "Back to Episodes"),
+            new("Esc (in Shownotes/Chapters)", "Back to Episodes"),
             new("J / K", "Next / Prev unplayed"),
             new("⇧J / ⇧K", "Move item down / up (Queue)"),
 
@@ -84,9 +85,15 @@ namespace StuiPodcast.App
                 Examples: new[]{ ":remove-feed", ":rm-feed" },
                 Category: HelpCategory.Feeds, Rank: 60),
 
-            new(":feed", "Switch to virtual feeds.",
-                "all|saved|downloaded|history|queue",
-                Examples: new[]{ ":feed all", ":feed queue" },
+            new(":feed", "Switch to virtual feeds or configure the selected feed.",
+                "all|saved|downloaded|history|queue | speed <n|off> | auto-download on|off",
+                Examples: new[]{
+                    ":feed all",
+                    ":feed queue",
+                    ":feed speed 1.5",
+                    ":feed speed off",
+                    ":feed auto-download on"
+                },
                 Category: HelpCategory.Feeds, Rank: 35),
 
             // app / general
@@ -282,6 +289,34 @@ namespace StuiPodcast.App
                     ":sync help"
                 },
                 Category: HelpCategory.Sync, Rank: 75),
+
+            new(":chapter", "Navigate podcast-2.0 chapters of the selected episode.",
+                "list | next | prev | jump <n> | probe <url>",
+                Aliases: new[]{ ":chapters" },
+                Examples: new[]{
+                    ":chapter list",
+                    ":chapter next",
+                    ":chapter prev",
+                    ":chapter jump 3",
+                    ":chapter probe https://example/episode.mp3"
+                },
+                Category: HelpCategory.Playback, Rank: 58),
+
+            new(":undo", "Revert the most recent destructive action (queue clear, etc.).",
+                Examples: new[]{ ":undo" },
+                Category: HelpCategory.Queue, Rank: 78),
+
+            new(":sleep", "Stop playback after a duration.",
+                "<30m|1h30m|90s> | off | status",
+                Examples: new[]{
+                    ":sleep 30m",
+                    ":sleep 1h30m",
+                    ":sleep 45s",
+                    ":sleep 30",           // bare number = minutes
+                    ":sleep",              // show remaining
+                    ":sleep off"
+                },
+                Category: HelpCategory.Playback, Rank: 65),
         };
         #endregion
 

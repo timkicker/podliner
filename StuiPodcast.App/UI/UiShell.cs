@@ -1,3 +1,4 @@
+using Serilog;
 using Terminal.Gui;
 using StuiPodcast.Core;
 using StuiPodcast.App.Debug;
@@ -32,6 +33,11 @@ public sealed class UiShell : IUiShell
     public event Action<string>? Command;
     public event Action<string>? SearchApplied;
     public event Action? SelectedFeedChanged;
+    public event Action<Episode>? ChaptersLoadRequested;
+
+    // Episode id the Chapters tab currently renders — used to reject stale
+    // loads that come back after the user already moved on.
+    Guid? _chaptersActiveEpisodeId;
     #endregion
     
     #region theme shortcut
@@ -204,7 +210,43 @@ public sealed class UiShell : IUiShell
         {
             var ep = _episodesPane.GetSelected();
             if (ep != null) _episodesPane.ShowDetails(ep);
+            // Reset the chapters tab to a placeholder when selection moves
+            // so the old episode's chapters don't linger. Actual fetch is
+            // deferred to tab-activation — browsing the episode list
+            // shouldn't fire network per keypress.
+            MaybeResetChaptersForSelection(ep);
             EpisodeSelectionChanged?.Invoke();
+        };
+
+        // Lazy-load chapters when the user switches to the Chapters tab.
+        _episodesPane.Tabs.SelectedTabChanged += (_, e) =>
+        {
+            if (e.NewTab == _episodesPane.ChaptersTab)
+            {
+                var ep = _episodesPane.GetSelected();
+                if (ep == null)
+                {
+                    _episodesPane.ChaptersList.ShowPlaceholder("Select an episode to see chapters");
+                    _episodesPane.SetChaptersTabCount(null);
+                    return;
+                }
+                _chaptersActiveEpisodeId = ep.Id;
+                _episodesPane.ChaptersList.ShowPlaceholder("Loading chapters…");
+                _episodesPane.SetChaptersTabCount(null);
+                try { ChaptersLoadRequested?.Invoke(ep); }
+                catch (Exception ex) { Log.Debug(ex, "chapters-load-requested subscriber threw"); }
+            }
+        };
+
+        // Enter on a chapter row → seek to its start. Routed through the
+        // command bus so it goes via the same dispatcher as every other
+        // user-triggered seek (keeps OSD + status behaviour consistent).
+        _episodesPane.ChaptersList.OpenSelected += () =>
+        {
+            var ch = _episodesPane.ChaptersList.GetSelected();
+            if (ch == null) return;
+            Command?.Invoke($":seek {(long)ch.StartSeconds}");
+            ShowOsd($"▶ {ch.Title}", 1500);
         };
 
         _player = new UiPlayerPanel();
@@ -221,18 +263,18 @@ public sealed class UiShell : IUiShell
             FocusEpisodes: () => FocusPane(Pane.Episodes),
             OpenDetails: () =>
             {
-                if (_episodesPane?.Tabs is { } tv)
+                if (_episodesPane is { } p)
                 {
-                    tv.SelectedTab = tv.Tabs.Last();
-                    _episodesPane.Details.SetFocus();
+                    p.Tabs.SelectedTab = p.DetailsTab;
+                    p.Details.SetFocus();
                 }
             },
             BackFromDetails: () =>
             {
-                if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
+                if (_episodesPane is { } p && p.Tabs.SelectedTab != p.EpisodesTab)
                 {
-                    _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First();
-                    _episodesPane.List.SetFocus();
+                    p.Tabs.SelectedTab = p.EpisodesTab;
+                    p.List.SetFocus();
                 }
             },
             JumpNextUnplayed: () => JumpToUnplayed(+1),
@@ -299,7 +341,8 @@ public sealed class UiShell : IUiShell
             _feedsPane?.List,
             _episodesPane?.Tabs,
             _episodesPane?.List,
-            _episodesPane?.Details
+            _episodesPane?.Details,
+            _episodesPane?.ChaptersList.List
         );
 
         SetPlayerPlacement(false);
@@ -547,6 +590,74 @@ public sealed class UiShell : IUiShell
 
     public void TogglePlayerPlacement() => SetPlayerPlacement(!_playerAtTop);
     public void ShowDetails(Episode e) => UI(() => _episodesPane?.ShowDetails(e));
+
+    // Called from SelectionChanged. Resets the chapters tab state so the
+    // previous episode's list can't stay on screen. Only re-loads if the
+    // Chapters tab is currently active — otherwise we wait for activation.
+    void MaybeResetChaptersForSelection(Episode? ep)
+    {
+        if (_episodesPane == null) return;
+        _chaptersActiveEpisodeId = ep?.Id;
+
+        if (_episodesPane.Tabs.SelectedTab == _episodesPane.ChaptersTab)
+        {
+            if (ep == null)
+            {
+                _episodesPane.ChaptersList.ShowPlaceholder("Select an episode to see chapters");
+                _episodesPane.SetChaptersTabCount(null);
+                return;
+            }
+            _episodesPane.ChaptersList.ShowPlaceholder("Loading chapters…");
+            _episodesPane.SetChaptersTabCount(null);
+            try { ChaptersLoadRequested?.Invoke(ep); }
+            catch (Exception ex) { Log.Debug(ex, "chapters-load-requested subscriber threw"); }
+        }
+        else
+        {
+            // Tab not visible — clear the panel so a future activation
+            // starts fresh instead of showing the old episode's chapters.
+            _episodesPane.ChaptersList.ShowPlaceholder(ep == null
+                ? "Select an episode to see chapters"
+                : "Open Chapters tab to load");
+            _episodesPane.SetChaptersTabCount(null);
+        }
+    }
+
+    #region chapters tab api
+    public void SetChaptersLoading(string message) => UI(() =>
+    {
+        _episodesPane?.ChaptersList.ShowPlaceholder(message);
+        _episodesPane?.SetChaptersTabCount(null);
+    });
+
+    public void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1) => UI(() =>
+    {
+        // Stale-guard: the user may have switched episodes while the fetch
+        // was in flight. Drop the result if we're no longer showing that ep.
+        if (_chaptersActiveEpisodeId != episodeId) return;
+        if (_episodesPane == null) return;
+        _episodesPane.ChaptersList.SetChapters(chapters, activeIndex);
+        _episodesPane.SetChaptersTabCount(chapters.Count);
+    });
+
+    public void SetChaptersEmpty(Guid episodeId, string message) => UI(() =>
+    {
+        if (_chaptersActiveEpisodeId != episodeId) return;
+        if (_episodesPane == null) return;
+        _episodesPane.ChaptersList.ShowPlaceholder(message);
+        _episodesPane.SetChaptersTabCount(0);
+    });
+
+    public void UpdateChapterHighlight(Guid episodeId, double posSeconds) => UI(() =>
+    {
+        if (_chaptersActiveEpisodeId != episodeId) return;
+        if (_episodesPane == null) return;
+        var chapters = _episodesPane.ChaptersList.Chapters;
+        if (chapters.Count == 0) return;
+        var idx = UiChaptersList.IndexForPosition(chapters, posSeconds);
+        _episodesPane.ChaptersList.SetActiveIndex(idx);
+    });
+    #endregion
 
     private void ApplyTheme()
     {

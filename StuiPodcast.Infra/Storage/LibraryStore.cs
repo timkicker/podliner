@@ -44,15 +44,59 @@ namespace StuiPodcast.Infra.Storage
             lib.SchemaVersion = lib.SchemaVersion <= 0 ? 1 : lib.SchemaVersion;
 
             // feed cleanup and dedupe
-            var feedMap = new Dictionary<Guid, Feed>();
+            //   (a) drop rows whose URL isn't a well-formed http(s) URI — we
+            //       observed "<feed>" (literal) sneaking in when users typed
+            //       the placeholder in :add. Such rows fail every refresh.
+            //   (b) dedup by Id first, then by URL. URL-duplicates produce a
+            //       redirect table so episodes/queue/history can be rewritten
+            //       to the surviving feed instead of orphaning them.
+            var feedsById = new Dictionary<Guid, Feed>();
             foreach (var f in lib.Feeds)
             {
                 if (f.Id == Guid.Empty) f.Id = Guid.NewGuid();
-                if (!feedMap.ContainsKey(f.Id))
-                    feedMap.Add(f.Id, f);
+                if (!IsValidFeedUrl(f.Url)) continue;
+                if (!feedsById.ContainsKey(f.Id))
+                    feedsById.Add(f.Id, f);
             }
+
+            // URL dedup (brownfield heal for the pre-URL-dedup AddOrUpdateFeed
+            // bug: same URL was added N times as N distinct Ids).
+            var feedRedirect = new Dictionary<Guid, Guid>();
+            var byUrl = new Dictionary<string, Feed>(StringComparer.OrdinalIgnoreCase);
+            var feedsKept = new List<Feed>();
+            foreach (var f in feedsById.Values)
+            {
+                if (byUrl.TryGetValue(f.Url, out var winner))
+                {
+                    feedRedirect[f.Id] = winner.Id;
+                    // Carry over richer metadata from the loser if the
+                    // winner was less-populated (e.g. never refreshed).
+                    if (string.IsNullOrWhiteSpace(winner.Title) && !string.IsNullOrWhiteSpace(f.Title))
+                        winner.Title = f.Title;
+                    if (!winner.LastChecked.HasValue || (f.LastChecked.HasValue && f.LastChecked > winner.LastChecked))
+                        winner.LastChecked = f.LastChecked;
+                    if (string.IsNullOrWhiteSpace(winner.LastEtag) && !string.IsNullOrWhiteSpace(f.LastEtag))
+                        winner.LastEtag = f.LastEtag;
+                    if (string.IsNullOrWhiteSpace(winner.LastModified) && !string.IsNullOrWhiteSpace(f.LastModified))
+                        winner.LastModified = f.LastModified;
+                }
+                else
+                {
+                    byUrl[f.Url] = f;
+                    feedsKept.Add(f);
+                }
+            }
+
             lib.Feeds.Clear();
-            lib.Feeds.AddRange(feedMap.Values);
+            lib.Feeds.AddRange(feedsKept);
+
+            if (feedRedirect.Count > 0)
+            {
+                // Episodes linked to a collapsed feed now point at the winner.
+                foreach (var e in lib.Episodes)
+                    if (feedRedirect.TryGetValue(e.FeedId, out var to))
+                        e.FeedId = to;
+            }
 
             var validFeedIds = new HashSet<Guid>(lib.Feeds.Select(x => x.Id));
 
@@ -183,6 +227,16 @@ namespace StuiPodcast.Infra.Storage
             return redirect;
         }
 
+        // A feed URL is "valid" if it parses as an absolute http or https
+        // URI. Anything else (empty, "<feed>", file:// paths) is noise and
+        // gets dropped at load so it doesn't waste refresh cycles.
+        static bool IsValidFeedUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+            return uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps;
+        }
+
         static Episode PickMergeWinner(List<Episode> dupes)
         {
             static bool HasState(Episode e)
@@ -219,8 +273,28 @@ namespace StuiPodcast.Infra.Storage
         public Feed AddOrUpdateFeed(Feed feed)
         {
             if (feed == null) throw new ArgumentNullException(nameof(feed));
-            if (feed.Id == Guid.Empty) feed.Id = Guid.NewGuid();
             if (string.IsNullOrWhiteSpace(feed.Title)) feed.Title = string.Empty;
+
+            // URL-based dedup. Callers that run AddFeedAsync construct a new
+            // probe Feed with a fresh Guid every time; without this check,
+            // ":add <url>" twice creates two rows + double episodes instead
+            // of a no-op. Also covers the legacy case where a Feed.Id was
+            // never persisted (Guid.Empty).
+            if (!string.IsNullOrWhiteSpace(feed.Url))
+            {
+                var dup = Current.Feeds.FirstOrDefault(f =>
+                    string.Equals(f.Url, feed.Url, StringComparison.OrdinalIgnoreCase) &&
+                    f.Id != feed.Id);
+                if (dup != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(feed.Title)) dup.Title = feed.Title;
+                    if (feed.LastChecked.HasValue)              dup.LastChecked = feed.LastChecked;
+                    SaveAsync();
+                    return dup;
+                }
+            }
+
+            if (feed.Id == Guid.Empty) feed.Id = Guid.NewGuid();
 
             if (_feedsById.TryGetValue(feed.Id, out var existing))
             {

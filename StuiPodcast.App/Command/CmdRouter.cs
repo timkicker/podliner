@@ -83,7 +83,10 @@ internal enum TopCommand
     History, Opml, Open, Copy,
     Write, WriteQuit, WriteQuitBang, QuitBang,
     Search, Now, Jump, Theme,
-    Sync
+    Sync,
+    Sleep,
+    Undo,
+    Chapter
 }
 #endregion
 
