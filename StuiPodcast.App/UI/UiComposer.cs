@@ -1,25 +1,25 @@
-using System.Reflection;
 using Serilog;
-using StuiPodcast.App.Debug;
+using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
+using StuiPodcast.App.UI.Wiring;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Download;
-using StuiPodcast.Infra.Storage;
 using Terminal.Gui;
-using System.Collections.Generic;
-using System.Linq;
-using StuiPodcast.App.Bootstrap;
-using StuiPodcast.App.Command.Module;
-
 
 namespace StuiPodcast.App.UI;
 
-
+// Top-level composer. Orchestrates startup rendering + event wiring by
+// delegating to focused wiring classes in UI/Wiring. Also hosts the
+// cross-cutting helpers (sort key evaluation, window-title formatting,
+// idle scroll-to-top, shutdown sequence) that multiple wiring classes
+// and Program.cs share.
 static class UiComposer
 {
     #region startup helpers
-    // scroll feeds/episodes to top on first idle
+
+    // Scroll feeds/episodes to top on first idle so the initial view starts
+    // at the newest item regardless of where the previous selection was.
     public static void ScrollAllToTopOnIdle(UiShell ui, AppData data, IEpisodeStore episodes)
     {
         Application.MainLoop?.AddIdle(() =>
@@ -46,9 +46,10 @@ static class UiComposer
             return false;
         });
     }
-    #endregion
 
-    #region window title
+    // Renders the window title using the now-playing episode (if any) and
+    // prefixes "[OFFLINE]" when the network is flagged as offline. Shared by
+    // NetworkMonitor, UiDownloaderBridge, and Program startup.
     public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data, IEpisodeStore episodes)
     {
         var offlinePrefix = !data.NetworkOnline ? "[OFFLINE] " : "";
@@ -66,9 +67,14 @@ static class UiComposer
         catch { }
         ui.SetWindowTitle($"{offlinePrefix}{baseTitle}");
     }
+
     #endregion
 
-    #region sorting
+    #region sorting helpers
+
+    // Shared "is this episode played" predicate used by both feed and episode
+    // sort keys. Falls back to position-based heuristics when the user hasn't
+    // explicitly marked the episode as played.
     private static bool IsPlayed(Episode e)
     {
         if (e.ManuallyMarkedPlayed) return true;
@@ -168,137 +174,20 @@ static class UiComposer
         }
         return ordered;
     }
+
     #endregion
 
     #region downloader
+
+    // Delegates to UiDownloaderBridge. Kept here as a stable entry point so
+    // Program.cs doesn't need to reach into the Wiring namespace directly.
     public static void AttachDownloaderUi(DownloadManager downloader, UiShell? ui, AppData data, IEpisodeStore episodes)
-{
-    // per-download state cache
-    var byId = new Dictionary<Guid, DownloadState>();
-    var progress = new Dictionary<Guid, (long bytes, long? total, DownloadState state)>();
+        => UiDownloaderBridge.Attach(downloader, ui, data, episodes);
 
-    DateTime lastPulse = DateTime.MinValue;
-
-    void updateBadge()
-    {
-        // badge: done/active/total and overall percent
-        int done   = byId.Values.Count(s => s == DownloadState.Done);
-        int active = byId.Values.Count(s => s == DownloadState.Queued
-                                            || s == DownloadState.Running
-                                            || s == DownloadState.Verifying);
-        int total  = done + active;
-
-        if (total <= 0)
-        {
-            ui?.SetDownloadBadge(null);
-            return;
-        }
-
-        // bytes-weighted percent across items with known totals
-        long sumBytes = 0;
-        long sumTotal = 0;
-
-        foreach (var (_, (bytes, totalBytes, st)) in progress.ToArray())
-        {
-            if (totalBytes is { } T && T > 0)
-            {
-                // done counts as 100%, running/verifying contribute current bytes
-                if (st == DownloadState.Done)
-                {
-                    sumBytes += T;
-                    sumTotal += T;
-                }
-                else if (st == DownloadState.Running || st == DownloadState.Verifying)
-                {
-                    var b = Math.Clamp(bytes, 0, T);
-                    sumBytes += b;
-                    sumTotal += T;
-                }
-            }
-        }
-
-        int pct;
-        if (sumTotal > 0)
-        {
-            pct = (int)Math.Round(100.0 * sumBytes / sumTotal);
-        }
-        else
-        {
-            // fallback: no total bytes known → simple done/total percent
-            pct = (int)Math.Round(100.0 * done / Math.Max(1, total));
-        }
-
-        ui?.SetDownloadBadge($"{done}/{total} • {pct}%");
-
-        // optional: show osd when batch ends
-        if (active == 0 && done > 0)
-            ui?.ShowOsd($"downloads {done}/{total} • {pct}%");
-    }
-
-
-    downloader.StatusChanged += (id, st) =>
-    {
-        // During an active download, DownloadManager fires StatusChanged ~every
-        // 400ms with state=Running for progress pulses. We want UI side-effects
-        // (OSD, full list refresh) only on real state transitions; progress
-        // byte updates still flow into the `progress` dictionary for the badge.
-        var prevState = byId.TryGetValue(id, out var ps) ? (DownloadState?)ps : null;
-        bool isTransition = prevState != st.State;
-
-        byId[id] = st.State;
-        progress[id] = (st.BytesReceived, st.TotalBytes, st.State);
-
-        // prune progress on failed/canceled
-        if (st.State == DownloadState.Failed || st.State == DownloadState.Canceled)
-            progress.Remove(id);
-
-        // ensure done reports 100% if bytes < total
-        if (st.State == DownloadState.Done && progress.TryGetValue(id, out var p) && p.total is { } T)
-            progress[id] = (T, T, DownloadState.Done);
-
-        if (isTransition)
-        {
-            Application.MainLoop?.Invoke(() =>
-            {
-                ui?.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
-                if (ui != null)
-                {
-                    UpdateWindowTitleWithDownloads(ui, data, episodes);
-                    switch (st.State)
-                    {
-                        case DownloadState.Queued: ui.ShowOsd("dl queued", 300); break;
-                        case DownloadState.Running: ui.ShowOsd("dl ⇣", 300); break;
-                        case DownloadState.Verifying: ui.ShowOsd("dl ≈", 300); break;
-                        case DownloadState.Done: ui.ShowOsd("dl ✓", 500); break;
-                        case DownloadState.Failed: ui.ShowOsd("dl !", 900); break;
-                        case DownloadState.Canceled: ui.ShowOsd("dl ×", 400); break;
-                    }
-                }
-                updateBadge();
-            });
-        }
-
-        // Light ui pulse while running: refresh at most every 2s to reflect
-        // changing byte counts on the episode row. Was every 500ms — too spammy
-        // for multi-GB downloads with thousands of episodes.
-        if (st.State == DownloadState.Running && DateTime.UtcNow - lastPulse > TimeSpan.FromSeconds(2))
-        {
-            lastPulse = DateTime.UtcNow;
-            Application.MainLoop?.Invoke(() =>
-            {
-                ui?.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
-                updateBadge();
-            });
-        }
-    };
-
-    downloader.EnsureRunning();
-}
-
-    
     #endregion
 
-    #region ui wiring
+    #region event wiring (delegation to Wiring/*)
+
     public static void WireUi(
         AppServices ctx,
         Func<Task> save,
@@ -306,408 +195,23 @@ static class UiComposer
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
-        var ui            = ctx.Ui;
-        var data          = ctx.Data;
-        var app           = ctx.App;
-        var feeds         = ctx.Feeds;
-        var playback      = ctx.Playback;
-        var audioPlayer   = ctx.Player;
-        var syncService   = ctx.Gpodder;
-        var episodeStore  = ctx.Episodes;
-        var feedStore     = ctx.FeedStore;
-        var queueService  = ctx.Queue;
-        // quit
-        ui.QuitRequested += () =>
-        {
-            if (feeds != null) QuitApp(ui, audioPlayer, feeds, save);
-        };
-
-        // add feed
-        ui.AddFeedRequested += async url =>
-        {
-            if (feeds == null) return;
-            if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("add feed: url missing", 1500); return; }
-
-            Log.Information("ui/addfeed url={Url}", url);
-            ui.ShowOsd("adding…", 800);
-
-            try
-            {
-                if (hasFeedWithUrl(url)) { ui.ShowOsd("already added", 1200); return; }
-            }
-            catch
-            {
-                // ignored
-            }
-
-            try
-            {
-                var f = await feeds.AddFeedAsync(url);
-                app?.SaveNow();
-                Log.Information("ui/addfeed ok id={Id} title={Title}", f.Id, f.Title);
-
-                data.LastSelectedFeedId = f.Id;
-                _ = save();
-
-                ui.SetFeeds(feedStore.Snapshot(), f.Id);
-                ui.SetEpisodesForFeed(f.Id, episodeStore.Snapshot());
-                ui.SelectEpisodeIndex(0);
-
-                ui.ShowOsd("feed added ✓", 1200);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "ui/addfeed failed url={Url}", url);
-                ui.ShowOsd($"add failed: {ex.Message}", 2200);
-            }
-        };
-        
-        ui.RemoveFeedRequested += async () =>
-        {
-            var fid = ui.GetSelectedFeedId();
-            if (fid is null) { ui.ShowOsd("no feed selected", 1200); return; }
-
-            try
-            {
-                await feeds?.RemoveFeedAsync(fid.Value)!;   // ← persist + update app data + save
-
-                // reset ui
-                var snapshot = feedStore.Snapshot();
-                var next = snapshot.FirstOrDefault()?.Id;
-                ui.SetFeeds(snapshot, next);
-                if (next != null) { ui.SetEpisodesForFeed(next.Value, episodeStore.Snapshot()); ui.SelectEpisodeIndex(0); }
-                else              { ui.SetEpisodesForFeed(ui.AllFeedId, episodeStore.Snapshot()); }
-
-                ui.ShowOsd("feed removed ✓", 1200);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "ui/removefeed failed id={Id}", fid);
-                ui.ShowOsd($"remove failed: {ex.Message}", 2200);
-            }
-        };
-
-
-
-        // refresh
-        ui.RefreshRequested += async () =>
-        {
-            await feeds!.RefreshAllAsync();
-
-            var selected = ui.GetSelectedFeedId() ?? data.LastSelectedFeedId;
-            ui.SetFeeds(feedStore.Snapshot(), selected);
-
-            if (selected != null)
-            {
-                ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
-            }
-            CmdRouter.ApplyList(ui, data, episodeStore);
-        };
-
-        // feed selection change
-        ui.SelectedFeedChanged += () =>
-        {
-            var fid = ui.GetSelectedFeedId();
-            data.LastSelectedFeedId = fid;
-
-            if (fid != null)
-            {
-                ui.SetEpisodesForFeed(fid.Value, episodeStore.Snapshot());
-                ui.SelectEpisodeIndex(0);
-            }
-
-            _ = save();
-        };
-
-        // episode selection change
-        ui.EpisodeSelectionChanged += () => { _ = save(); };
-
-        // play selected
-        ui.PlaySelected += () =>
-        {
-            var ep = ui?.GetSelectedEpisode();
-            if (ep == null || audioPlayer == null || playback == null || ui == null) return;
-
-            var curFeed = ui.GetSelectedFeedId();
-
-            ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
-            _ = save();
-
-            if (curFeed is Guid fid && fid == VirtualFeedsCatalog.Queue)
-            {
-                if (queueService.TrimUpToInclusive(ep.Id))
-                {
-                    ui.SetQueueOrder(queueService.Snapshot());
-                    ui.RefreshEpisodesForSelectedFeed(episodeStore.Snapshot());
-                    _ = save();
-                }
-            }
-
-            string? localPath = null;
-            if (app!.TryGetLocalPath(ep.Id, out var lp)) localPath = lp;
-
-            bool isRemote =
-                string.IsNullOrWhiteSpace(localPath) &&
-                !string.IsNullOrWhiteSpace(ep.AudioUrl) &&
-                ep.AudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
-
-            var baseline = TimeSpan.Zero;
-            try { baseline = audioPlayer?.State.Position ?? TimeSpan.Zero; } catch { }
-            ui.SetPlayerLoading(true, isRemote ? "loading…" : "opening…", baseline);
-
-            var mode   = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
-            var online = data.NetworkOnline;
-
-            string? source = mode switch
-            {
-                "local"  => localPath,
-                "remote" => ep.AudioUrl,
-                _        => localPath ?? (online ? ep.AudioUrl : null)
-            };
-
-            if (string.IsNullOrWhiteSpace(source))
-            {
-                ui.SetPlayerLoading(false);
-                var msg = localPath == null ? "offline: not downloaded" : "no playable source";
-                ui.ShowOsd(msg, 1500);
-                return;
-            }
-
-            var oldUrl = ep.AudioUrl;
-            try
-            {
-                ep.AudioUrl = source;
-                playback.Play(ep);
-            }
-            catch
-            {
-                ui.SetPlayerLoading(false);
-                throw;
-            }
-            finally
-            {
-                ep.AudioUrl = oldUrl;
-            }
-
-            ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + ep.Title);
-            ui.SetNowPlaying(ep.Id);
-
-            if (localPath != null)
-            {
-                Application.MainLoop?.AddTimeout(TimeSpan.FromMilliseconds(600), _ =>
-                {
-                    try
-                    {
-                        var s = audioPlayer.State;
-                        if (!s.IsPlaying && s.Position == TimeSpan.Zero)
-                        {
-                            try { audioPlayer.Stop(); } catch { }
-                            var fileUri = new Uri(localPath).AbsoluteUri;
-
-                            var old = ep.AudioUrl;
-                            try
-                            {
-                                ep.AudioUrl = fileUri;
-                                playback.Play(ep);
-                                ui.ShowOsd("retry (file://)");
-                            }
-                            finally { ep.AudioUrl = old; }
-                        }
-                    }
-                    catch { }
-                    return false;
-                });
-            }
-        };
-
-        // theme toggle
-        ui.ToggleThemeRequested += () => ui.ToggleTheme();
-
-        // played toggle
-        ui.TogglePlayedRequested += () =>
-        {
-            var ep = ui.GetSelectedEpisode();
-            if (ep == null) return;
-
-            ep.ManuallyMarkedPlayed = !ep.ManuallyMarkedPlayed;
-
-            if (ep.ManuallyMarkedPlayed)
-            {
-                if (ep.DurationMs > 0) ep.Progress.LastPosMs = ep.DurationMs;
-                ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
-            }
-            else
-            {
-                ep.Progress.LastPosMs = 0;
-            }
-
-            _ = save();
-
-            var fid = ui.GetSelectedFeedId();
-            if (fid != null) ui.SetEpisodesForFeed(fid.Value, episodeStore.Snapshot());
-            ui.ShowDetails(ep);
-        };
-
-        // command router
-        ui.Command += cmd =>
-        {
-            Log.Debug("cmd {Cmd}", cmd);
-            if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { }
-
-            if (CmdRouter.HandleQueue(cmd, ui, data, save, episodeStore, queueService))
-            {
-                ui.SetQueueOrder(queueService.Snapshot());
-                ui.RefreshEpisodesForSelectedFeed(episodeStore.Snapshot());
-                return;
-            }
-
-            if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save, episodeStore))
-                return;
-
-            CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader, episodeStore, feedStore, queueService, engineSwitch, syncService);
-        };
-
-        // search
-        ui.SearchApplied += query =>
-        {
-            var fid = ui?.GetSelectedFeedId();
-            IEnumerable<Episode> list = episodeStore.Snapshot();
-            if (fid != null) list = list.Where(e => e.FeedId == fid.Value);
-
-            if (!string.IsNullOrWhiteSpace(query))
-                list = list.Where(e =>
-                    (e.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (e.DescriptionText?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false));
-
-            if (fid != null) ui?.SetEpisodesForFeed(fid.Value, list);
-        };
-
+        UiFeedWiring.Wire(ctx, save, hasFeedWithUrl);
+        UiSelectionWiring.Wire(ctx, save);
+        UiPlaybackWiring.Wire(ctx, save);
+        UiCommandWiring.Wire(ctx, save, engineSwitch);
     }
-    #endregion
 
-    #region initialization
     public static void ShowInitialLists(AppServices ctx)
     {
-        var ui = ctx.Ui;
-        var data = ctx.Data;
-        var episodeStore = ctx.Episodes;
-        var feedStore = ctx.FeedStore;
-        CmdViewModule.ApplyFeedList(ui, data, feedStore, episodeStore);
-        ui.SetUnplayedHint(data.UnplayedOnly);
-        CmdRouter.ApplyList(ui, data, episodeStore);
-
-        var initialFeed = ui.GetSelectedFeedId();
-        if (initialFeed != null)
-        {
-            ui.SetEpisodesForFeed(initialFeed.Value, episodeStore.Snapshot());
-            ui.SelectEpisodeIndex(0);
-        }
-
-        var last = episodeStore.Snapshot()
-            .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
-            .ThenByDescending(e => e.Progress.LastPosMs)
-            .FirstOrDefault()
-            ?? ui.GetSelectedEpisode();
-
-        if (last != null)
-        {
-            ui.SelectFeed(last.FeedId);
-            ui.SetEpisodesForFeed(last.FeedId, episodeStore.Snapshot());
-
-            var list = episodeStore.WhereByFeed(last.FeedId)
-                .OrderByDescending(e => e.PubDate ?? DateTimeOffset.MinValue)
-                .ToList();
-
-            var idx = Math.Max(0, list.FindIndex(e => e.Id == last.Id));
-            ui.SelectEpisodeIndex(idx);
-
-            ui.ShowStartupEpisode(last, data.Volume0_100, data.Speed);
-        }
-
-        var player = ctx.Player;
-        var playback = ctx.Playback;
-
-        // Track the last episode whose title we pushed to the window label so
-        // we don't re-resolve and re-set the same string 4×/sec. Network
-        // transitions update the title via NetworkMonitor separately.
-        Guid? lastTitleId = null;
-        playback.SnapshotAvailable += snap => Application.MainLoop?.Invoke(() =>
-        {
-            try
-            {
-                if (ui != null && player != null)
-                {
-                    ui.UpdatePlayerSnapshot(snap, player.State.Volume0_100);
-                    ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
-                    // Keep the playing episode row's progress bar fresh with a
-                    // single-row update; the periodic full refresh used to do
-                    // this but rebuilt the whole list.
-                    ui.RefreshActiveProgress(snap);
-
-                    var nowId = ui.GetNowPlayingId();
-                    if (nowId is Guid nid && snap.EpisodeId == nid && nid != lastTitleId)
-                    {
-                        var ep = ctx.Episodes.Find(nid);
-                        if (ep != null)
-                        {
-                            ui.SetWindowTitle((!data.NetworkOnline ? "[OFFLINE] " : "") + (ep.Title ?? "—"));
-                            lastTitleId = nid;
-                        }
-                    }
-                    else if (nowId == null && lastTitleId != null)
-                    {
-                        lastTitleId = null; // reset so next play re-sets title
-                    }
-                }
-            }
-            catch { }
-        });
-
-        playback.StatusChanged += st => Application.MainLoop?.Invoke(() =>
-        {
-            try
-            {
-                if (ui == null) return;
-                switch (st)
-                {
-                    case PlaybackStatus.Loading:
-                        ui.SetPlayerLoading(true, "loading…", null);
-                        break;
-                    case PlaybackStatus.SlowNetwork:
-                        ui.SetPlayerLoading(true, "connecting… (slow)", null);
-                        break;
-                    case PlaybackStatus.Playing:
-                    case PlaybackStatus.Ended:
-                    default:
-                        ui.SetPlayerLoading(false);
-                        break;
-                }
-            }
-            catch { }
-        });
-
-        player.StateChanged += s => Application.MainLoop?.Invoke(() =>
-        {
-            try
-            {
-                if (ui != null && playback != null)
-                {
-                    playback.PersistProgressTick(
-                        s,
-                        eps => {
-                            var fid = ui.GetSelectedFeedId();
-                            if (fid != null) ui.SetEpisodesForFeed(fid.Value, eps);
-                        });
-                    ui.UpdateSpeedEnabled((player.Capabilities & PlayerCapabilities.Speed) != 0);
-                }
-            }
-            catch { }
-        });
+        UiInitialRender.Render(ctx);
+        UiPlaybackEventBridge.Wire(ctx);
     }
+
     #endregion
 
     #region shutdown
-    static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
+
+    public static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
     {
         if (Program.MarkExiting()) return;
 
@@ -732,5 +236,6 @@ static class UiComposer
             try { Environment.Exit(0); } catch { }
         });
     }
+
     #endregion
 }

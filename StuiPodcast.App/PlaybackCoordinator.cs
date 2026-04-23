@@ -165,15 +165,17 @@ public sealed class PlaybackCoordinator : IDisposable
         long effLenMs, posMs;
         var endNow = IsEndReached(s, out effLenMs, out posMs);
 
-        if (!_progressSeenForSession)
+        // Only clear the loading overlay once the position counter has
+        // actually advanced. LibVLC flips IsPlaying=true + Length>0 while
+        // still filling its network buffer, so relying on those would hide
+        // the loading indicator while the user waits in silence for the
+        // pre-roll to finish.
+        if (!_progressSeenForSession && posMs > 0)
         {
-            if (posMs > 0 || (s.IsPlaying && s.Length.HasValue && s.Length.Value > TimeSpan.Zero))
-            {
-                _progressSeenForSession = true;
-                FireStatus(PlaybackStatus.Playing);
-                CancelStallWatch();
-                try { _loadingCts?.Cancel(); } catch { } 
-            }
+            _progressSeenForSession = true;
+            FireStatus(PlaybackStatus.Playing);
+            CancelStallWatch();
+            try { _loadingCts?.Cancel(); } catch { }
         }
 
         if (effLenMs > 0)

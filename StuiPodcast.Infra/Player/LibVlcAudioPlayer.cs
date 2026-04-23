@@ -44,9 +44,10 @@ namespace StuiPodcast.Infra.Player
                 "--quiet","--verbose=0","--no-color",
                 "--no-xlib",
                 "--input-fast-seek",
-                "--file-caching=1000",
-                "--network-caching=2000",
-                "--http-reconnect"
+                "--file-caching=300",
+                "--network-caching=750",
+                "--http-reconnect",
+                $"--http-user-agent={PlayerHttpDefaults.UserAgent}"
             };
 
             var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "podliner-vlc.log");
@@ -96,6 +97,13 @@ namespace StuiPodcast.Infra.Player
                 _pendingSeekMs = startMs is > 0 ? startMs : null;
 
                 _media = CreateMedia(_lib, url);
+
+                // Per-media UA override. Library-wide `--http-user-agent` is
+                // not always honored by libvlc's http access module for
+                // individual streams (observed with Buzzsprout/Cloudflare
+                // returning 403 to VLC's default UA despite the library
+                // option). Setting it on the media object is reliable.
+                try { _media.AddOption($":http-user-agent={PlayerHttpDefaults.UserAgent}"); } catch { }
 
                 // provide start-time hint for faster seeks on some inputs
                 if (_pendingSeekMs is long ms && ms >= 1000)

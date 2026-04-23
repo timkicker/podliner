@@ -124,6 +124,7 @@ namespace StuiPodcast.Infra.Player
             psi.ArgumentList.Add("-loglevel"); psi.ArgumentList.Add("quiet");
             psi.ArgumentList.Add("-volume"); psi.ArgumentList.Add(Math.Clamp(vol0to100, 0, 100).ToString(CultureInfo.InvariantCulture));
             psi.ArgumentList.Add("-af"); psi.ArgumentList.Add($"atempo={Math.Clamp(speed, 0.5, 2.0).ToString("0.##", CultureInfo.InvariantCulture)}");
+            psi.ArgumentList.Add("-user_agent"); psi.ArgumentList.Add(PlayerHttpDefaults.UserAgent);
             psi.ArgumentList.Add(url);
 
             var p = new Process { StartInfo = psi, EnableRaisingEvents = true };

@@ -192,6 +192,7 @@ public sealed class MpvAudioPlayer : IAudioPlayer
         psi.ArgumentList.Add("--keep-open=no");
         psi.ArgumentList.Add("--really-quiet");
         psi.ArgumentList.Add("--msg-level=all=no");          // suppress logs to stdio completely
+        psi.ArgumentList.Add($"--user-agent={PlayerHttpDefaults.UserAgent}");
         psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
 
         // optional start offset hint
