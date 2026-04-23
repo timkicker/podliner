@@ -47,7 +47,7 @@
 - **Sync progress and subscriptions** via the gPodder API (gpodder.net + Nextcloud gPodder-Sync, auto-detected).
 - **MPRIS on Linux.** Media keys (play/pause/next/prev) and status from `playerctl`, KDE/GNOME widgets, etc.
 - **Offline-ready.** Download episodes, resume where you left off, manage a queue.
-- **Sleep timer.** `:sleep 30m` / `:sleep 1h30m` — stops playback when you nod off.
+- **Sleep timer.** `:sleep 30m` / `:sleep 1h30m` to stop playback after a duration.
 - **Per-feed settings.** Speed override (`:feed speed 1.5`) and auto-download (`:feed auto-download on`) per subscription.
 - **Undo** for destructive actions like queue clear.
 - **Easy migration.** OPML import/export to move subscriptions between players.
