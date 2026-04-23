@@ -158,7 +158,7 @@ internal class Program
         _gpodderStore = new GpodderStore(appConfigDir);
         _gpodderStore.Load();
         _gpodder = new GpodderSyncService(
-            _gpodderStore, new GpodderClient(), _data, _playback, _episodes, _feedStore,
+            _gpodderStore, new GpodderClientFactory(), _data, _playback, _episodes, _feedStore,
             saveAsync: _saver.RequestSaveAsync, uiDispatch: DispatchToUi);
 
         Log.Information("cfg at {Cfg}", _configStore.FilePath);

@@ -9,17 +9,21 @@ namespace StuiPodcast.App.Services;
 // Entirely opt-in — if no credentials are configured, nothing runs.
 sealed class GpodderSyncService : IDisposable
 {
-    private readonly GpodderStore        _store;
-    private readonly IGpodderClient      _client;
-    private readonly AppData             _data;
-    private readonly PlaybackCoordinator _playback;
-    private readonly Func<Task>?         _saveAsync;
-    private readonly IKeyring            _keyring;
+    private readonly GpodderStore          _store;
+    private readonly IGpodderClientFactory _factory;
+    private IGpodderClient                 _client;
+    private GpodderFlavor                  _flavor;
+    private readonly AppData               _data;
+    private readonly PlaybackCoordinator   _playback;
+    private readonly Func<Task>?           _saveAsync;
+    private readonly IKeyring              _keyring;
     // Marshals feed-store mutations to the UI thread to avoid races with UI reads.
     // Defaults to synchronous (test-friendly); Program.cs wires it to Application.MainLoop.Invoke.
-    private readonly Func<Action, Task>  _uiDispatch;
-    private readonly IEpisodeStore       _episodes;
-    private readonly IFeedStore          _feedStore;
+    private readonly Func<Action, Task>    _uiDispatch;
+    private readonly IEpisodeStore         _episodes;
+    private readonly IFeedStore            _feedStore;
+
+    public GpodderFlavor Flavor => _flavor;
 
     // Episode action tracking state
     private int   _lastSessionId = -1;
@@ -31,6 +35,9 @@ sealed class GpodderSyncService : IDisposable
 
     public bool ShouldAutoSync => _store.Current.AutoSync && _store.Current.IsConfigured;
 
+    // Back-compat constructor: still accepts a single IGpodderClient. The
+    // flavor stays pinned to whatever the caller injected — used by tests
+    // and the pre-multi-flavor call sites.
     public GpodderSyncService(
         GpodderStore        store,
         IGpodderClient      client,
@@ -41,9 +48,22 @@ sealed class GpodderSyncService : IDisposable
         Func<Task>?         saveAsync  = null,
         IKeyring?           keyring    = null,
         Func<Action, Task>? uiDispatch = null)
+        : this(store, new FixedClientFactory(client), data, playback, episodes, feedStore,
+               saveAsync, keyring, uiDispatch) { }
+
+    public GpodderSyncService(
+        GpodderStore          store,
+        IGpodderClientFactory factory,
+        AppData               data,
+        PlaybackCoordinator   playback,
+        IEpisodeStore         episodes,
+        IFeedStore            feedStore,
+        Func<Task>?           saveAsync  = null,
+        IKeyring?             keyring    = null,
+        Func<Action, Task>?   uiDispatch = null)
     {
         _store      = store;
-        _client     = client;
+        _factory    = factory;
         _data       = data;
         _playback   = playback;
         _saveAsync  = saveAsync;
@@ -51,6 +71,12 @@ sealed class GpodderSyncService : IDisposable
         _uiDispatch = uiDispatch ?? (a => { a(); return Task.CompletedTask; });
         _episodes   = episodes  ?? throw new ArgumentNullException(nameof(episodes));
         _feedStore  = feedStore ?? throw new ArgumentNullException(nameof(feedStore));
+
+        // Honour the stored flavor (persists across restarts so we don't
+        // re-probe on every launch). Pre-flavor configs hit the Auto branch
+        // which defaults to the gpodder.net client — matches legacy behaviour.
+        _flavor = GpodderFlavorExt.FromWire(_store.Current.Flavor);
+        _client = _factory.Create(_flavor);
 
         // Pre-configure client from stored credentials so syncs work without explicit login.
         if (_store.Current.IsConfigured)
@@ -64,6 +90,14 @@ sealed class GpodderSyncService : IDisposable
         _playback.StatusChanged     += OnStatusChanged;
     }
 
+    // Trivial factory shim for call sites that already constructed a client.
+    sealed class FixedClientFactory : IGpodderClientFactory
+    {
+        readonly IGpodderClient _fixed;
+        public FixedClientFactory(IGpodderClient c) { _fixed = c; }
+        public IGpodderClient Create(GpodderFlavor _) => _fixed;
+    }
+
     // ── public API ───────────────────────────────────────────────────────────
 
     public async Task<(bool ok, string msg)> LoginAsync(string server, string username, string password)
@@ -73,7 +107,11 @@ sealed class GpodderSyncService : IDisposable
         try
         {
             Log.Information("gpodder/sync login attempt server={Server} user={User}", server, username);
-            var ok = await _client.LoginAsync(server, username, password);
+
+            // Flavor detection — try the most likely protocol first based on
+            // the URL, fall back to the other. Skip the probe entirely if a
+            // flavor is already persisted (normal steady-state case).
+            var (ok, chosen, attempts) = await DetectFlavorAndLoginAsync(server, username, password);
             if (!ok)
             {
                 var status = _client.LastLoginStatus;
@@ -81,11 +119,29 @@ sealed class GpodderSyncService : IDisposable
                 var detail = status.HasValue
                     ? $"HTTP {status}{(string.IsNullOrWhiteSpace(reason) ? "" : $" {reason}")}"
                     : "unknown error";
-                Log.Warning("gpodder/sync login failed server={Server} detail={Detail}", server, detail);
-                // Hint for Nextcloud users whose /api/2 endpoints don't exist.
-                var hint = status == 404 ? " (endpoint not found — Nextcloud gPodder-Sync uses a different API path)" : "";
+                Log.Warning("gpodder/sync login failed server={Server} detail={Detail} tried={Tried}",
+                    server, detail, string.Join(",", attempts));
+
+                var hint = "";
+                if (status == 404 && attempts.Count == 1 && !attempts.Contains(GpodderFlavor.Nextcloud))
+                {
+                    // Only happens on an auth-abort path (401 on first flavor
+                    // stops probing before Nextcloud is tried). Leave the old
+                    // hint as-is for that narrow case.
+                    hint = " (endpoint not found — Nextcloud gPodder-Sync uses a different API path)";
+                }
+                else if (status == 404)
+                {
+                    hint = " — neither gpodder.net nor Nextcloud endpoints responded; check the server URL";
+                }
+                else if (status == 401)
+                    hint = " (wrong password? for 2FA Nextcloud accounts create an app-password in Settings → Security)";
+
                 return (false, $"login failed: {detail}{hint}");
             }
+
+            _flavor = chosen;
+            _store.Current.Flavor = chosen.ToWire();
 
             _store.Current.ServerUrl = server.TrimEnd('/');
             _store.Current.Username  = username;
@@ -107,7 +163,8 @@ sealed class GpodderSyncService : IDisposable
             try { await _client.RegisterDeviceAsync(username, _store.Current.DeviceId); }
             catch (Exception ex) { Log.Warning(ex, "gpodder device registration failed"); }
 
-            var resultMsg = $"logged in as {username} (device {_store.Current.DeviceId})";
+            var flavorLabel = _flavor == GpodderFlavor.Nextcloud ? "Nextcloud" : "gpodder.net";
+            var resultMsg = $"logged in as {username} via {flavorLabel} (device {_store.Current.DeviceId})";
             if (!keyringOk)
                 resultMsg += "\nWarning: keyring unavailable – password stored in plaintext";
 
@@ -118,6 +175,74 @@ sealed class GpodderSyncService : IDisposable
             Log.Warning(ex, "gpodder login failed");
             return (false, $"login error: {ex.Message}");
         }
+    }
+
+    // Try each flavor in priority order (URL-hinted flavor first) and stop
+    // at the first success. Swaps `_client` atomically so the winning
+    // flavor is the one used for subsequent operations. Returns the list
+    // of flavors actually tried for diagnostic logging.
+    async Task<(bool ok, GpodderFlavor chosen, List<GpodderFlavor> attempts)> DetectFlavorAndLoginAsync(
+        string server, string username, string password)
+    {
+        var attempts = new List<GpodderFlavor>();
+        var order = OrderFlavorsForUrl(server);
+
+        foreach (var flavor in order)
+        {
+            attempts.Add(flavor);
+            var candidate = _factory.Create(flavor);
+            Log.Debug("gpodder/detect trying flavor={Flavor} server={Server}", flavor, server);
+            bool ok;
+            try
+            {
+                ok = await candidate.LoginAsync(server, username, password);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug(ex, "gpodder/detect flavor={Flavor} threw", flavor);
+                try { candidate.Dispose(); } catch { }
+                continue;
+            }
+
+            if (ok)
+            {
+                // Swap the live client. Disposing the previous one is safe
+                // because we only hold a reference locally past this point.
+                var old = _client;
+                _client = candidate;
+                try { old.Dispose(); } catch { }
+                return (true, flavor, attempts);
+            }
+
+            // 401 = creds bad, no point trying the other flavor (would
+            // also 401). Report now with the actual server response.
+            if (candidate.LastLoginStatus == 401)
+            {
+                // Surface via _client for the outer reason-formatter.
+                try { _client.Dispose(); } catch { }
+                _client = candidate;
+                return (false, flavor, attempts);
+            }
+
+            try { candidate.Dispose(); } catch { }
+        }
+
+        // Neither flavor accepted; last candidate remains in _client for
+        // error-message extraction. Rebuild a fresh one for the Auto state
+        // so we don't leak diagnostics across attempts.
+        return (false, GpodderFlavor.Auto, attempts);
+    }
+
+    // Cheap heuristic: a URL that already contains /index.php is almost
+    // certainly Nextcloud; everything else we try gpodder.net first.
+    static List<GpodderFlavor> OrderFlavorsForUrl(string server)
+    {
+        var isNextcloudHint = !string.IsNullOrEmpty(server) &&
+                              (server.Contains("/index.php", StringComparison.OrdinalIgnoreCase) ||
+                               server.Contains("gpoddersync", StringComparison.OrdinalIgnoreCase));
+        return isNextcloudHint
+            ? new List<GpodderFlavor> { GpodderFlavor.Nextcloud, GpodderFlavor.GpodderNet }
+            : new List<GpodderFlavor> { GpodderFlavor.GpodderNet, GpodderFlavor.Nextcloud };
     }
 
     public void Logout()
@@ -135,6 +260,8 @@ sealed class GpodderSyncService : IDisposable
         _store.Current.LastKnownServerFeeds    = new();
         _store.Current.PendingActions          = new();
         _store.Current.LastSyncAt              = null;
+        _store.Current.Flavor                  = null;
+        _flavor                                = GpodderFlavor.Auto;
         _store.Save();
     }
 
@@ -307,8 +434,9 @@ sealed class GpodderSyncService : IDisposable
             : "never";
 
         var pwdStore = cfg.PasswordStoredInKeyring ? "keyring" : "plaintext";
+        var flavor   = _flavor == GpodderFlavor.Auto ? "unknown" : _flavor.ToWire();
 
-        return $"sync: {cfg.Username}@{cfg.ServerUrl}\n" +
+        return $"sync: {cfg.Username}@{cfg.ServerUrl}  flavor: {flavor}\n" +
                $"device: {cfg.DeviceId}  auto: {(cfg.AutoSync ? "on" : "off")}  pwd: {pwdStore}\n" +
                $"last sync: {lastSync}  pending actions: {cfg.PendingActions.Count}";
     }

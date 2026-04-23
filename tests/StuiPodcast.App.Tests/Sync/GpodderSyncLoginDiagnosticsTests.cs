@@ -52,8 +52,11 @@ public sealed class GpodderSyncLoginDiagnosticsTests
     }
 
     [Fact]
-    public async Task LoginAsync_404_includes_nextcloud_hint()
+    public async Task LoginAsync_404_on_every_flavor_mentions_both()
     {
+        // With flavor auto-detect the service probes both gpodder.net and
+        // Nextcloud. If both 404, the message tells the user their server
+        // supports neither protocol.
         var (svc, client, dir) = MakeSetup();
         try
         {
@@ -65,7 +68,8 @@ public sealed class GpodderSyncLoginDiagnosticsTests
 
             ok.Should().BeFalse();
             msg.Should().Contain("404");
-            msg.Should().Contain("Nextcloud", because: "users of Nextcloud gPodder-Sync need a clear pointer");
+            msg.Should().Contain("Nextcloud", because: "user needs to know Nextcloud was also tried");
+            msg.Should().Contain("gpodder.net");
         }
         finally { svc.Dispose(); Directory.Delete(dir, recursive: true); }
     }

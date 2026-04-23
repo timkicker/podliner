@@ -43,9 +43,13 @@
 
 - **Keyboard-first & mouse-friendly.** Full mouse support (click, select, scroll) with fast TUI feedback.
 - **Vim keys & commands.** Familiar navigation (`j/k`, `gg/G`, `/` to search) plus concise colon-commands (`:add <url>`, `:queue add`, `:opml import`, `:opml export`).
-- **Sync progress and subscriptions** via the gPodder API.
+- **Chapters.** Podcast-2.0 `<podcast:chapters>` JSON and ID3 CHAP frames, with a dedicated Chapters tab and `,`/`.` keys to jump.
+- **Sync progress and subscriptions** via the gPodder API (gpodder.net + Nextcloud gPodder-Sync, auto-detected).
 - **MPRIS on Linux.** Media keys (play/pause/next/prev) and status from `playerctl`, KDE/GNOME widgets, etc.
 - **Offline-ready.** Download episodes, resume where you left off, manage a queue.
+- **Sleep timer.** `:sleep 30m` / `:sleep 1h30m` — stops playback when you nod off.
+- **Per-feed settings.** Speed override (`:feed speed 1.5`) and auto-download (`:feed auto-download on`) per subscription.
+- **Undo** for destructive actions like queue clear.
 - **Easy migration.** OPML import/export to move subscriptions between players.
 - **Cross-platform.** Single-file builds for Linux, macOS, and Windows.
 - **Engine choice.** Works with mpv, ffplay (FFmpeg), or VLC where available.
@@ -108,16 +112,26 @@ Most podcast players support **OPML** export/import.
 
 ## gPodder sync
 
-Podliner can sync your subscriptions and play history with any **gPodder API v2** compatible server. Tested with [gpodder.net](https://gpodder.net) (public, free) and self-hosted gpodder instances.
+Podliner syncs your subscriptions and play history with any gPodder-compatible server. Two protocol flavors are supported and auto-detected at login:
 
-> Note: Nextcloud's gPodder-Sync app uses a different API path and is not supported yet. See [#6](https://github.com/timkicker/podliner/issues/6).
+- **gpodder.net** (public) + self-hosted gpodder API v2 servers (mygpo, opodsync, podfetch…).
+- **Nextcloud** with the [gPodder-Sync](https://github.com/thrillfall/nextcloud-gpodder) app.
 
 **Quick start**
 ```
+# gpodder.net
 :sync login https://gpodder.net <username> <password>
+
+# Nextcloud (plain username/password works; see 2FA note below)
+:sync login https://cloud.example.com <username> <password>
+
 :sync          ← pull + push (full sync)
 :sync auto on  ← sync automatically on startup and exit
 ```
+
+**Nextcloud + 2FA / WebAuthn:** generic Basic-Auth with your normal password fails with HTTP 401 on 2FA-enabled accounts. Create a dedicated App-Password in Nextcloud (Settings → Security → Devices & sessions → *Create new app password*) and use that.
+
+The detected flavor is stored in `gpodder.json` so subsequent launches don't re-probe. `:sync status` shows which flavor is active.
 
 **Common commands**
 
@@ -127,7 +141,7 @@ Podliner can sync your subscriptions and play history with any **gPodder API v2*
 | `:sync` | Full sync (pull then push) |
 | `:sync push` | Upload subscription changes and play history |
 | `:sync pull` | Download subscription changes |
-| `:sync status` | Show sync state, device, pending actions |
+| `:sync status` | Show server, flavor, device, pending actions |
 | `:sync auto on\|off` | Toggle auto-sync |
 | `:sync logout` | Remove credentials |
 | `:sync help` | In-app guide |
@@ -141,23 +155,36 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 - Enter: play selected
 - Space: pause/resume
 - Left/Right: seek 10s backward/forward
-- [: slower  | ]: faster
+- `[` / `]`: slower / faster
+- `,` / `.`: previous / next chapter (if available)
+- `:sleep 30m` | `:sleep 1h30m` | `:sleep off`: sleep timer
 
 **Navigation & filters**
 - j / k: move down / up
 - gg / G: jump to top / bottom
 - / : search in current list
-- u : toggle “unplayed only”
+- u : toggle "unplayed only"
+- `i`: open Shownotes tab • `Esc`: back to episodes
+
+**Chapters**
+- Dedicated **Chapters** tab next to Episodes/Details; shows `Chapters (N)` with a count
+- `,` / `.`: jump to previous / next chapter globally
+- Enter on a chapter row: seek to that chapter
+- `:chapter list|next|prev|jump <n>`: explicit commands
+- Chapters come from Podcast-2.0 `<podcast:chapters>` URLs and ID3 CHAP frames (local file or HTTP Range)
 
 **Downloads & queue**
 - d : download or show status
 - :feed queue : switch to queue view
 - :queue add|rm|clear|shuffle : queue ops for selected episode
 - :play-next / :play-prev : next/previous in queue
+- `:undo` : revert the last destructive action (e.g. `:queue clear`)
 
 **Feeds**
-- :add <url> : add feed
-- :feed all|saved|downloaded|history|queue : switch view
+- `:add <url>` : add feed
+- `:feed all|saved|downloaded|history|queue` : switch view
+- `:feed speed <n|off>` : per-feed playback speed override (e.g. `:feed speed 1.5`)
+- `:feed auto-download on|off` : auto-queue new episodes from this feed for download
 
 **Misc**
 - t : toggle theme

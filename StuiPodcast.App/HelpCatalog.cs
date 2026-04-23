@@ -399,19 +399,32 @@ Sync subscriptions and play history with any gPodder-compatible server:
   • Any self-hosted gPodder API v2 compatible server
 
 Quick start
-  :sync login https://gpodder.net <user> <pass>   → authenticate
-  :sync                                            → push + pull (full sync)
-  :sync auto on                                    → sync on startup and exit
+  :sync login https://gpodder.net <user> <pass>                → gpodder.net
+  :sync login https://cloud.example.com <user> <app-password>  → Nextcloud
+  :sync                                                         → push + pull
+  :sync auto on                                                 → sync on startup and exit
 
 Subcommands
   :sync login <server> <user> <pass>   → log in and store credentials
   :sync logout                         → remove credentials and stop syncing
   :sync push                           → upload subscription changes and play history
   :sync pull                           → download subscription changes
-  :sync status                         → server, device, timestamps, pending actions
+  :sync status                         → server, flavor, device, timestamps, pending actions
   :sync device <id>                    → set device ID (default: podliner-<hostname>)
   :sync auto [on|off]                  → toggle auto-sync on startup and exit
   :sync help                           → show this guide
+
+Server flavor (auto-detected at login)
+  gpodder.net  — classic /api/2/ endpoints (gpodder.net, mygpo, opodsync, podfetch).
+  Nextcloud    — the thrillfall/nextcloud-gpodder app. URLs with /index.php are
+                 probed first; plain hostnames try gpodder.net first and fall back.
+  The winning flavor is stored in gpodder.json so subsequent launches skip the probe.
+
+Nextcloud + 2FA
+  If your Nextcloud account has 2FA or WebAuthn enabled, generic Basic-Auth with
+  your normal password will fail with HTTP 401. Create an App Password instead:
+    Settings → Security → Devices & sessions → 'Create new app password'
+  and use that as the password in :sync login.
 
 Password storage
   Credentials are stored in the OS keyring when available

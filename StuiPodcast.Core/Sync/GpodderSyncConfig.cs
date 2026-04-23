@@ -13,5 +13,11 @@ public sealed class GpodderSyncConfig
     public List<string>               LastKnownServerFeeds { get; set; } = new();
     public List<PendingGpodderAction> PendingActions       { get; set; } = new();
     public DateTimeOffset?            LastSyncAt           { get; set; }
+
+    // Wire-format flavor of the configured server. Persisted as a string
+    // ("gpoddernet" / "nextcloud") so later enum renames don't break
+    // existing configs; Auto means "not yet detected / upgrade from pre-flavor config".
+    public string? Flavor { get; set; }
+
     public bool IsConfigured => ServerUrl != null && Username != null && (Password != null || PasswordStoredInKeyring);
 }
