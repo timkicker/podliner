@@ -92,6 +92,12 @@ internal sealed class UiOsdOverlay
         _win.Y = Pos.At(1); // slightly below top edge
         _win.Visible = true;
 
+        // Guarantee the overlay draws on top of anything added to the root
+        // after Initialize() — e.g. command/search prompts parented to
+        // Application.Top. Terminal.Gui draws siblings in add-order, so
+        // without this a later-added view would occlude the OSD.
+        try { _win.SuperView?.BringSubviewToFront(_win); } catch { }
+
         // reset timeout
         if (_timeout != null)
         {
@@ -108,7 +114,14 @@ internal sealed class UiOsdOverlay
             return false;
         });
 
+        _win.SetNeedsDisplay();
+        _label.SetNeedsDisplay();
         _root?.SetNeedsDisplay();
+        // Force immediate paint. SetNeedsDisplay alone only marks; in long
+        // synchronous command paths the event loop may not tick before the
+        // user's focus-grabbing action runs next, so the OSD would never
+        // appear even for its full duration.
+        try { Application.Refresh(); } catch { }
     }
 
     private void HideOnUi()
