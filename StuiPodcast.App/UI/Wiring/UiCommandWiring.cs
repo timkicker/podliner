@@ -12,13 +12,13 @@ internal static class UiCommandWiring
     public static void Wire(
         AppServices ctx,
         Func<Task> save,
-        Func<string, Task> engineSwitch)
+        Func<AudioEngine, Task> engineSwitch)
     {
         WireCommand(ctx, save, engineSwitch);
         WireSearch(ctx);
     }
 
-    static void WireCommand(AppServices ctx, Func<Task> save, Func<string, Task> engineSwitch)
+    static void WireCommand(AppServices ctx, Func<Task> save, Func<AudioEngine, Task> engineSwitch)
     {
         var ui = ctx.Ui;
         var data = ctx.Data;
@@ -33,7 +33,6 @@ internal static class UiCommandWiring
         ui.Command += cmd =>
         {
             Log.Debug("cmd {Cmd}", cmd);
-            if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { /* guard no-op */ }
 
             if (CmdRouter.HandleQueue(cases, cmd))
             {

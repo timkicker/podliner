@@ -25,7 +25,7 @@ static class CmdApplier
         MemoryLogSink memLog,
         Func<Task> save,
         DownloadManager? downloader,
-        Func<string, Task> engineSwitch,
+        Func<AudioEngine, Task> engineSwitch,
         IEpisodeStore episodes,
         IFeedStore feedStore,
         IQueueService queue,

@@ -9,39 +9,33 @@ namespace StuiPodcast.Infra.Player;
 public static class AudioPlayerFactory
 {
     #region main factory
-    // engine selection with os-aware fallbacks
+    // Engine selection with OS-aware fallbacks. The user's preferred engine
+    // is honoured first; if that probe fails (e.g. mpv not on PATH) we fall
+    // back to an auto-chain: VLC first (best capabilities everywhere),
+    // MediaFoundation on Windows as a native option, mpv as an IPC fallback,
+    // and ffplay as a degraded last resort (coarse seek only).
     public static IAudioPlayer Create(AppData data, out string infoOsd)
     {
-        // normalize engine preference
-        var rawPref = (data.PreferredEngine ?? "auto").Trim();
-        var pref = rawPref.ToLowerInvariant() switch
-        {
-            "libvlc" => "vlc",
-            "mf" => "mediafoundation",
-            "" => "auto",
-            var s => s
-        };
+        var pref = data.PreferredEngine;
 
-        // detect os
         bool isWin = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
         bool isMac = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
         bool isLin = RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
-        Log.Information("[engine-detect] requested='{Raw}' normalized='{Norm}' os={{win:{Win}, mac:{Mac}, lin:{Lin}}}",
-            rawPref, pref, isWin, isMac, isLin);
+        Log.Information("[engine-detect] requested='{Pref}' os={{win:{Win}, mac:{Mac}, lin:{Lin}}}",
+            pref.ToWire(), isWin, isMac, isLin);
 
         IAudioPlayer? chosen = null;
         string why = "";
 
-        // honor explicit preference; fallback to auto if failed
-        if (pref is "vlc" && !TryVlc(out chosen!, out why)) pref = "auto";
-        if (pref is "mpv" && !TryMpv(out chosen!, out why)) pref = "auto";
-        if (pref is "ffplay" && !TryFfp(out chosen!, out why)) pref = "auto";
-        if (pref is "mediafoundation" or "mf")
+        // honour explicit preference; fall through to auto chain on failure
+        switch (pref)
         {
-            if (!TryMf(out chosen!, out why)) pref = "auto";
+            case AudioEngine.Vlc:             TryVlc(out chosen!, out why); break;
+            case AudioEngine.Mpv:             TryMpv(out chosen!, out why); break;
+            case AudioEngine.Ffplay:          TryFfp(out chosen!, out why); break;
+            case AudioEngine.MediaFoundation: TryMf(out chosen!,  out why); break;
         }
 
-        // try engines in os-preferred order until success
         if (chosen == null)
         {
             Log.Information("[engine-detect] auto chain start (os policy)");
@@ -50,44 +44,34 @@ public static class AudioPlayerFactory
                 why = $"vlc: {wVlc}";
                 Log.Information("[engine-detect] pick: vlc ({Why})", why);
             }
+            else if (isWin && TryMf(out chosen!, out var wMf))
+            {
+                why = $"mediafoundation: {wMf}";
+                Log.Information("[engine-detect] pick: mediafoundation ({Why})", why);
+            }
+            else if (TryMpv(out chosen!, out var wMpv))
+            {
+                why = $"mpv: {wMpv}";
+                Log.Information("[engine-detect] pick: mpv ({Why})", why);
+            }
+            else if (TryFfp(out chosen!, out var wFfp))
+            {
+                why = $"ffplay: {wFfp}";
+                Log.Information("[engine-detect] pick: ffplay ({Why})", why);
+            }
             else
             {
-                if (isWin)
-                {
-                    if (TryMf(out chosen!, out var wMf)) { why = $"mediafoundation: {wMf}"; Log.Information("[engine-detect] pick: mediafoundation ({Why})", why); }
-                    else if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; Log.Information("[engine-detect] pick: mpv ({Why})", why); }
-                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; Log.Information("[engine-detect] pick: ffplay ({Why})", why); }
-                }
-                else if (isMac)
-                {
-                    if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; Log.Information("[engine-detect] pick: mpv ({Why})", why); }
-                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; Log.Information("[engine-detect] pick: ffplay ({Why})", why); }
-                }
-                else if (isLin)
-                {
-                    if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; Log.Information("[engine-detect] pick: mpv ({Why})", why); }
-                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; Log.Information("[engine-detect] pick: ffplay ({Why})", why); }
-                }
-                else
-                {
-                    if (TryMpv(out chosen!, out var wMpv)) { why = $"mpv: {wMpv}"; Log.Information("[engine-detect] pick: mpv ({Why})", why); }
-                    else if (TryFfp(out chosen!, out var wFfp)) { why = $"ffplay: {wFfp}"; Log.Information("[engine-detect] pick: ffplay ({Why})", why); }
-                }
-
-                if (chosen == null)
-                {
-                    Log.Error("[engine-detect] no engine available (libVLC/mpv/ffplay) after auto chain");
-                    throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
-                }
+                Log.Error("[engine-detect] no engine available (libVLC/mpv/ffplay) after auto chain");
+                throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
             }
         }
 
-        // set osd text and update state
-        bool degraded = string.Equals(chosen.Name, "ffplay", StringComparison.OrdinalIgnoreCase);
+        var usedEngine = AudioEngineExt.FromWire(chosen.Name);
+        bool degraded = usedEngine == AudioEngine.Ffplay;
         infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : $"Engine: {chosen.Name}";
         if (data.NetProfile == NetworkProfile.BadNetwork) infoOsd += " • Net: bad";
 
-        data.LastEngineUsed = chosen.Name;
+        data.LastEngineUsed = usedEngine;
         Log.Information("[engine-detect] chosen='{Eng}' reason='{Why}' net='{Net}'", chosen.Name, why, data.NetProfile);
 
         return chosen;

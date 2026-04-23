@@ -13,9 +13,9 @@ internal sealed class EngineUseCase
     readonly IUiShell _ui;
     readonly AppData _data;
     readonly Func<Task> _persist;
-    readonly Func<string, Task>? _switchEngine;
+    readonly Func<AudioEngine, Task>? _switchEngine;
 
-    public EngineUseCase(IAudioPlayer audioPlayer, IUiShell ui, AppData data, Func<Task> persist, Func<string, Task>? switchEngine)
+    public EngineUseCase(IAudioPlayer audioPlayer, IUiShell ui, AppData data, Func<Task> persist, Func<AudioEngine, Task>? switchEngine)
     {
         _audioPlayer = audioPlayer;
         _ui = ui;
@@ -42,8 +42,8 @@ internal sealed class EngineUseCase
                 bool cSpeed = (caps & PlayerCapabilities.Speed) != 0;
                 bool cVolume = (caps & PlayerCapabilities.Volume) != 0;
 
-                var pref = string.IsNullOrWhiteSpace(_data?.PreferredEngine) ? "auto" : _data!.PreferredEngine!;
-                var last = _data?.LastEngineUsed ?? "";
+                var pref = _data.PreferredEngine.ToWire();
+                var last = _data.LastEngineUsed?.ToWire() ?? "";
 
                 _ui.ShowOsd($"engine: {activeName}  caps: seek={cSeek} pause={cPause} speed={cSpeed} vol={cVolume}  pref={pref} last={last}", 3000);
             }
@@ -55,7 +55,7 @@ internal sealed class EngineUseCase
         {
             var caps = _audioPlayer.Capabilities;
             var txt = $"engine active: {_audioPlayer.Name}\n" +
-                      $"preference: {_data.PreferredEngine ?? "auto"}\n" +
+                      $"preference: {_data.PreferredEngine.ToWire()}\n" +
                       "supports: " +
                       $"{((caps & PlayerCapabilities.Seek) != 0 ? "seek " : "")}" +
                       $"{((caps & PlayerCapabilities.Speed) != 0 ? "speed " : "")}" +
@@ -81,19 +81,24 @@ internal sealed class EngineUseCase
             return;
         }
 
-        if (arg is "auto" or "vlc" or "mpv" or "ffplay" or "mediafoundation" or "mf")
+        // Treat anything that parses to a non-Auto engine (or the literal
+        // "auto") as a valid preference; everything else falls through to
+        // the usage hint. FromWire handles the vendor aliases (libvlc, mf).
+        var parsed = AudioEngineExt.FromWire(arg);
+        bool recognised = parsed != AudioEngine.Auto || arg == "auto";
+        if (recognised)
         {
-            _data.PreferredEngine = arg switch { "mf" => "mediafoundation", _ => arg };
+            _data.PreferredEngine = parsed;
             _ = _persist();
 
             if (_switchEngine != null)
             {
-                _ui.ShowOsd($"engine: switching to {arg}…", 900);
-                _ = _switchEngine(arg); // fire-and-forget
+                _ui.ShowOsd($"engine: switching to {parsed.ToWire()}…", 900);
+                _ = _switchEngine(parsed); // fire-and-forget
             }
             else
             {
-                _ui.ShowOsd($"engine pref: {arg} (active: {_audioPlayer.Name})", 1500);
+                _ui.ShowOsd($"engine pref: {parsed.ToWire()} (active: {_audioPlayer.Name})", 1500);
             }
             return;
         }

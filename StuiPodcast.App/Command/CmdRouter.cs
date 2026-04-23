@@ -31,7 +31,7 @@ static class CmdRouter
         IFeedStore feedStore,
         IQueueService queue,
         CmdCases cases,
-        Func<string, Task>? switchEngine = null,
+        Func<AudioEngine, Task>? switchEngine = null,
         GpodderSyncService? syncService = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;

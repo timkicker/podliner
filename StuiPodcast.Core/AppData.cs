@@ -33,8 +33,12 @@ namespace StuiPodcast.Core
 
         public bool PlayerAtTop { get; set; } = false;
 
-        public string? PreferredEngine { get; set; } = "auto"; // auto, vlc, mpv, ffplay
-        public string? LastEngineUsed { get; set; }           // diagnostic, osd
+        // Audio engine preference (what the user asked for) and the engine
+        // actually chosen on the last start (for the :engine diag OSD).
+        // Persistence still round-trips through AppConfig.EnginePreference
+        // as a string via AppBridge, so library.json format is stable.
+        public AudioEngine PreferredEngine { get; set; } = AudioEngine.Auto;
+        public AudioEngine? LastEngineUsed { get; set; }
 
         // network profile; affects engine startup params when engines use it
         public NetworkProfile NetProfile { get; set; } = NetworkProfile.Standard;

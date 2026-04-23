@@ -70,11 +70,11 @@ sealed class EngineService
         catch { }
     }
 
-    public async Task SwitchAsync(SwappableAudioPlayer audioPlayer, string pref, Func<Task> onPersistTick)
+    public async Task SwitchAsync(SwappableAudioPlayer audioPlayer, AudioEngine pref, Func<Task> onPersistTick)
     {
         try
         {
-            _data.PreferredEngine = string.IsNullOrWhiteSpace(pref) ? "auto" : pref.Trim().ToLowerInvariant();
+            _data.PreferredEngine = pref;
             _ = onPersistTick();
 
             var next = AudioPlayerFactory.Create(_data, out var info);

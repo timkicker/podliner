@@ -191,7 +191,7 @@ static class UiComposer
     public static void WireUi(
         AppServices ctx,
         Func<Task> save,
-        Func<string, Task> engineSwitch,
+        Func<AudioEngine, Task> engineSwitch,
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {

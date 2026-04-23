@@ -39,7 +39,7 @@ internal sealed class CmdCases
         IAudioPlayer audioPlayer,
         PlaybackCoordinator playback,
         DownloadManager dlm,
-        Func<string, Task>? switchEngine,
+        Func<AudioEngine, Task>? switchEngine,
         GpodderSyncService? sync)
     {
         // View first — every list-mutating UseCase depends on it for the

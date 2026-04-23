@@ -114,7 +114,7 @@ internal class Program
 
         // apply cli engine preference before creating audio player
         if (!string.IsNullOrWhiteSpace(cli.Engine))
-            _data.PreferredEngine = cli.Engine!.Trim().ToLowerInvariant();
+            _data.PreferredEngine = AudioEngineExt.FromWire(cli.Engine);
 
         // audio player / engine service
         _engineSvc = new EngineService(_data, _memLog);
@@ -183,7 +183,7 @@ internal class Program
         // exists. Downstream UI wiring + NetworkMonitor hold references to
         // individual UseCases (e.g. ViewUseCase) so we construct it here
         // before NetworkMonitor starts.
-        Func<string, Task> engineSwitch = pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
+        Func<AudioEngine, Task> engineSwitch = pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
         var cases = new StuiPodcast.App.Command.UseCases.CmdCases(
             ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
             episodes: _episodes!, feedStore: _feedStore!, queue: _queue!,

@@ -10,7 +10,7 @@ static class AppBridge
 {
     public static void SyncFromFacadeToAppData(AppFacade app, AppData data)
     {
-        data.PreferredEngine = app.EnginePreference;
+        data.PreferredEngine = AudioEngineExt.FromWire(app.EnginePreference);
         data.Volume0_100     = app.Volume0100;
         data.Speed           = app.Speed;
         data.ThemePref       = app.Theme;
@@ -24,7 +24,7 @@ static class AppBridge
 
     public static void SyncFromAppDataToFacade(AppData data, AppFacade app)
     {
-        app.EnginePreference = data.PreferredEngine;
+        app.EnginePreference = data.PreferredEngine.ToWire();
         app.Volume0100       = data.Volume0_100;
         app.Speed            = data.Speed;
         app.Theme            = data.ThemePref ?? app.Theme;

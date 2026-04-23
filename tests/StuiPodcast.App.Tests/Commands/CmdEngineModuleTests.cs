@@ -13,7 +13,7 @@ public sealed class CmdEngineModuleTests
     private readonly AppData _data = new();
     private bool _saved;
 
-    private EngineUseCase Make(Func<string, Task>? switcher = null)
+    private EngineUseCase Make(Func<AudioEngine, Task>? switcher = null)
     {
         Task Save() { _saved = true; return Task.CompletedTask; }
         return new EngineUseCase(_player, _ui, _data, Save, switcher);
@@ -50,8 +50,8 @@ public sealed class CmdEngineModuleTests
     [Fact]
     public void Diag_prints_full_diagnostics()
     {
-        _data.PreferredEngine = "mpv";
-        _data.LastEngineUsed = "mpv";
+        _data.PreferredEngine = AudioEngine.Mpv;
+        _data.LastEngineUsed = AudioEngine.Mpv;
 
         Make().Exec(new[] { "diag" });
 
@@ -63,16 +63,16 @@ public sealed class CmdEngineModuleTests
     // ── :engine <preference> without switcher ───────────────────────────────
 
     [Theory]
-    [InlineData("auto")]
-    [InlineData("vlc")]
-    [InlineData("mpv")]
-    [InlineData("ffplay")]
-    [InlineData("mediafoundation")]
-    public void Valid_preferences_update_data_and_persist(string pref)
+    [InlineData("auto", AudioEngine.Auto)]
+    [InlineData("vlc", AudioEngine.Vlc)]
+    [InlineData("mpv", AudioEngine.Mpv)]
+    [InlineData("ffplay", AudioEngine.Ffplay)]
+    [InlineData("mediafoundation", AudioEngine.MediaFoundation)]
+    public void Valid_preferences_update_data_and_persist(string pref, AudioEngine expected)
     {
         Make().Exec(new[] { pref });
 
-        _data.PreferredEngine.Should().Be(pref);
+        _data.PreferredEngine.Should().Be(expected);
         _saved.Should().BeTrue();
     }
 
@@ -80,7 +80,7 @@ public sealed class CmdEngineModuleTests
     public void Mf_shorthand_expands_to_mediafoundation()
     {
         Make().Exec(new[] { "mf" });
-        _data.PreferredEngine.Should().Be("mediafoundation");
+        _data.PreferredEngine.Should().Be(AudioEngine.MediaFoundation);
     }
 
     [Fact]
@@ -93,12 +93,12 @@ public sealed class CmdEngineModuleTests
     [Fact]
     public void Valid_pref_with_switcher_calls_it_and_shows_switching_osd()
     {
-        string? switchedTo = null;
-        Func<string, Task> switcher = pref => { switchedTo = pref; return Task.CompletedTask; };
+        AudioEngine? switchedTo = null;
+        Func<AudioEngine, Task> switcher = pref => { switchedTo = pref; return Task.CompletedTask; };
 
         Make(switcher).Exec(new[] { "mpv" });
 
-        switchedTo.Should().Be("mpv");
+        switchedTo.Should().Be(AudioEngine.Mpv);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("switching"));
     }
 
@@ -107,15 +107,16 @@ public sealed class CmdEngineModuleTests
     [Fact]
     public void Invalid_preference_shows_usage()
     {
+        var before = _data.PreferredEngine;
         Make().Exec(new[] { "banana" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
-        _data.PreferredEngine.Should().NotBe("banana");
+        _data.PreferredEngine.Should().Be(before);
     }
 
     [Fact]
-    public void Empty_preferred_engine_shown_as_auto_in_diag()
+    public void Default_preferred_engine_shown_as_auto_in_diag()
     {
-        _data.PreferredEngine = null;
+        _data.PreferredEngine = AudioEngine.Auto;
         Make().Exec(new[] { "diag" });
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("pref=auto"));
