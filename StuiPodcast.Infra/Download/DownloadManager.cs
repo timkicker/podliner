@@ -27,11 +27,7 @@ namespace StuiPodcast.Infra.Download
     {
         #region fields
 
-        private readonly string _indexPath;
-        private readonly string _indexTmpPath;
-
-        private readonly object _persistGate = new();
-        private Timer? _persistTimer;
+        private readonly DownloadIndexStore _indexStore;
 
         private readonly AppData _data;
         private readonly LibraryStore _lib;
@@ -61,9 +57,7 @@ namespace StuiPodcast.Infra.Download
         {
             _data = data;
             _lib = lib ?? throw new ArgumentNullException(nameof(lib));
-
-            _indexPath    = Path.Combine(configDir, "downloads.json");
-            _indexTmpPath = _indexPath + ".tmp";
+            _indexStore = new DownloadIndexStore(configDir);
 
             var handler = new SocketsHttpHandler
             {
@@ -82,120 +76,34 @@ namespace StuiPodcast.Infra.Download
             };
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("podliner/1.0");
 
-            TryLoadIndex();
+            _indexStore.Load((id, st) =>
+            {
+                lock (_gate) { _data.DownloadMap[id] = st; }
+                try { StatusChanged?.Invoke(id, st); } catch { }
+            });
         }
 
         #endregion
 
         #region index persistence
 
-        void TryLoadIndex()
+        // Snapshot the download map for the index store under _gate.
+        // Filters to only the entries we'd want to restore on next start:
+        // Done state + local file still exists on disk.
+        private IReadOnlyList<DownloadIndex.Item> CollectDoneItems()
         {
-            try
-            {
-                if (!File.Exists(_indexPath)) return;
-
-                var json = File.ReadAllText(_indexPath);
-                var idx = JsonSerializer.Deserialize<DownloadIndex>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true,
-                    AllowTrailingCommas = true,
-                    ReadCommentHandling = JsonCommentHandling.Skip
-                }) ?? new DownloadIndex();
-
-                int restored = 0;
-                foreach (var it in idx.Items ?? [])
-                {
-                    if (it.EpisodeId == Guid.Empty) continue;
-                    if (string.IsNullOrWhiteSpace(it.LocalPath)) continue;
-                    if (!File.Exists(it.LocalPath)) continue;
-
-                    lock (_gate)
-                    {
-                        _data.DownloadMap[it.EpisodeId] = new DownloadStatus
-                        {
-                            State = DownloadState.Done,
-                            LocalPath = it.LocalPath,
-                            BytesReceived = 0,
-                            TotalBytes = null,
-                            UpdatedAt = DateTimeOffset.Now
-                        };
-                    }
-
-                    try { StatusChanged?.Invoke(it.EpisodeId, _data.DownloadMap[it.EpisodeId]); } catch { }
-                    restored++;
-                }
-
-                Log.Information("downloads: restored {Count} entries from index", restored);
-            }
-            catch (Exception ex)
-            {
-                Log.Debug(ex, "downloads: index load failed");
-            }
-        }
-
-        void SaveIndexDebounced()
-        {
-            lock (_persistGate)
-            {
-                _persistTimer ??= new Timer(_ =>
-                {
-                    try { TrySaveIndex(); }
-                    catch { }
-                }, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-
-                _persistTimer.Change(TimeSpan.FromMilliseconds(800), Timeout.InfiniteTimeSpan);
-            }
-        }
-
-        void TrySaveIndex()
-        {
-            List<DownloadIndex.Item> items;
             lock (_gate)
             {
-                items = _data.DownloadMap
+                return _data.DownloadMap
                     .Where(kv => kv.Value.State == DownloadState.Done &&
                                  !string.IsNullOrWhiteSpace(kv.Value.LocalPath) &&
                                  File.Exists(kv.Value.LocalPath))
                     .Select(kv => new DownloadIndex.Item { EpisodeId = kv.Key, LocalPath = kv.Value.LocalPath! })
                     .ToList();
             }
-
-            var idx = new DownloadIndex { SchemaVersion = 1, Items = items };
-
-            var opts = new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                DefaultIgnoreCondition = JsonIgnoreCondition.Never
-            };
-
-            Directory.CreateDirectory(Path.GetDirectoryName(_indexPath)!);
-            var tmp = _indexTmpPath;
-
-            using (var fs = File.Open(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-            {
-                using var writer = new Utf8JsonWriter(fs, new JsonWriterOptions { Indented = true });
-                JsonSerializer.Serialize(writer, idx, opts);
-                writer.Flush();
-                try { fs.Flush(true); } catch { }
-            }
-
-            if (File.Exists(_indexPath))
-            {
-                try { File.Replace(tmp, _indexPath, null, ignoreMetadataErrors: true); }
-                catch (PlatformNotSupportedException)
-                {
-                    try { File.Delete(_indexPath); } catch { }
-                    File.Move(tmp, _indexPath);
-                }
-            }
-            else
-            {
-                File.Move(tmp, _indexPath);
-            }
-
-            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
         }
+
+        private void SaveIndexDebounced() => _indexStore.SaveDebounced(CollectDoneItems);
 
         #endregion
 
@@ -243,7 +151,7 @@ namespace StuiPodcast.Infra.Download
                 _running.Clear();
             }
 
-            try { _persistTimer?.Dispose(); } catch { }
+            try { _indexStore.Dispose(); } catch { }
             _http.Dispose();
         }
 
@@ -466,14 +374,14 @@ namespace StuiPodcast.Infra.Download
                 {
                     throw;
                 }
-                catch (HttpRequestException ex) when (IsTransient(ex)) { last = ex; }
-                catch (IOException ex)        when (IsTransient(ex))   { last = ex; }
+                catch (HttpRequestException ex) when (DownloadRetryPolicy.IsTransient(ex)) { last = ex; }
+                catch (IOException ex)        when (DownloadRetryPolicy.IsTransient(ex))   { last = ex; }
                 catch (SocketException ex)                              { last = ex; }
                 catch (Exception ex)                                    { last = ex; break; }
 
                 if (attempt < MAX_RETRIES)
                 {
-                    var delay = await ComputeRetryDelayAsync(last, attempt).ConfigureAwait(false);
+                    var delay = DownloadRetryPolicy.ComputeRetryDelay(last, attempt, BACKOFF_BASE_MS);
                     Log.Debug("dl/retry wait {Delay}ms id={Id} cause={Cause}",
                         delay, ep.Id, last.GetType().Name);
                     await Task.Delay(delay, cancel).ConfigureAwait(false);
@@ -546,7 +454,7 @@ namespace StuiPodcast.Infra.Download
 
             if ((int)resp.StatusCode == 429)
             {
-                var retry = ParseRetryAfterMs(resp.Headers.RetryAfter);
+                var retry = DownloadRetryPolicy.ParseRetryAfterMs(resp.Headers.RetryAfter);
                 var ex = new HttpRequestException("429 too many requests");
                 if (retry > 0) ex.Data["RetryAfterMs"] = retry;
                 throw ex;
@@ -779,50 +687,6 @@ namespace StuiPodcast.Infra.Download
         #endregion
 
         #region helpers
-
-        private static bool IsTransient(Exception ex)
-        {
-            if (ex is HttpRequestException) return true;
-            if (ex is IOException ioex && ioex.InnerException is SocketException) return true;
-            if (ex is IOException iox && iox.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)) return true;
-            if (ex is SocketException) return true;
-            return false;
-        }
-
-        private static int BackoffWithJitter(int attempt0)
-        {
-            var pow = 1 << attempt0;
-            var baseMs = BACKOFF_BASE_MS * pow;
-            var jitter = Random.Shared.Next(0, 150);
-            return Math.Min(baseMs + jitter, 4000);
-        }
-
-        private async Task<int> ComputeRetryDelayAsync(Exception? last, int attempt)
-        {
-            if (last is HttpRequestException hre && hre.Data != null && hre.Data.Contains("RetryAfterMs"))
-            {
-                var v = hre.Data["RetryAfterMs"];
-                if (v is int ms && ms > 0) return ms;
-            }
-            return BackoffWithJitter(attempt);
-        }
-
-        private int ParseRetryAfterMs(RetryConditionHeaderValue? retryAfter)
-        {
-            if (retryAfter == null) return 0;
-            if (retryAfter.Delta.HasValue)
-            {
-                var ms = (int)Math.Clamp(retryAfter.Delta.Value.TotalMilliseconds, 0, 120_000);
-                return ms;
-            }
-            if (retryAfter.Date.HasValue)
-            {
-                var delta = retryAfter.Date.Value - DateTimeOffset.UtcNow;
-                var ms = (int)Math.Clamp(delta.TotalMilliseconds, 0, 120_000);
-                return ms;
-            }
-            return 0;
-        }
 
         private string ResolveDownloadRoot()
         {
