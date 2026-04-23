@@ -214,7 +214,7 @@ internal class Program
                     else    _ui?.ShowOsd($"engine: switch to {pref.ToWire()} failed — check logs", 2500);
                 });
             }
-            catch { }
+            catch (Exception ex) { Log.Debug(ex, "engine-switch osd dispatch failed"); }
         };
         var cases = new StuiPodcast.App.Command.UseCases.CmdCases(
             ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
@@ -287,7 +287,12 @@ internal class Program
                         });
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Fires 4×/sec. Log.Debug so running with --log-level info
+                // doesn't flood, but keep the stack when debug is on.
+                Log.Debug(ex, "ui-tick/persist-progress threw");
+            }
             return true;
         });
 

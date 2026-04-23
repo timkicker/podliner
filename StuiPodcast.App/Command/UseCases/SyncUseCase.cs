@@ -135,7 +135,11 @@ internal sealed class SyncUseCase
                     dlg.AddButton(ok);
                     Application.Run(dlg);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "sync help dialog failed");
+                    _ui.ShowOsd($"sync: help dialog failed ({ex.Message})", 2000);
+                }
                 break;
 
             case "":

@@ -221,7 +221,8 @@ sealed class GpodderSyncService : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "gpodder pull failed");
+            Log.Warning(ex, "gpodder pull failed server={Server} user={User}",
+                _store.Current.ServerUrl, _store.Current.Username);
             return (false, $"pull error: {ex.Message}");
         }
     }
@@ -278,7 +279,8 @@ sealed class GpodderSyncService : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Warning(ex, "gpodder push failed");
+            Log.Warning(ex, "gpodder push failed server={Server} user={User} pendingActions={Pending}",
+                _store.Current.ServerUrl, _store.Current.Username, _store.Current.PendingActions?.Count ?? 0);
             return (false, $"push error: {ex.Message}");
         }
     }

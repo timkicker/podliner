@@ -1,3 +1,4 @@
+using Serilog;
 using StuiPodcast.App.Debug;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
@@ -281,11 +282,11 @@ public sealed class PlaybackCoordinator : IDisposable
                         if (lenMs > 0 && ms > lenMs - 10000) return;
                         _audioPlayer.SeekTo(TimeSpan.FromMilliseconds(ms));
                     }
-                    catch { }
+                    catch (Exception ex) { Log.Debug(ex, "resume seek failed sid={Sid} ms={Ms}", sid, ms); }
                 });
             }
             catch (TaskCanceledException) { }
-            catch { }
+            catch (Exception ex) { Log.Debug(ex, "resume task threw sid={Sid} ms={Ms}", sid, ms); }
         });
     }
 
@@ -308,7 +309,7 @@ public sealed class PlaybackCoordinator : IDisposable
                 FireStatus(PlaybackStatus.SlowNetwork);
             }
             catch (TaskCanceledException) { }
-            catch { }
+            catch (Exception ex) { Log.Debug(ex, "stall-watch task threw sid={Sid}", sid); }
         });
     }
 

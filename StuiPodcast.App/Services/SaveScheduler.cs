@@ -78,7 +78,7 @@ sealed class SaveScheduler : IDisposable
             _syncFromDataToFacade();
             _app.SaveNow();
         }
-        catch (Exception ex) { Log.Debug(ex, "save failed"); }
+        catch (Exception ex) { Log.Warning(ex, "save failed — library/config not persisted"); }
         finally
         {
             lock (_gate)

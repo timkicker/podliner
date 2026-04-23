@@ -110,7 +110,11 @@ static class CmdApplier
                     Dispatch($":search {cli.Search}");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "cli/apply-post-ui failed engine={Engine} feed={Feed} opmlImport={OpmlIn} opmlExport={OpmlOut} search={Search}",
+                    cli.Engine, cli.Feed, cli.OpmlImport, cli.OpmlExport, cli.Search);
+            }
         });
     }
 }

@@ -74,7 +74,10 @@ internal sealed class DownloadIndexStore : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "downloads: index load failed");
+            // Corrupt/unreadable downloads.json means the user sees
+            // previously-finished downloads re-appear as "missing". Surface
+            // this so it's not silent.
+            Log.Warning(ex, "downloads: index load failed path={Path}", _indexPath);
             return 0;
         }
     }

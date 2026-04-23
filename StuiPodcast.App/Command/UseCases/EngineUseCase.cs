@@ -77,7 +77,11 @@ internal sealed class EngineUseCase
                 dlg.AddButton(ok);
                 Terminal.Gui.Application.Run(dlg);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning(ex, "engine help dialog failed");
+                _ui.ShowOsd($"engine: help dialog failed ({ex.Message})", 2000);
+            }
             return;
         }
 

@@ -357,6 +357,10 @@ namespace StuiPodcast.Infra.Player
 
         private void OnEncounteredError(object? _, EventArgs __)
         {
+            // VLC hit an unrecoverable error (codec, network, DRM, etc).
+            // Log at Warning so it's visible without --log-level debug; the
+            // underlying libVLC error is printed to stderr by libVLC itself.
+            Log.Warning("libvlc OnEncounteredError — playback aborted");
             lock (_sync)
             {
                 try
@@ -364,7 +368,7 @@ namespace StuiPodcast.Infra.Player
                     State.IsPlaying = false;
                     SafeFire();
                 }
-                catch (Exception ex) { Log.Debug(ex, "OnEncounteredError"); }
+                catch (Exception ex) { Log.Debug(ex, "OnEncounteredError state update"); }
             }
         }
 
