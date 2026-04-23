@@ -181,27 +181,51 @@ namespace StuiPodcast.Infra
             var items = (f.Items ?? Array.Empty<FeedItem>()).ToList();
 
             // Parse + decide + mutate the library on the UI thread so concurrent UI
-            // enumerations of the episode list don't trip over us.
+            // enumerations of the episode list don't trip over us. The heavy
+            // (Title, PubDate) dedup pass lives in LibraryStore.ValidateAndNormalize
+            // so it runs on every load, not just refresh.
             await _uiDispatch(() =>
             {
-                // Build a URL → Episode lookup once so dedup is O(1) per item
-                // instead of O(total episodes) per item inside the loop.
-                var byUrl = new Dictionary<string, Episode>(StringComparer.OrdinalIgnoreCase);
+                // Build three O(1) lookups from the existing feed episodes:
+                //   byGuid — primary dedup key; stable across CDN migrations
+                //            (podcast publishers rotate CDN URLs but keep
+                //             the RSS <guid> stable, so matching on guid
+                //             lets us transparently update the AudioUrl).
+                //   byUrl  — fallback for feeds that don't emit <guid> or
+                //            for episodes we ingested before we started
+                //            persisting RssGuid (older library.json files).
+                //   byTitlePub — last-resort fallback: same title + pubdate.
+                //            Catches brownfield CDN migrations on feeds we
+                //            ingested before guid persistence, where URL
+                //            and guid both differ from the stored entry.
+                var byGuid = new Dictionary<string, Episode>(StringComparer.Ordinal);
+                var byUrl  = new Dictionary<string, Episode>(StringComparer.OrdinalIgnoreCase);
+                var byTitlePub = new Dictionary<(string, DateTimeOffset?), Episode>();
                 foreach (var e in _app.Episodes)
-                    if (e.FeedId == persistedFeed.Id && !string.IsNullOrEmpty(e.AudioUrl))
-                        byUrl[e.AudioUrl] = e;
+                {
+                    if (e.FeedId != persistedFeed.Id) continue;
+                    if (!string.IsNullOrEmpty(e.RssGuid)) byGuid[e.RssGuid] = e;
+                    if (!string.IsNullOrEmpty(e.AudioUrl)) byUrl[e.AudioUrl] = e;
+                    if (!string.IsNullOrWhiteSpace(e.Title) && e.PubDate.HasValue)
+                        byTitlePub[(e.Title!.Trim(), e.PubDate)] = e;
+                }
 
                 foreach (var item in items)
                 {
                     var audioUrl = TryGetAudioUrl(item);
                     if (string.IsNullOrWhiteSpace(audioUrl)) { skippedNoAudio++; continue; }
 
-                    var pub = ParseDate(item);
+                    var guid  = TryGetGuid(item);
+                    var pub   = ParseDate(item);
                     var lenMs = TryGetDurationMs(item) ?? 0;
-                    var desc = HtmlToText(item.Content ?? item.Description ?? "");
+                    var desc  = HtmlToText(item.Content ?? item.Description ?? "");
                     var title = item.Title ?? "(untitled)";
 
-                    byUrl.TryGetValue(audioUrl, out var existing);
+                    Episode? existing = null;
+                    if (!string.IsNullOrEmpty(guid)) byGuid.TryGetValue(guid, out existing);
+                    if (existing == null) byUrl.TryGetValue(audioUrl, out existing);
+                    if (existing == null && !string.IsNullOrWhiteSpace(title) && pub.HasValue)
+                        byTitlePub.TryGetValue((title.Trim(), pub), out existing);
 
                     if (existing == null)
                     {
@@ -211,6 +235,7 @@ namespace StuiPodcast.Infra
                             FeedId = persistedFeed.Id,
                             Title = title,
                             AudioUrl = audioUrl,
+                            RssGuid = guid,
                             PubDate = pub,
                             DurationMs = lenMs,
                             DescriptionText = desc,
@@ -219,11 +244,29 @@ namespace StuiPodcast.Infra
                         };
 
                         var persistedEp = _app.AddOrUpdateEpisode(ep);
-                        byUrl[audioUrl] = persistedEp; // keep dedup state fresh for rest of loop
+                        if (!string.IsNullOrEmpty(guid)) byGuid[guid] = persistedEp;
+                        byUrl[audioUrl] = persistedEp;
                         added++;
                     }
                     else
                     {
+                        // Backfill guid once we see it — older library entries
+                        // were created before guid persistence landed.
+                        if (string.IsNullOrEmpty(existing.RssGuid) && !string.IsNullOrEmpty(guid))
+                            existing.RssGuid = guid;
+
+                        // CDN migration: feed now advertises a different URL
+                        // for the same guid. Update our copy so playback stops
+                        // hitting stale 404s. Also re-key the local lookup so
+                        // later items in this loop find the new URL too.
+                        if (!string.Equals(existing.AudioUrl, audioUrl, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!string.IsNullOrEmpty(existing.AudioUrl))
+                                byUrl.Remove(existing.AudioUrl);
+                            existing.AudioUrl = audioUrl;
+                            byUrl[audioUrl] = existing;
+                        }
+
                         if (string.IsNullOrWhiteSpace(existing.Title) && !string.IsNullOrWhiteSpace(title))
                             existing.Title = title;
                         if (!existing.PubDate.HasValue && pub.HasValue)
@@ -279,6 +322,28 @@ namespace StuiPodcast.Infra
                 Log.Warning(ex, "feed/http fail url={Url}", url);
                 return null;
             }
+        }
+
+        // RSS2 <guid> (or Atom <id>) — the stable episode identifier the
+        // publisher promises not to rotate. Primary dedup key in the
+        // refresh loop; lets us follow CDN migrations transparently.
+        // isPermaLink="false" is common (publishers opt out of URI
+        // semantics); we don't care either way — we just need the text.
+        static string? TryGetGuid(FeedItem item)
+        {
+            var root = item.SpecificItem?.Element as XElement;
+            if (root == null) return null;
+
+            foreach (var node in root.Elements())
+            {
+                var ln = node.Name.LocalName.ToLowerInvariant();
+                if (ln == "guid" || ln == "id")
+                {
+                    var txt = node.Value?.Trim();
+                    if (!string.IsNullOrWhiteSpace(txt)) return txt;
+                }
+            }
+            return null;
         }
 
         static string? TryGetAudioUrl(FeedItem item)

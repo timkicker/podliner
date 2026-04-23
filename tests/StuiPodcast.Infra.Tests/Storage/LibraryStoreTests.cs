@@ -297,4 +297,216 @@ public sealed class LibraryStoreTests : IDisposable
         _store.Load();
         File.Exists(_store.TmpPath).Should().BeFalse();
     }
+
+    // ── Title+PubDate dedup on load ──────────────────────────────────────────
+    // Brownfield heal: libraries that accumulated duplicates during a CDN
+    // migration (pre-guid vs post-guid refresh runs) must be collapsed on
+    // the next Load so the user sees a clean list without having to run
+    // :refresh.
+
+    [Fact]
+    public void Load_merges_title_pubdate_duplicates_preferring_user_state()
+    {
+        var pub = DateTimeOffset.Parse("2024-02-27T12:00:00Z");
+
+        // Hand-craft a library.json with two rows for the same episode:
+        // legacy (svmaudio URL, null guid, with user progress) + new
+        // (audiorella URL, guid set, no user state).
+        var legacyId = Guid.NewGuid();
+        var freshId  = Guid.NewGuid();
+        var feedId   = Guid.NewGuid();
+
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{feedId}}", "Title": "VdV", "Url": "https://example.com/feed" }
+          ],
+          "Episodes": [
+            {
+              "Id": "{{legacyId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A",
+              "AudioUrl": "https://legacy-cdn.example.com/a.mp3",
+              "RssGuid": null,
+              "PubDate": "2024-02-27T12:00:00+00:00",
+              "Saved": true,
+              "Progress": { "LastPosMs": 45000, "LastPlayedAt": "2024-03-01T10:00:00+00:00" }
+            },
+            {
+              "Id": "{{freshId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A",
+              "AudioUrl": "https://new-cdn.example.com/a.mp3",
+              "RssGuid": "stable-guid-aaa",
+              "PubDate": "2024-02-27T12:00:00+00:00",
+              "Saved": false,
+              "Progress": { "LastPosMs": 0 }
+            }
+          ],
+          "Queue": ["{{legacyId}}"],
+          "History": []
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+
+        lib.Episodes.Should().ContainSingle("duplicates must be collapsed on load");
+        var winner = lib.Episodes.Single();
+
+        // Winner keeps legacy Id (it was the one with user state, so
+        // queue/history references stay valid) ...
+        winner.Id.Should().Be(legacyId);
+        winner.Saved.Should().BeTrue();
+        winner.Progress.LastPosMs.Should().Be(45000);
+
+        // ... but adopts the freshest CDN URL + guid so playback works.
+        winner.AudioUrl.Should().Be("https://new-cdn.example.com/a.mp3");
+        winner.RssGuid.Should().Be("stable-guid-aaa");
+
+        // Queue entry is preserved (still points to winner.Id).
+        lib.Queue.Should().ContainSingle().Which.Should().Be(legacyId);
+    }
+
+    [Fact]
+    public void Load_rewrites_queue_refs_to_winner_when_loser_was_queued()
+    {
+        // Edge case: it's the *loser* (no user state) that's in the queue,
+        // e.g. user queued the audiorella entry then never played it, while
+        // the svmaudio entry holds older progress. The rewrite must keep
+        // the queue intact by redirecting loser.Id → winner.Id.
+        var pub = DateTimeOffset.Parse("2024-02-27T12:00:00Z");
+        var legacyId = Guid.NewGuid();
+        var freshId  = Guid.NewGuid();
+        var feedId   = Guid.NewGuid();
+
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{feedId}}", "Title": "F", "Url": "https://example.com/feed" }
+          ],
+          "Episodes": [
+            {
+              "Id": "{{legacyId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A",
+              "AudioUrl": "https://legacy-cdn.example.com/a.mp3",
+              "RssGuid": null,
+              "PubDate": "2024-02-27T12:00:00+00:00",
+              "Saved": true,
+              "Progress": { "LastPosMs": 30000 }
+            },
+            {
+              "Id": "{{freshId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A",
+              "AudioUrl": "https://new-cdn.example.com/a.mp3",
+              "RssGuid": "g1",
+              "PubDate": "2024-02-27T12:00:00+00:00",
+              "Progress": { "LastPosMs": 0 }
+            }
+          ],
+          "Queue": ["{{freshId}}"],
+          "History": [ { "EpisodeId": "{{freshId}}", "At": "2024-03-01T10:00:00+00:00" } ]
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+
+        lib.Episodes.Should().ContainSingle();
+        var winner = lib.Episodes.Single();
+        winner.Id.Should().Be(legacyId, "winner is picked for user state");
+
+        lib.Queue.Should().ContainSingle().Which.Should().Be(legacyId,
+            "queue entry that pointed to the loser must be redirected to the winner");
+        lib.History.Should().ContainSingle().Which.EpisodeId.Should().Be(legacyId,
+            "history entry must be redirected too");
+    }
+
+    [Fact]
+    public void Load_merges_duplicates_with_trailing_whitespace_in_title()
+    {
+        // Real-world brownfield: the RSS parser that ingested the legacy
+        // entries preserved a trailing space in the title, the post-guid
+        // refresh trimmed it. Naive Title equality would keep them apart,
+        // Title.Trim() collapses them.
+        var feedId = Guid.NewGuid();
+        var legacyId = Guid.NewGuid();
+        var freshId  = Guid.NewGuid();
+
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{feedId}}", "Title": "F", "Url": "https://example.com/feed" }
+          ],
+          "Episodes": [
+            {
+              "Id": "{{legacyId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A ",
+              "AudioUrl": "https://legacy-cdn.example.com/a.mp3",
+              "RssGuid": null,
+              "PubDate": "2024-01-01T00:00:00+00:00",
+              "Progress": { "LastPosMs": 0 }
+            },
+            {
+              "Id": "{{freshId}}",
+              "FeedId": "{{feedId}}",
+              "Title": "Episode A",
+              "AudioUrl": "https://new-cdn.example.com/a.mp3",
+              "RssGuid": "g1",
+              "PubDate": "2024-01-01T00:00:00+00:00",
+              "Progress": { "LastPosMs": 0 }
+            }
+          ],
+          "Queue": [],
+          "History": []
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+
+        lib.Episodes.Should().ContainSingle("trailing whitespace must not defeat dedup");
+        lib.Episodes.Single().AudioUrl.Should().Be("https://new-cdn.example.com/a.mp3");
+        lib.Episodes.Single().RssGuid.Should().Be("g1");
+    }
+
+    [Fact]
+    public void Load_keeps_distinct_episodes_with_same_title_but_different_pubdate()
+    {
+        // Regression guard: re-uploads and recap episodes legitimately
+        // share a title. They must survive as separate rows as long as
+        // PubDate differs.
+        var feedId = Guid.NewGuid();
+        var id1 = Guid.NewGuid();
+        var id2 = Guid.NewGuid();
+
+        var json = $$"""
+        {
+          "SchemaVersion": 1,
+          "Feeds": [
+            { "Id": "{{feedId}}", "Title": "F", "Url": "https://example.com/feed" }
+          ],
+          "Episodes": [
+            { "Id": "{{id1}}", "FeedId": "{{feedId}}", "Title": "Weekly Recap", "AudioUrl": "https://a.mp3", "PubDate": "2024-01-07T00:00:00+00:00", "Progress": { "LastPosMs": 0 } },
+            { "Id": "{{id2}}", "FeedId": "{{feedId}}", "Title": "Weekly Recap", "AudioUrl": "https://b.mp3", "PubDate": "2024-01-14T00:00:00+00:00", "Progress": { "LastPosMs": 0 } }
+          ],
+          "Queue": [],
+          "History": []
+        }
+        """;
+        Directory.CreateDirectory(Path.Combine(_dir, "library"));
+        File.WriteAllText(Path.Combine(_dir, "library", "library.json"), json);
+
+        var lib = _store.Load();
+        lib.Episodes.Should().HaveCount(2);
+    }
 }

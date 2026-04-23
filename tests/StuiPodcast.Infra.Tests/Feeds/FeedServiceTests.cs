@@ -170,6 +170,138 @@ public sealed class FeedServiceTests : IDisposable
             .Saved.Should().BeTrue("refresh must not reset the Saved flag");
     }
 
+    // ── guid-based dedup + CDN migration ─────────────────────────────────────
+
+    private const string RssWithGuids = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Guid Feed</title>
+            <item>
+              <title>Episode A</title>
+              <guid isPermaLink="false">stable-guid-aaa</guid>
+              <enclosure url="https://old-cdn.example.com/a.mp3" type="audio/mpeg"/>
+            </item>
+          </channel>
+        </rss>
+        """;
+
+    private const string RssWithGuidsMigrated = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Guid Feed</title>
+            <item>
+              <title>Episode A</title>
+              <guid isPermaLink="false">stable-guid-aaa</guid>
+              <enclosure url="https://new-cdn.example.com/a.mp3" type="audio/mpeg"/>
+            </item>
+          </channel>
+        </rss>
+        """;
+
+    [Fact]
+    public async Task RefreshFeedAsync_persists_rss_guid_on_new_episodes()
+    {
+        _handler.EnqueueXml(RssWithGuids);
+        _handler.EnqueueXml(RssWithGuids);
+
+        await _feeds.AddFeedAsync("https://example.com/guidfeed");
+
+        var ep = _app.Episodes.Single();
+        ep.RssGuid.Should().Be("stable-guid-aaa");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_follows_cdn_migration_via_guid()
+    {
+        // Initial fetch: old CDN URL.
+        _handler.EnqueueXml(RssWithGuids);
+        _handler.EnqueueXml(RssWithGuids);
+        var feed = await _feeds.AddFeedAsync("https://example.com/guidfeed");
+
+        _app.Episodes.Should().ContainSingle();
+        var originalId = _app.Episodes.Single().Id;
+        _app.Episodes.Single().AudioUrl.Should().Be("https://old-cdn.example.com/a.mp3");
+
+        // Second refresh: publisher migrated CDN but kept the same guid.
+        _handler.EnqueueXml(RssWithGuidsMigrated);
+        await _feeds.RefreshFeedAsync(feed);
+
+        _app.Episodes.Should().HaveCount(1, "guid match must update the URL in place, not insert a new episode");
+        var updated = _app.Episodes.Single();
+        updated.Id.Should().Be(originalId, "episode identity is preserved across CDN migrations");
+        updated.AudioUrl.Should().Be("https://new-cdn.example.com/a.mp3", "AudioUrl must follow the feed");
+        updated.RssGuid.Should().Be("stable-guid-aaa");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_matches_by_title_and_pubdate_when_guid_and_url_miss()
+    {
+        // Brownfield case: library has an episode ingested before guid
+        // persistence AND before the CDN migration (old URL, null guid).
+        // The feed now advertises both a new URL and a new guid. Only
+        // Title + PubDate still match.
+        var feed = _app.AddOrUpdateFeed(new Feed { Title = "F", Url = "https://example.com/guidfeed" });
+        _app.AddOrUpdateEpisode(new Episode
+        {
+            Id = Guid.NewGuid(),
+            FeedId = feed.Id,
+            Title = "Episode A",
+            AudioUrl = "https://legacy-cdn.example.com/a.mp3",
+            RssGuid = null,
+            PubDate = DateTimeOffset.Parse("2024-01-15T10:00:00Z"),
+            Progress = new Core.EpisodeProgress()
+        });
+
+        var rss = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <title>F</title>
+                <item>
+                  <title>Episode A</title>
+                  <pubDate>Mon, 15 Jan 2024 10:00:00 +0000</pubDate>
+                  <guid isPermaLink="false">stable-guid-aaa</guid>
+                  <enclosure url="https://new-cdn.example.com/a.mp3" type="audio/mpeg"/>
+                </item>
+              </channel>
+            </rss>
+            """;
+        _handler.EnqueueXml(rss);
+        await _feeds.RefreshFeedAsync(feed);
+
+        _app.Episodes.Should().HaveCount(1,
+            "title+pubdate fallback must update the legacy entry in place, not insert a duplicate");
+        var updated = _app.Episodes.Single();
+        updated.AudioUrl.Should().Be("https://new-cdn.example.com/a.mp3");
+        updated.RssGuid.Should().Be("stable-guid-aaa");
+    }
+
+    [Fact]
+    public async Task RefreshFeedAsync_backfills_rss_guid_for_legacy_episodes()
+    {
+        // Seed an episode that looks like it was created before guid
+        // persistence landed: matching URL, null RssGuid.
+        var feed = _app.AddOrUpdateFeed(new Feed { Title = "F", Url = "https://example.com/guidfeed" });
+        _app.AddOrUpdateEpisode(new Episode
+        {
+            Id = Guid.NewGuid(),
+            FeedId = feed.Id,
+            Title = "Episode A",
+            AudioUrl = "https://old-cdn.example.com/a.mp3",
+            RssGuid = null,
+            Progress = new Core.EpisodeProgress()
+        });
+
+        _handler.EnqueueXml(RssWithGuids);
+        await _feeds.RefreshFeedAsync(feed);
+
+        _app.Episodes.Should().HaveCount(1);
+        _app.Episodes.Single().RssGuid.Should().Be("stable-guid-aaa",
+            "legacy episodes (null guid) matched via AudioUrl must get the guid backfilled");
+    }
+
     [Fact]
     public async Task RefreshFeedAsync_skips_items_without_audio()
     {

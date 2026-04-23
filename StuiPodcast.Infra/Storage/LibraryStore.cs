@@ -77,6 +77,23 @@ namespace StuiPodcast.Infra.Storage
             lib.Episodes.Clear();
             lib.Episodes.AddRange(episodeMap.Values);
 
+            // Brownfield heal: merge duplicate episodes in the same feed that
+            // share (Title, PubDate). Arises when a publisher migrates CDN
+            // hosts — the feed refresh that shipped guid persistence
+            // inserted fresh rows with guid+new-URL instead of matching the
+            // legacy guid-less rows. Running here (on every load) means
+            // upgraded users see a clean library on first start even if
+            // they never run :refresh. loser→winner id rewrite keeps
+            // queue/history references valid.
+            var redirect = CollapseTitlePubDateDuplicates(lib);
+            if (redirect.Count > 0)
+            {
+                lib.Queue   = lib.Queue.Select(id => redirect.GetValueOrDefault(id, id)).Distinct().ToList();
+                lib.History = lib.History
+                    .Select(h => { h.EpisodeId = redirect.GetValueOrDefault(h.EpisodeId, h.EpisodeId); return h; })
+                    .ToList();
+            }
+
             var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
 
             lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
@@ -91,6 +108,99 @@ namespace StuiPodcast.Infra.Storage
                 .ToList();
 
             RebuildIndicesFrom(lib);
+        }
+
+        // Returns a map loser-id → winner-id for every removed duplicate so
+        // the caller can rewrite queue/history references. Winner selection
+        // preserves whichever row the user has interacted with (progress,
+        // saved, manually played) — that Id is most likely already in the
+        // queue/history. URL + RssGuid on the winner are replaced with the
+        // freshest duplicate's values so the kept row doesn't stay stuck
+        // on a stale CDN host.
+        static Dictionary<Guid, Guid> CollapseTitlePubDateDuplicates(Library lib)
+        {
+            var redirect = new Dictionary<Guid, Guid>();
+
+            // Normalize the title before grouping: some RSS parsers preserve
+            // trailing whitespace (observed in the wild with pre-guid svmaudio
+            // entries vs post-guid audiorella entries for the same episode),
+            // which would otherwise keep the duplicates apart.
+            var groups = lib.Episodes
+                .Where(e => !string.IsNullOrWhiteSpace(e.Title) && e.PubDate.HasValue)
+                .GroupBy(e => (e.FeedId, Title: e.Title!.Trim(), e.PubDate))
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            if (groups.Count == 0) return redirect;
+
+            var toRemove = new HashSet<Guid>();
+            foreach (var group in groups)
+            {
+                var dupes = group.ToList();
+                var winner = PickMergeWinner(dupes);
+                var losers = dupes.Where(e => e.Id != winner.Id).ToList();
+
+                foreach (var loser in losers)
+                {
+                    if (loser.Saved) winner.Saved = true;
+                    if (loser.ManuallyMarkedPlayed) winner.ManuallyMarkedPlayed = true;
+                    if (loser.Progress != null)
+                    {
+                        winner.Progress ??= new EpisodeProgress();
+                        if (loser.Progress.LastPosMs > winner.Progress.LastPosMs)
+                            winner.Progress.LastPosMs = loser.Progress.LastPosMs;
+                        if (loser.Progress.LastPlayedAt is { } lp &&
+                            (winner.Progress.LastPlayedAt is not { } wp || lp > wp))
+                            winner.Progress.LastPlayedAt = lp;
+                    }
+                }
+
+                // Adopt freshest URL+Guid: the duplicate with a non-null
+                // RssGuid is by construction the one ingested by the
+                // post-guid refresh, so its AudioUrl is current. Prefer it
+                // over the winner's stale values even if the winner was
+                // chosen for user state.
+                var freshest = dupes.FirstOrDefault(e => !string.IsNullOrEmpty(e.RssGuid));
+                if (freshest != null && freshest.Id != winner.Id)
+                {
+                    if (!string.IsNullOrEmpty(freshest.AudioUrl)) winner.AudioUrl = freshest.AudioUrl;
+                    if (!string.IsNullOrEmpty(freshest.RssGuid))  winner.RssGuid  = freshest.RssGuid;
+                }
+
+                foreach (var loser in losers)
+                {
+                    redirect[loser.Id] = winner.Id;
+                    toRemove.Add(loser.Id);
+                }
+            }
+
+            if (toRemove.Count > 0)
+                lib.Episodes.RemoveAll(e => toRemove.Contains(e.Id));
+
+            return redirect;
+        }
+
+        static Episode PickMergeWinner(List<Episode> dupes)
+        {
+            static bool HasState(Episode e)
+                => e.Saved
+                   || e.ManuallyMarkedPlayed
+                   || e.Progress?.LastPlayedAt is not null
+                   || (e.Progress?.LastPosMs ?? 0) > 0;
+
+            var withState = dupes.Where(HasState).ToList();
+            if (withState.Count > 0)
+            {
+                return withState
+                    .OrderByDescending(e => e.Progress?.LastPlayedAt ?? DateTimeOffset.MinValue)
+                    .ThenBy(e => e.Id)
+                    .First();
+            }
+
+            var withGuid = dupes.Where(e => !string.IsNullOrEmpty(e.RssGuid)).ToList();
+            if (withGuid.Count > 0) return withGuid.OrderBy(e => e.Id).First();
+
+            return dupes.OrderBy(e => e.Id).First();
         }
 
         void RebuildIndicesFrom(Library lib)

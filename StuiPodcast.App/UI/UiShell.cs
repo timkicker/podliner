@@ -267,7 +267,29 @@ public sealed class UiShell : IUiShell
             });
         }
 
-        BindKeys(
+        var keyBindings = new UiShellKeyBindings.Bindings(
+            EpisodesPane: _episodesPane,
+            Player: _player,
+            GetSelectedFeedId: GetSelectedFeedId,
+            IsFeedsPaneActive: () => _activePane == Pane.Feeds,
+            MoveList: MoveList,
+            FocusFeeds: () => FocusPane(Pane.Feeds),
+            FocusEpisodes: () => FocusPane(Pane.Episodes),
+            JumpToUnplayed: JumpToUnplayed,
+            InvokeCommand: cmd => Command?.Invoke(cmd),
+            TogglePlayed: () => TogglePlayedRequested?.Invoke(),
+            ShowLogs: ShowLogsOverlay,
+            Quit: () => QuitRequested?.Invoke(),
+            ToggleTheme: () => ToggleThemeRequested?.Invoke(),
+            ShowCommandBox: ShowCommandBox,
+            ShowSearchBox: ShowSearchBox,
+            PlaySelected: () => PlaySelected?.Invoke(),
+            GetLastSearch: () => _lastSearch,
+            ApplySearch: q => SearchApplied?.Invoke(q),
+            NotifySelectedFeedChanged: () => SelectedFeedChanged?.Invoke()
+        );
+        UiShellKeyBindings.Wire(
+            keyBindings,
             Application.Top,
             _menu,
             _mainWin,
@@ -291,25 +313,6 @@ public sealed class UiShell : IUiShell
             FocusPane(Pane.Episodes);
             return false;
         });
-    }
-    #endregion
-
-    #region details theme
-    private ColorScheme BuildDetailsScheme()
-    {
-        var p = UserPal;
-
-        var normal = Attr(C(p.Fg), C(p.Bg2));
-        var hot    = Attr(C(p.Orange), C(p.Bg2));
-
-        return new ColorScheme
-        {
-            Normal    = normal,
-            Focus     = normal,
-            HotNormal = hot,
-            HotFocus  = hot,
-            Disabled  = Attr(C(p.Comment), C(p.Bg2))
-        };
     }
     #endregion
 
@@ -496,135 +499,6 @@ public sealed class UiShell : IUiShell
     #endregion
 
     #region theme/layout
-    // user palette
-    private record Palette(string Bg, string Bg2, string Dim, string Fg, string Comment,
-        string Orange, string Green, string Pink, string Red, string Cyan,
-        string Purple, string Blue, string Yellow);
-
-    private static readonly Palette UserPal = new(
-        Bg:     "#2a2a2a",
-        Bg2:    "#333333",
-        Dim:    "#222222",
-        Fg:     "#bec1bf",
-        Comment:"#8a8a8a",
-        Orange: "#df970d",
-        Green:  "#6aaa64",
-        Pink:   "#b16286",
-        Red:    "#a14040",
-        Cyan:   "#64aaaa",
-        Purple: "#9762b1",
-        Blue:   "#6289b1",
-        Yellow: "#d5a442"
-    );
-
-    private static Color C(string hex) => ApproxAnsi(hex);
-
-    private static Color ApproxAnsi(string hex)
-    {
-        hex = (hex ?? "#000000").Trim().TrimStart('#');
-        if (hex.Length < 6) hex = hex.PadRight(6, '0');
-        int r = Convert.ToInt32(hex.Substring(0, 2), 16);
-        int g = Convert.ToInt32(hex.Substring(2, 2), 16);
-        int b = Convert.ToInt32(hex.Substring(4, 2), 16);
-
-        var candidates = new (Color color, int r, int g, int b)[]
-        {
-            (Color.Black,     0,   0,   0),
-            (Color.DarkGray,  85,  85,  85),
-            (Color.Gray,      136, 136, 136),
-            (Color.White,     255, 255, 255),
-            (Color.Red,       205, 0,   0),
-            (Color.Green,     0,   205, 0),
-            (Color.Blue,      0,   0,   205),
-            (Color.Cyan,      0,   205, 205),
-            (Color.Magenta,   205, 0,   205),
-            (Color.Brown,     205, 205, 0),
-        };
-
-        int Dist2((int r, int g, int b) a, (int r, int g, int b) bb)
-        {
-            var dr = a.r - bb.r; var dg = a.g - bb.g; var db = a.b - bb.b;
-            return dr * dr + dg * dg + db * db;
-        }
-
-        var want = (r, g, b);
-        var best = candidates[0];
-        var bestD = int.MaxValue;
-        foreach (var c in candidates)
-        {
-            var d = Dist2(want, (c.r, c.g, c.b));
-            if (d < bestD) { best = c; bestD = d; }
-        }
-        return best.color;
-    }
-
-    private static Attribute Attr(Color fg, Color bg) => new(fg, bg);
-
-    private sealed class UserSchemes
-    {
-        public ColorScheme Main  = new();
-        public ColorScheme Menu  = new();
-        public ColorScheme List  = new();
-        public ColorScheme Input = new();
-        public ColorScheme Dialog= new();
-        public ColorScheme Status= new();
-    }
-
-    private static UserSchemes BuildUserSchemes()
-    {
-        var p = UserPal;
-
-        var main = new ColorScheme {
-            Normal    = Attr(C(p.Fg),     C(p.Bg)),
-            Focus     = Attr(Color.Black,  C(p.Orange)),
-            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
-            HotFocus  = Attr(Color.Black,  C(p.Orange)),
-            Disabled  = Attr(C(p.Comment), C(p.Bg))
-        };
-
-        var menu = new ColorScheme {
-            Normal    = Attr(C(p.Fg),     C(p.Bg)),
-            Focus     = Attr(Color.Black,  C(p.Orange)),
-            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
-            HotFocus  = Attr(Color.Black,  C(p.Orange)),
-            Disabled  = Attr(C(p.Comment), C(p.Bg))
-        };
-
-        var list = new ColorScheme {
-            Normal    = Attr(C(p.Fg),     C(p.Bg)),
-            Focus     = Attr(Color.Black,  C(p.Pink)),
-            HotNormal = Attr(C(p.Orange),  C(p.Bg)),
-            HotFocus  = Attr(Color.Black,  C(p.Pink)),
-            Disabled  = Attr(C(p.Comment), C(p.Bg))
-        };
-
-        var input = new ColorScheme {
-            Normal    = Attr(C(p.Fg),     C(p.Dim)),
-            Focus     = Attr(Color.Black,  C(p.Green)),
-            HotNormal = Attr(C(p.Orange),  C(p.Dim)),
-            HotFocus  = Attr(Color.Black,  C(p.Green)),
-            Disabled  = Attr(C(p.Comment), C(p.Dim))
-        };
-
-        var dialog = new ColorScheme {
-            Normal    = Attr(C(p.Fg),     C(p.Bg2)),
-            Focus     = Attr(Color.Black,  C(p.Green)),
-            HotNormal = Attr(C(p.Orange),  C(p.Bg2)),
-            HotFocus  = Attr(Color.Black,  C(p.Green)),
-            Disabled  = Attr(C(p.Comment), C(p.Bg2))
-        };
-
-        var status = new ColorScheme {
-            Normal    = Attr(C(p.Fg),      C(p.Bg2)),
-            Focus     = Attr(Color.Black,   C(p.Orange)),
-            HotNormal = Attr(C(p.Yellow),   C(p.Bg2)),
-            HotFocus  = Attr(Color.Black,   C(p.Orange)),
-            Disabled  = Attr(C(p.Comment),  C(p.Bg2))
-        };
-
-        return new UserSchemes { Main = main, Menu = menu, List = list, Input = input, Dialog = dialog, Status = status };
-    }
-
     public void SetPlayerPlacement(bool atTop)
     {
         UI(() =>
@@ -680,7 +554,7 @@ public sealed class UiShell : IUiShell
         {
             if (_theme == ThemeMode.User)
             {
-                var u = BuildUserSchemes();
+                var u = UiShellColorSchemes.BuildUserSchemes();
 
                 if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
                 if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
@@ -712,7 +586,7 @@ public sealed class UiShell : IUiShell
                 if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
 
                 if (_episodesPane?.Details != null)
-                    _episodesPane.Details.ColorScheme = BuildDetailsScheme();
+                    _episodesPane.Details.ColorScheme = UiShellColorSchemes.BuildDetailsScheme();
 
                 _osd.ApplyTheme();
                 RequestRepaint();
@@ -792,34 +666,13 @@ public sealed class UiShell : IUiShell
         UI(() =>
         {
             _commandBox?.SuperView?.Remove(_commandBox);
-            _commandBox = new TextField(seed)
+            _commandBox = UiShellPrompts.Show(seed, cmd =>
             {
-                X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, ColorScheme = Colors.Base
-            };
-
-            _commandBox.KeyPress += (View.KeyEventEventArgs k) =>
-            {
-                if (k.KeyEvent.Key == Key.Enter)
-                {
-                    var cmd = _commandBox!.Text.ToString() ?? "";
-                    if (cmd.Trim().StartsWith(":refresh", StringComparison.OrdinalIgnoreCase))
-                        IndicateRefresh(false);
-
-                    _commandBox!.SuperView?.Remove(_commandBox);
-                    _commandBox = null;
-                    Command?.Invoke(cmd);
-                    k.Handled = true;
-                }
-                else if (k.KeyEvent.Key == Key.Esc)
-                {
-                    _commandBox!.SuperView?.Remove(_commandBox);
-                    _commandBox = null;
-                    k.Handled = true;
-                }
-            };
-            Application.Top.Add(_commandBox);
-            _commandBox.SetFocus();
-            _commandBox.CursorPosition = _commandBox.Text.ToString()!.Length;
+                _commandBox = null;
+                if (cmd.Trim().StartsWith(":refresh", StringComparison.OrdinalIgnoreCase))
+                    IndicateRefresh(false);
+                Command?.Invoke(cmd);
+            });
         });
     }
 
@@ -828,178 +681,18 @@ public sealed class UiShell : IUiShell
         UI(() =>
         {
             _searchBox?.SuperView?.Remove(_searchBox);
-            _searchBox = new TextField(seed)
+            _searchBox = UiShellPrompts.Show(seed, text =>
             {
-                X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, ColorScheme = Colors.Base
-            };
-
-            _searchBox.KeyPress += (View.KeyEventEventArgs k) =>
-            {
-                if (k.KeyEvent.Key == Key.Enter)
-                {
-                    var q = _searchBox!.Text.ToString()!.TrimStart('/');
-                    _lastSearch = q;
-                    _searchBox!.SuperView?.Remove(_searchBox);
-                    _searchBox = null;
-
-                    SearchApplied?.Invoke(q);
-                    SelectedFeedChanged?.Invoke();
-                    k.Handled = true;
-                }
-                else if (k.KeyEvent.Key == Key.Esc)
-                {
-                    _searchBox!.SuperView?.Remove(_searchBox);
-                    _searchBox = null;
-                    k.Handled = true;
-                }
-            };
-            Application.Top.Add(_searchBox);
-            _searchBox.SetFocus();
-            _searchBox.CursorPosition = _searchBox.Text.ToString()!.Length;
+                _searchBox = null;
+                var q = text.TrimStart('/');
+                _lastSearch = q;
+                SearchApplied?.Invoke(q);
+                SelectedFeedChanged?.Invoke();
+            });
         });
     }
     #endregion
 
-    #region keys
-    private static bool Has(Key k, Key mask) => (k & mask) == mask;
-    private static Key BaseKey(Key k) => k & ~(Key.ShiftMask | Key.CtrlMask | Key.AltMask);
-
-    private void BindKeys(params View?[] views)
-    {
-        foreach (var v in views)
-        {
-            if (v is null) continue;
-            v.KeyPress += e => { if (HandleKeys(e)) e.Handled = true; };
-        }
-    }
-
-    private bool HandleKeys(View.KeyEventEventArgs e)
-    {
-        var key = e.KeyEvent.Key;
-        var kv  = e.KeyEvent.KeyValue;
-
-        if ((key & Key.CtrlMask) != 0)
-        {
-            var baseKey = key & ~Key.CtrlMask;
-            if (baseKey == Key.C || baseKey == Key.V || baseKey == Key.X) { e.Handled = true; return true; }
-        }
-
-        bool inQueue = GetSelectedFeedId() is Guid fid && fid == VirtualFeedsCatalog.Queue;
-        if (kv == 'J')
-        {
-            if (inQueue) { Command?.Invoke(":queue move down"); return true; }
-            JumpToUnplayed(+1); return true;
-        }
-        if (kv == 'K')
-        {
-            if (inQueue) { Command?.Invoke(":queue move up"); return true; }
-            JumpToUnplayed(-1); return true;
-        }
-
-        if (kv == 'm' || kv == 'M') { TogglePlayedRequested?.Invoke(); return true; }
-        if (key == Key.F12) { ShowLogsOverlay(500); return true; }
-        if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { QuitRequested?.Invoke(); return true; }
-        if (kv == 't' || kv == 'T') { ToggleThemeRequested?.Invoke(); return true; }
-        if (kv == 'u' || kv == 'U') { Command?.Invoke(":filter toggle"); return true; }
-
-        if (key == (Key)(':')) { ShowCommandBox(":"); return true; }
-        if (key == (Key)('/')) { ShowSearchBox("/"); return true; }
-
-        if (key == (Key)('h'))
-        {
-            if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
-            {
-                if (_episodesPane != null)
-                {
-                    _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First();
-                    _episodesPane.List.SetFocus();
-                }
-            }
-            else FocusPane(Pane.Feeds);
-            return true;
-        }
-
-        if (key == (Key)('l'))
-        {
-            if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
-            else
-            {
-                if (_episodesPane?.Tabs?.SelectedTab?.Text.ToString() != "Details" && _episodesPane != null)
-                {
-                    _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last();
-                    _episodesPane.Details.SetFocus();
-                }
-            }
-            return true;
-        }
-
-        if (key == (Key)('j') || key == Key.CursorDown) { MoveList(+1); return true; }
-        if (key == (Key)('k') || key == Key.CursorUp)   { MoveList(-1); return true; }
-
-        if (kv == 'i' || kv == 'I')
-        {
-            if (_episodesPane != null)
-            {
-                _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.Last();
-                _episodesPane.Details.SetFocus();
-            }
-            return true;
-        }
-
-        if (key == Key.Esc && _episodesPane?.Tabs?.SelectedTab?.Text.ToString() == "Details")
-        {
-            if (_episodesPane != null)
-            {
-                _episodesPane.Tabs.SelectedTab = _episodesPane.Tabs.Tabs.First();
-                _episodesPane.List.SetFocus();
-            }
-            return true;
-        }
-
-        if (key == Key.Space)
-        {
-            _player?.OptimisticToggle();  
-            Command?.Invoke(":toggle");  
-            return true;
-        }
-
-        if (key == Key.CursorLeft || key == (Key)('H')) { Command?.Invoke(":seek -10"); return true; }
-        if (key == Key.CursorRight|| key == (Key)('L')) { Command?.Invoke(":seek +10"); return true; }
-        if (kv == 'H') { Command?.Invoke(":seek -60"); return true; }
-        if (kv == 'L') { Command?.Invoke(":seek +60"); return true; }
-
-        if (kv == 'g') { Command?.Invoke(":seek 0:00"); return true; }
-        if (kv == 'G') { Command?.Invoke(":seek 100%"); return true; }
-
-        if (key == (Key)('-')) { Command?.Invoke(":vol -5"); return true; }
-        if (key == (Key)('+')) { Command?.Invoke(":vol +5"); return true; }
-
-        if (key == (Key)('[')) { Command?.Invoke(":speed -0.1"); return true; }
-        if (key == (Key)(']')) { Command?.Invoke(":speed +0.1"); return true; }
-        if (key == (Key)('=')) { Command?.Invoke(":speed 1.0"); return true; }
-        if (kv == '1') { Command?.Invoke(":speed 1.0");  return true; }
-        if (kv == '2') { Command?.Invoke(":speed 1.25"); return true; }
-        if (kv == '3') { Command?.Invoke(":speed 1.5");  return true; }
-
-        if (kv == 'd' || kv == 'D') { Command?.Invoke(":dl toggle"); return true; }
-
-        if (key == Key.Enter)
-        {
-            if (_activePane == Pane.Feeds) FocusPane(Pane.Episodes);
-            else if (_episodesPane?.Tabs.SelectedTab?.Text.ToString() != "Details") PlaySelected?.Invoke();
-            return true;
-        }
-
-        if (key == (Key)('n') && !string.IsNullOrEmpty(_lastSearch))
-        {
-            SearchApplied?.Invoke(_lastSearch!);
-            SelectedFeedChanged?.Invoke();
-            return true;
-        }
-
-        return false;
-    }
-    #endregion
 
     #region downloads/ui lookups
     public void SetDownloadStateLookup(Func<Guid, StuiPodcast.Core.DownloadState> fn)
@@ -1158,27 +851,7 @@ public sealed class UiShell : IUiShell
         });
     }
 
-    public void ShowLogsOverlay(int tail = 500)
-    {
-        try
-        {
-            var lines = _mem.Snapshot(tail);
-            var dlg = new Dialog($"Logs (last {tail}) — F12/Esc to close", 100, 30);
-            var tv = new TextView { ReadOnly = true, X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill(), WordWrap = false };
-            tv.Text = string.Join('\n', lines);
-            tv.MoveEnd();
-
-            dlg.KeyPress += (View.KeyEventEventArgs e) =>
-            {
-                if (e.KeyEvent.Key == Key.F12 || e.KeyEvent.Key == Key.Esc) {
-                    Application.RequestStop();
-                    e.Handled = true;
-                }
-            };
-            dlg.Add(tv);
-            Application.Run(dlg);
-        } catch { }
-    }
+    public void ShowLogsOverlay(int tail = 500) => UiShellLogsDialog.Show(_mem, tail);
 
     public void SetHistoryLimit(int n) => _episodesPane?.SetHistoryLimit(n);
     #endregion
