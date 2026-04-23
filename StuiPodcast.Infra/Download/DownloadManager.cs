@@ -455,14 +455,14 @@ namespace StuiPodcast.Infra.Download
             if ((int)resp.StatusCode == 429)
             {
                 var retry = DownloadRetryPolicy.ParseRetryAfterMs(resp.Headers.RetryAfter);
-                var ex = new HttpRequestException("429 too many requests");
+                var ex = new HttpRequestException("429 too many requests", null, resp.StatusCode);
                 if (retry > 0) ex.Data["RetryAfterMs"] = retry;
                 throw ex;
             }
 
             if ((int)resp.StatusCode == 408 || (int)resp.StatusCode >= 500)
             {
-                throw new HttpRequestException($"server returned {(int)resp.StatusCode} {resp.ReasonPhrase}");
+                throw new HttpRequestException($"server returned {(int)resp.StatusCode} {resp.ReasonPhrase}", null, resp.StatusCode);
             }
 
             if (resume && resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)

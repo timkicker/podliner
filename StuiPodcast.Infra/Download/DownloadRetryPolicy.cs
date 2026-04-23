@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 
@@ -17,9 +18,20 @@ internal static class DownloadRetryPolicy
 {
     // Exceptions that represent a blip rather than a permanent failure.
     // Matches what a browser would silently retry under the hood.
+    // For HttpRequestException we honour StatusCode (if the server actually
+    // responded): 4xx other than 408/429 is permanent (404/403/410/413…) and
+    // should fail fast; 5xx/408/429 and connection-level errors are transient.
     public static bool IsTransient(Exception ex)
     {
-        if (ex is HttpRequestException) return true;
+        if (ex is HttpRequestException hre)
+        {
+            if (hre.StatusCode is { } code)
+            {
+                int n = (int)code;
+                return n == 408 || n == 429 || n >= 500;
+            }
+            return true; // connection-level HttpRequestException (no response)
+        }
         if (ex is IOException ioex && ioex.InnerException is SocketException) return true;
         if (ex is IOException iox && iox.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)) return true;
         if (ex is SocketException) return true;

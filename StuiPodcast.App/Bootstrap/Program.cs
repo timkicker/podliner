@@ -112,9 +112,20 @@ internal class Program
         _feedStore = new FeedStore(_libraryStore);
         _queue     = new QueueService(_libraryStore);
 
-        // apply cli engine preference before creating audio player
+        // apply cli engine preference before creating audio player; unknown
+        // values are left at whatever the config stored and surfaced via
+        // stderr so the user isn't silently "corrected" to Auto.
         if (!string.IsNullOrWhiteSpace(cli.Engine))
-            _data.PreferredEngine = AudioEngineExt.FromWire(cli.Engine);
+        {
+            var parsed = AudioEngineExt.FromWire(cli.Engine);
+            if (parsed != AudioEngine.Auto || cli.Engine == "auto")
+                _data.PreferredEngine = parsed;
+            else
+            {
+                Console.Error.WriteLine($"podliner: unknown --engine '{cli.Engine}' (expected auto|vlc|mpv|ffplay|mediafoundation) — ignoring");
+                cli.Engine = null; // prevent CmdApplier from also dispatching an invalid ":engine" post-UI
+            }
+        }
 
         // audio player / engine service
         _engineSvc = new EngineService(_data, _memLog);
@@ -183,7 +194,28 @@ internal class Program
         // exists. Downstream UI wiring + NetworkMonitor hold references to
         // individual UseCases (e.g. ViewUseCase) so we construct it here
         // before NetworkMonitor starts.
-        Func<AudioEngine, Task> engineSwitch = pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
+        // Engine hot-swap: capture live playback state, perform the swap,
+        // resume the same episode + position on the new engine, and OSD
+        // the result (success or failure) so the user gets feedback.
+        Func<AudioEngine, Task> engineSwitch = async pref =>
+        {
+            var resume = _playback?.CaptureResumeState();
+            var ok = await _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
+            if (ok && resume is not null)
+            {
+                try { Application.MainLoop?.Invoke(() => _playback!.ResumeAfterSwap(resume.Value)); }
+                catch (Exception ex) { Log.Warning(ex, "engine resume-after-swap failed"); }
+            }
+            try
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    if (ok) _ui?.ShowOsd($"engine: switched to {pref.ToWire()}", 1200);
+                    else    _ui?.ShowOsd($"engine: switch to {pref.ToWire()} failed — check logs", 2500);
+                });
+            }
+            catch { }
+        };
         var cases = new StuiPodcast.App.Command.UseCases.CmdCases(
             ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
             episodes: _episodes!, feedStore: _feedStore!, queue: _queue!,
@@ -436,7 +468,7 @@ internal class Program
         Console.WriteLine("Options:");
         Console.WriteLine("  --version, -v            Show version and exit");
         Console.WriteLine("  --help, -h               Show this help and exit");
-        Console.WriteLine("  --engine <auto|libvlc|mpv|ffplay>");
+        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay|mediafoundation>");
         Console.WriteLine("  --theme <base|accent|native|auto|user>");
         Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
         Console.WriteLine("  --search \"<term>\"");

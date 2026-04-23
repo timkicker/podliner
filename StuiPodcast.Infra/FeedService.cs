@@ -28,6 +28,11 @@ namespace StuiPodcast.Infra
         private readonly FeedHttpFetcher _fetcher;
         private readonly Func<Action, Task> _uiDispatch;
 
+        // Reentrance guard so double-triggered :refresh (e.g. user mashes the
+        // key) doesn't run two concurrent full sweeps that mutate the same
+        // episodes dict in parallel.
+        private int _refreshingAll;
+
         public FeedService(AppData data, AppFacade app, Func<Action, Task>? uiDispatch = null)
             : this(data, app, new FeedHttpFetcher(), uiDispatch) { }
 
@@ -118,15 +123,28 @@ namespace StuiPodcast.Infra
 
         public async Task RefreshAllAsync()
         {
-            // snapshot the feed list on the UI thread to avoid enumerating a live list
-            List<CoreFeed> snapshot = new();
-            await _uiDispatch(() => snapshot = _app.Feeds.ToList()).ConfigureAwait(false);
-
-            // intentionally sequential
-            foreach (var feed in snapshot)
+            if (System.Threading.Interlocked.Exchange(ref _refreshingAll, 1) == 1)
             {
-                try { await RefreshFeedAsync(feed).ConfigureAwait(false); }
-                catch { /* best effort per feed */ }
+                Log.Debug("feed/refresh-all already in progress — skipping");
+                return;
+            }
+
+            try
+            {
+                // snapshot the feed list on the UI thread to avoid enumerating a live list
+                List<CoreFeed> snapshot = new();
+                await _uiDispatch(() => snapshot = _app.Feeds.ToList()).ConfigureAwait(false);
+
+                // intentionally sequential
+                foreach (var feed in snapshot)
+                {
+                    try { await RefreshFeedAsync(feed).ConfigureAwait(false); }
+                    catch { /* best effort per feed */ }
+                }
+            }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _refreshingAll, 0);
             }
         }
 

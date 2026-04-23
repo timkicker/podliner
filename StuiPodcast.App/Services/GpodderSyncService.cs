@@ -25,6 +25,10 @@ sealed class GpodderSyncService : IDisposable
     private int   _lastSessionId = -1;
     private Guid? _lastEpisodeId;
 
+    // Reentrance guard so a startup auto-sync and a user-triggered :sync
+    // don't race on _store.Current (PendingActions clear + server push).
+    private int _syncing;
+
     public bool ShouldAutoSync => _store.Current.AutoSync && _store.Current.IsConfigured;
 
     public GpodderSyncService(
@@ -137,16 +141,26 @@ sealed class GpodderSyncService : IDisposable
     // Pull then push.
     public async Task<(bool ok, string msg)> SyncAsync()
     {
-        var (pullOk, pullMsg) = await PullAsync();
-        var (pushOk, pushMsg) = await PushAsync();
+        if (System.Threading.Interlocked.Exchange(ref _syncing, 1) == 1)
+            return (false, "sync already in progress");
 
-        if (pullOk && pushOk)
-            return (true, "sync complete");
+        try
+        {
+            var (pullOk, pullMsg) = await PullAsync();
+            var (pushOk, pushMsg) = await PushAsync();
 
-        var parts = new List<string>();
-        if (!pullOk) parts.Add($"pull: {pullMsg}");
-        if (!pushOk) parts.Add($"push: {pushMsg}");
-        return (false, string.Join("; ", parts));
+            if (pullOk && pushOk)
+                return (true, "sync complete");
+
+            var parts = new List<string>();
+            if (!pullOk) parts.Add($"pull: {pullMsg}");
+            if (!pushOk) parts.Add($"push: {pushMsg}");
+            return (false, string.Join("; ", parts));
+        }
+        finally
+        {
+            System.Threading.Interlocked.Exchange(ref _syncing, 0);
+        }
     }
 
     // Pull subscription delta and episode actions from server.

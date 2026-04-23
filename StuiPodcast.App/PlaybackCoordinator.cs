@@ -445,6 +445,24 @@ public sealed class PlaybackCoordinator : IDisposable
 
     public PlaybackSnapshot GetLastSnapshot() => _lastSnapshot;
 
+    // Engine hot-swap support. Caller captures the active episode + live
+    // position BEFORE the swap, then replays it afterwards. The live
+    // PlayerState is read here (not ep.Progress) so we don't lose the last
+    // <250ms between persistence ticks.
+    public (Episode episode, long posMs)? CaptureResumeState()
+    {
+        if (_current is null) return null;
+        var live = _audioPlayer.State?.Position.TotalMilliseconds ?? _current.Progress?.LastPosMs ?? 0;
+        return (_current, (long)Math.Max(0, live));
+    }
+
+    public void ResumeAfterSwap((Episode episode, long posMs) s)
+    {
+        if (s.episode == null) return;
+        s.episode.Progress.LastPosMs = s.posMs;
+        Play(s.episode);
+    }
+
     // Advance to the next episode (via queue or same-feed fallback)
     public bool TryAdvanceToNext(out Episode? next)
     {

@@ -96,7 +96,10 @@ namespace StuiPodcast.Infra.Storage
 
             var validEpisodeIds = new HashSet<Guid>(lib.Episodes.Select(x => x.Id));
 
-            lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).ToList();
+            // Dedup + drop stale ids. Duplicates can sneak in from legacy
+            // saves (before Queue.Append's Contains-check) or via
+            // MoveToFront/Move which only touch the first occurrence.
+            lib.Queue = lib.Queue.Where(validEpisodeIds.Contains).Distinct().ToList();
 
             lib.History = lib.History
                 .Where(h => validEpisodeIds.Contains(h.EpisodeId))

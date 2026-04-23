@@ -70,7 +70,7 @@ sealed class EngineService
         catch { }
     }
 
-    public async Task SwitchAsync(SwappableAudioPlayer audioPlayer, AudioEngine pref, Func<Task> onPersistTick)
+    public async Task<bool> SwitchAsync(SwappableAudioPlayer audioPlayer, AudioEngine pref, Func<Task> onPersistTick)
     {
         try
         {
@@ -81,14 +81,16 @@ sealed class EngineService
             Log.Information("engine created name={Engine} caps={Caps} info={Info}",
                 next?.Name, next?.Capabilities, info);
 
-            ApplyPrefsTo(next);
+            ApplyPrefsTo(next!);
 
-            await audioPlayer.SwapToAsync(next, old => { try { old.Stop(); } catch { } });
+            await audioPlayer.SwapToAsync(next!, old => { try { old.Stop(); } catch { } });
             Log.Information("engine switched current={Name} caps={Caps}", audioPlayer.Name, audioPlayer.Capabilities);
+            return true;
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "engine switch failed");
+            Log.Warning(ex, "engine switch failed pref={Pref}", pref);
+            return false;
         }
     }
 }
