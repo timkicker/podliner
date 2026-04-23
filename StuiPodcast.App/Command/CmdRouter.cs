@@ -1,18 +1,23 @@
 using StuiPodcast.App;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
-using StuiPodcast.App.Command.Module;
 using StuiPodcast.Infra.Download;
 
 #region public facade
+
+// Entry point from ui → command pipeline. The top-level Handle() receives
+// the CmdCases container (built once in Program.cs) and dispatches the
+// parsed command to a registered handler. HandleQueue / HandleDownloads
+// are kept as public fastpaths so the ui-side command loop can short-
+// circuit queue/download verbs without going through the parser.
 static class CmdRouter
 {
- 
     public static void Handle(
         string raw,
         IAudioPlayer audioPlayer,
@@ -25,14 +30,15 @@ static class CmdRouter
         IEpisodeStore episodes,
         IFeedStore feedStore,
         IQueueService queue,
+        CmdCases cases,
         Func<string, Task>? switchEngine = null,
         GpodderSyncService? syncService = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
 
         // fastpaths
-        if (HandleQueue(raw, ui, data, persist, episodes, queue)) return;
-        if (HandleDownloads(raw, ui, data, dlm, persist, episodes)) return;
+        if (cases.Queue.Handle(raw)) return;
+        if (cases.Download.Handle(raw)) return;
 
         // fallback for :dl without sub-arg
         if (raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase) ||
@@ -41,28 +47,24 @@ static class CmdRouter
             var arg = raw.Contains(' ')
                 ? raw[(raw.IndexOf(' ') + 1)..].Trim().ToLowerInvariant()
                 : "";
-            CmdDownloadsModule.DlToggle(arg, ui, data, persist, dlm, episodes);
-            ApplyList(ui, data, episodes);
+            cases.Download.DlToggle(arg);
+            cases.View.ApplyList();
             return;
         }
 
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine, episodes, feedStore, queue, syncService);
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine,
+            episodes, feedStore, queue, cases, syncService);
 
         // dispatch
         CommandDispatcher.Default.Dispatch(parsed, ctx);
     }
 
-    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IEpisodeStore episodes, IQueueService queue)
-        => CmdQueueModule.HandleQueue(cmd, ui, data, saveAsync, episodes, queue);
-
-    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync, IEpisodeStore episodes)
-        => CmdDownloadsModule.HandleDownloads(cmd, ui, data, dlm, saveAsync, episodes);
-
-    public static void ApplyList(IUiShell ui, AppData data, IEpisodeStore episodes)
-        => CmdViewModule.ApplyList(ui, data, episodes);
+    public static bool HandleQueue(CmdCases cases, string cmd) => cases.Queue.Handle(cmd);
+    public static bool HandleDownloads(CmdCases cases, string cmd) => cases.Download.Handle(cmd);
+    public static void ApplyList(CmdCases cases) => cases.View.ApplyList();
 }
 #endregion
 

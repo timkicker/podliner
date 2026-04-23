@@ -1,12 +1,28 @@
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
-using StuiPodcast.Core;
 
-namespace StuiPodcast.App.Command.Module;
+namespace StuiPodcast.App.Command.UseCases;
 
-internal static class CmdQueueModule
+// Handles :queue sub-commands. Returns true when the input matched a queue
+// verb so the command router fastpath can short-circuit (q = :queue add).
+// All mutations flow through IQueueService so the snapshot cache and the
+// Changed event stay coherent.
+internal sealed class QueueUseCase
 {
-    public static bool HandleQueue(string cmd, IUiShell ui, AppData data, Func<Task> saveAsync, IEpisodeStore episodes, IQueueService queue)
+    readonly IUiShell _ui;
+    readonly Func<Task> _persist;
+    readonly IEpisodeStore _episodes;
+    readonly IQueueService _queue;
+
+    public QueueUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, IQueueService queue)
+    {
+        _ui = ui;
+        _persist = persist;
+        _episodes = episodes;
+        _queue = queue;
+    }
+
+    public bool Handle(string cmd)
     {
         if (string.IsNullOrWhiteSpace(cmd)) return false;
         var t = cmd.Trim();
@@ -19,50 +35,43 @@ internal static class CmdQueueModule
         string[] parts = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         string sub = parts.Length >= 2 ? parts[1].ToLowerInvariant() : "add";
 
-        void Refresh()
-        {
-            ui.SetQueueOrder(queue.Snapshot());
-            ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
-        }
-        async Task PersistLocal() { try { await saveAsync(); } catch { } }
-
-        var ep = ui.GetSelectedEpisode();
+        var ep = _ui.GetSelectedEpisode();
 
         switch (sub)
         {
             case "add":
             case "toggle":
                 if (ep == null) return true;
-                queue.Toggle(ep.Id);
+                _queue.Toggle(ep.Id);
                 Refresh(); _ = PersistLocal(); return true;
 
             case "rm":
             case "remove":
                 if (ep == null) return true;
-                queue.Remove(ep.Id);
+                _queue.Remove(ep.Id);
                 Refresh(); _ = PersistLocal(); return true;
 
             case "clear":
-                queue.Clear();
+                _queue.Clear();
                 Refresh(); _ = PersistLocal(); return true;
 
             case "shuffle":
-                queue.Shuffle();
-                Refresh(); _ = PersistLocal(); ui.ShowOsd("queue: shuffled", 900); return true;
+                _queue.Shuffle();
+                Refresh(); _ = PersistLocal(); _ui.ShowOsd("queue: shuffled", 900); return true;
 
             case "uniq":
-                queue.Dedup();
-                Refresh(); _ = PersistLocal(); ui.ShowOsd("queue: uniq", 900); return true;
+                _queue.Dedup();
+                Refresh(); _ = PersistLocal(); _ui.ShowOsd("queue: uniq", 900); return true;
 
             case "move":
             {
                 var dir = parts.Length >= 3 ? parts[2].ToLowerInvariant() : "down";
-                var sel = ui.GetSelectedEpisode(); if (sel == null) return true;
+                var sel = _ui.GetSelectedEpisode(); if (sel == null) return true;
 
-                int idx = queue.IndexOf(sel.Id);
+                int idx = _queue.IndexOf(sel.Id);
                 if (idx < 0) return true;
 
-                int last = queue.Count - 1;
+                int last = _queue.Count - 1;
                 int target = idx;
                 if (dir == "up") target = Math.Max(0, idx - 1);
                 else if (dir == "down") target = Math.Min(last, idx + 1);
@@ -71,9 +80,9 @@ internal static class CmdQueueModule
 
                 if (target != idx)
                 {
-                    queue.Move(sel.Id, target);
+                    _queue.Move(sel.Id, target);
                     Refresh(); _ = PersistLocal();
-                    ui.ShowOsd(target < idx ? "Moved ↑" : "Moved ↓");
+                    _ui.ShowOsd(target < idx ? "Moved ↑" : "Moved ↓");
                 }
                 return true;
             }
@@ -81,5 +90,16 @@ internal static class CmdQueueModule
             default:
                 return true;
         }
+    }
+
+    void Refresh()
+    {
+        _ui.SetQueueOrder(_queue.Snapshot());
+        _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
+    }
+
+    async Task PersistLocal()
+    {
+        try { await _persist(); } catch { }
     }
 }

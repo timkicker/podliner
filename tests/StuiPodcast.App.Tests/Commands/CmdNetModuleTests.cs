@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -11,13 +11,21 @@ public sealed class CmdNetModuleTests
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
     private readonly FakeEpisodeStore _episodes = new();
-    private Task SaveAsync() => Task.CompletedTask;
+    private readonly FakeFeedStore _feeds = new();
+    private readonly NetUseCase _sut;
+
+    public CmdNetModuleTests()
+    {
+        Task SaveAsync() => Task.CompletedTask;
+        var view = new ViewUseCase(_ui, _data, SaveAsync, _episodes, _feeds);
+        _sut = new NetUseCase(_ui, _data, SaveAsync, _episodes, view);
+    }
 
     [Fact]
     public void Net_offline_sets_flag()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "offline" });
         _data.NetworkOnline.Should().BeFalse();
         _ui.OsdMessages.Should().Contain(m => m.Text == "Offline");
     }
@@ -26,7 +34,7 @@ public sealed class CmdNetModuleTests
     public void Net_online_sets_flag()
     {
         _data.NetworkOnline = false;
-        CmdNetModule.ExecNet(new[] { "online" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "online" });
         _data.NetworkOnline.Should().BeTrue();
         _ui.OsdMessages.Should().Contain(m => m.Text == "Online");
     }
@@ -35,7 +43,7 @@ public sealed class CmdNetModuleTests
     public void Net_toggle_flips()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "toggle" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "toggle" });
         _data.NetworkOnline.Should().BeFalse();
     }
 
@@ -43,14 +51,14 @@ public sealed class CmdNetModuleTests
     public void Net_empty_toggles()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(Array.Empty<string>(), _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(Array.Empty<string>());
         _data.NetworkOnline.Should().BeFalse();
     }
 
     [Fact]
     public void Net_invalid_shows_usage()
     {
-        CmdNetModule.ExecNet(new[] { "banana" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "banana" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 
@@ -58,7 +66,7 @@ public sealed class CmdNetModuleTests
     public void Net_off_alias_works()
     {
         _data.NetworkOnline = true;
-        CmdNetModule.ExecNet(new[] { "off" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "off" });
         _data.NetworkOnline.Should().BeFalse();
     }
 
@@ -66,14 +74,14 @@ public sealed class CmdNetModuleTests
     public void Net_on_alias_works()
     {
         _data.NetworkOnline = false;
-        CmdNetModule.ExecNet(new[] { "on" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "on" });
         _data.NetworkOnline.Should().BeTrue();
     }
 
     [Fact]
     public void PlaySource_auto()
     {
-        CmdNetModule.ExecPlaySource(new[] { "auto" }, _ui, _data, SaveAsync);
+        _sut.ExecPlaySource(new[] { "auto" });
         _data.PlaySource.Should().Be("auto");
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("auto"));
     }
@@ -81,14 +89,14 @@ public sealed class CmdNetModuleTests
     [Fact]
     public void PlaySource_local()
     {
-        CmdNetModule.ExecPlaySource(new[] { "local" }, _ui, _data, SaveAsync);
+        _sut.ExecPlaySource(new[] { "local" });
         _data.PlaySource.Should().Be("local");
     }
 
     [Fact]
     public void PlaySource_invalid_shows_usage()
     {
-        CmdNetModule.ExecPlaySource(new[] { "banana" }, _ui, _data, SaveAsync);
+        _sut.ExecPlaySource(new[] { "banana" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 
@@ -96,7 +104,7 @@ public sealed class CmdNetModuleTests
     public void PlaySource_show_displays_current()
     {
         _data.PlaySource = "local";
-        CmdNetModule.ExecPlaySource(new[] { "show" }, _ui, _data, SaveAsync);
+        _sut.ExecPlaySource(new[] { "show" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("local"));
     }
 
@@ -108,7 +116,7 @@ public sealed class CmdNetModuleTests
         _ui.NowPlayingId = ep.Id;
         _data.NetworkOnline = true;
 
-        CmdNetModule.ExecNet(new[] { "offline" }, _ui, _data, SaveAsync, _episodes);
+        _sut.ExecNet(new[] { "offline" });
         _ui.LastWindowTitle.Should().Contain("[OFFLINE]");
         _ui.LastWindowTitle.Should().Contain("My Episode");
     }

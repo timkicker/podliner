@@ -1,5 +1,6 @@
 using Serilog;
 using StuiPodcast.App.Bootstrap;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
@@ -10,7 +11,10 @@ using Terminal.Gui;
 
 namespace StuiPodcast.App.Command;
 
-static class  CmdApplier
+// Replays the CLI flags (:net offline, :engine, :opml import/export, :feed,
+// :search) after the UI is up. Uses the real command dispatcher so CLI and
+// interactive input share the same code path.
+static class CmdApplier
 {
     public static void ApplyPostUiFlags(
         CliEntrypoint.Options cli,
@@ -25,6 +29,7 @@ static class  CmdApplier
         IEpisodeStore episodes,
         IFeedStore feedStore,
         IQueueService queue,
+        CmdCases cases,
         GpodderSyncService? syncService = null)
     {
         Application.MainLoop?.Invoke(() =>
@@ -33,17 +38,21 @@ static class  CmdApplier
             {
                 if (ui == null || audioPlayer == null || playback == null || downloader == null) return;
 
+                void Dispatch(string raw) =>
+                    CmdRouter.Handle(raw, audioPlayer, playback, ui, memLog, data, save, downloader,
+                        episodes, feedStore, queue, cases, engineSwitch, syncService);
+
                 if (cli.Offline)
-                    CmdRouter.Handle(":net offline", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                    Dispatch(":net offline");
 
                 if (!string.IsNullOrWhiteSpace(cli.Engine))
-                    CmdRouter.Handle($":engine {cli.Engine}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                    Dispatch($":engine {cli.Engine}");
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlExport))
                 {
                     var path = cli.OpmlExport!;
                     Log.Information("cli/opml export path={Path}", path);
-                    CmdRouter.Handle($":opml export {path}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                    Dispatch($":opml export {path}");
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.OpmlImport))
@@ -82,23 +91,23 @@ static class  CmdApplier
                             _ = save();
 
                             ui.SetFeeds(feedStore.Snapshot(), data.LastSelectedFeedId);
-                            CmdRouter.ApplyList(ui, data, episodes);
+                            cases.View.ApplyList();
                         }
 
                         var path = cli.OpmlImport!.Contains(' ') ? $"\"{cli.OpmlImport}\"" : cli.OpmlImport!;
-                        CmdRouter.Handle($":opml import {path}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                        Dispatch($":opml import {path}");
                     }
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Feed))
                 {
                     var f = cli.Feed!.Trim();
-                    CmdRouter.Handle($":feed {f}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                    Dispatch($":feed {f}");
                 }
 
                 if (!string.IsNullOrWhiteSpace(cli.Search))
                 {
-                    CmdRouter.Handle($":search {cli.Search}", audioPlayer, playback, ui, memLog, data, save, downloader, episodes, feedStore, queue, engineSwitch, syncService);
+                    Dispatch($":search {cli.Search}");
                 }
             }
             catch { }

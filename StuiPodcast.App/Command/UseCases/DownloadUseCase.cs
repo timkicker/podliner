@@ -4,11 +4,30 @@ using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
 
-namespace StuiPodcast.App.Command.Module;
+namespace StuiPodcast.App.Command.UseCases;
 
-internal static class CmdDownloadsModule
+// Handles :dl / :downloads sub-commands. Dispatches on top-level verb so the
+// command router can fastpath without re-parsing. DlToggle is the UI-level
+// shortcut used by the `d` key binding (toggle the selected episode's
+// download state).
+internal sealed class DownloadUseCase
 {
-    public static bool HandleDownloads(string cmd, IUiShell ui, AppData data, DownloadManager dlm, Func<Task> saveAsync, IEpisodeStore episodes)
+    readonly IUiShell _ui;
+    readonly Func<Task> _persist;
+    readonly IEpisodeStore _episodes;
+    readonly DownloadManager _dlm;
+    readonly ViewUseCase _view;
+
+    public DownloadUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, DownloadManager dlm, ViewUseCase view)
+    {
+        _ui = ui;
+        _persist = persist;
+        _episodes = episodes;
+        _dlm = dlm;
+        _view = view;
+    }
+
+    public bool Handle(string cmd)
     {
         cmd = (cmd ?? "").Trim();
 
@@ -19,44 +38,44 @@ internal static class CmdDownloadsModule
 
             if (string.IsNullOrEmpty(sub))
             {
-                var q = dlm.QueuedCount();
-                var running = dlm.CountInState(DownloadState.Running);
-                var failed  = dlm.CountInState(DownloadState.Failed);
-                ui.ShowOsd($"downloads: queue {q}, running {running}, failed {failed}", 1500);
+                var q = _dlm.QueuedCount();
+                var running = _dlm.CountInState(DownloadState.Running);
+                var failed  = _dlm.CountInState(DownloadState.Failed);
+                _ui.ShowOsd($"downloads: queue {q}, running {running}, failed {failed}", 1500);
                 return true;
             }
 
             if (sub == "retry-failed")
             {
                 int n = 0;
-                foreach (var kv in dlm.SnapshotMap())
+                foreach (var kv in _dlm.SnapshotMap())
                 {
-                    if (kv.Value.State == DownloadState.Failed) { dlm.Enqueue(kv.Key); n++; }
+                    if (kv.Value.State == DownloadState.Failed) { _dlm.Enqueue(kv.Key); n++; }
                 }
-                _ = saveAsync();
-                ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
-                ui.ShowOsd($"downloads: retried {n} failed", 1500);
+                _ = _persist();
+                _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
+                _ui.ShowOsd($"downloads: retried {n} failed", 1500);
                 return true;
             }
 
             if (sub == "clear-queue")
             {
-                var n = dlm.ClearQueue();
-                _ = saveAsync();
-                ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
-                ui.ShowOsd($"downloads: cleared queue ({n})", 1200);
+                var n = _dlm.ClearQueue();
+                _ = _persist();
+                _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
+                _ui.ShowOsd($"downloads: cleared queue ({n})", 1200);
                 return true;
             }
 
             if (sub == "open-dir")
             {
-                var dir = GuessDownloadDir(dlm);
+                var dir = GuessDownloadDir(_dlm);
                 if (!string.IsNullOrWhiteSpace(dir)) TryOpenSystem(dir);
-                else ui.ShowOsd("downloads: no directory found", 1200);
+                else _ui.ShowOsd("downloads: no directory found", 1200);
                 return true;
             }
 
-            ui.ShowOsd("downloads: retry-failed | clear-queue | open-dir", 1200);
+            _ui.ShowOsd("downloads: retry-failed | clear-queue | open-dir", 1200);
             return true;
         }
 
@@ -64,7 +83,7 @@ internal static class CmdDownloadsModule
             && !cmd.StartsWith(":download", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var ep = ui.GetSelectedEpisode();
+        var ep = _ui.GetSelectedEpisode();
         if (ep == null) return true;
 
         var dlParts = cmd.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -73,43 +92,42 @@ internal static class CmdDownloadsModule
         switch (arg)
         {
             case "start":
-                dlm.ForceFront(ep.Id);
-                dlm.EnsureRunning();
-                ui.ShowOsd("Downloading ⇣ (forced)");
+                _dlm.ForceFront(ep.Id);
+                _dlm.EnsureRunning();
+                _ui.ShowOsd("Downloading ⇣ (forced)");
                 break;
 
             case "cancel":
-                dlm.Forget(ep.Id);
-                ui.ShowOsd("Download canceled ✖");
+                _dlm.Forget(ep.Id);
+                _ui.ShowOsd("Download canceled ✖");
                 break;
 
             default:
             {
-                var st = dlm.GetState(ep.Id);
+                var st = _dlm.GetState(ep.Id);
                 if (st == DownloadState.None || st == DownloadState.Canceled || st == DownloadState.Failed)
                 {
-                    dlm.Enqueue(ep.Id);
-                    dlm.EnsureRunning();         // <— WICHTIG: starten!
-                    ui.ShowOsd("Download queued ⌵");
+                    _dlm.Enqueue(ep.Id);
+                    _dlm.EnsureRunning();
+                    _ui.ShowOsd("Download queued ⌵");
                 }
                 else
                 {
-                    dlm.Forget(ep.Id);
-                    ui.ShowOsd("Download unqueued");
+                    _dlm.Forget(ep.Id);
+                    _ui.ShowOsd("Download unqueued");
                 }
                 break;
             }
-
         }
 
-        _ = saveAsync();
-        ui.RefreshEpisodesForSelectedFeed(episodes.Snapshot());
+        _ = _persist();
+        _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
         return true;
     }
 
-    public static void DlToggle(string arg, IUiShell ui, AppData data, Func<Task> persist, DownloadManager dlm, IEpisodeStore episodes)
+    public void DlToggle(string arg)
     {
-        var ep = ui.GetSelectedEpisode();
+        var ep = _ui.GetSelectedEpisode();
         if (ep is null) return;
 
         bool wantOn;
@@ -119,21 +137,23 @@ internal static class CmdDownloadsModule
 
         if (wantOn)
         {
-            dlm.Enqueue(ep.Id);
-            dlm.EnsureRunning();
-            ui.ShowOsd("Download queued ⌵");
+            _dlm.Enqueue(ep.Id);
+            _dlm.EnsureRunning();
+            _ui.ShowOsd("Download queued ⌵");
         }
         else
         {
-            dlm.Forget(ep.Id);
-            ui.ShowOsd("Download canceled ✖");
+            _dlm.Forget(ep.Id);
+            _ui.ShowOsd("Download canceled ✖");
         }
 
-        _ = persist();
-        CmdViewModule.ApplyList(ui, data, episodes);
+        _ = _persist();
+        _view.ApplyList();
     }
 
-    private static string? GuessDownloadDir(DownloadManager dlm)
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    static string? GuessDownloadDir(DownloadManager dlm)
     {
         try
         {
@@ -146,7 +166,7 @@ internal static class CmdDownloadsModule
         catch { return null; }
     }
 
-    private static bool TryOpenSystem(string url)
+    static bool TryOpenSystem(string url)
     {
         try
         {

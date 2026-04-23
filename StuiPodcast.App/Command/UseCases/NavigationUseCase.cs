@@ -3,23 +3,40 @@ using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
-namespace StuiPodcast.App.Command.Module;
+namespace StuiPodcast.App.Command.UseCases;
 
-internal static class CmdNavigationModule
+// Episode-pane keyboard navigation: relative/absolute selection, middle,
+// jump-to-next-unplayed. Builds against the currently visible list
+// (EpisodeListBuilder respects the selected virtual feed + unplayed filter)
+// so navigation matches what the user actually sees.
+internal sealed class NavigationUseCase
 {
-    public static void ExecGoto(string[] args, IUiShell ui, AppData data, IEpisodeStore episodes)
+    readonly IUiShell _ui;
+    readonly AppData _data;
+    readonly IEpisodeStore _episodes;
+    readonly PlaybackCoordinator _playback;
+
+    public NavigationUseCase(IUiShell ui, AppData data, IEpisodeStore episodes, PlaybackCoordinator playback)
     {
-        var arg = (args.Length > 0 ? args[0] : "").ToLowerInvariant();
-        if (arg is "top" or "start") { SelectAbsolute(0, ui, data, episodes); return; }
-        if (arg is "bottom" or "end") { SelectAbsolute(int.MaxValue, ui, data, episodes); return; }
+        _ui = ui;
+        _data = data;
+        _episodes = episodes;
+        _playback = playback;
     }
 
-    public static void SelectRelative(int dir, IUiShell ui, AppData data, IEpisodeStore episodes, bool playAfterSelect = false, PlaybackCoordinator? playback = null)
+    public void ExecGoto(string[] args)
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
+        var arg = (args.Length > 0 ? args[0] : "").ToLowerInvariant();
+        if (arg is "top" or "start") { SelectAbsolute(0); return; }
+        if (arg is "bottom" or "end") { SelectAbsolute(int.MaxValue); return; }
+    }
+
+    public void SelectRelative(int dir, bool playAfterSelect = false)
+    {
+        var list = EpisodeListBuilder.BuildCurrentList(_ui, _data, _episodes);
         if (list.Count == 0) return;
 
-        var cur = ui.GetSelectedEpisode();
+        var cur = _ui.GetSelectedEpisode();
         int idx = 0;
         if (cur != null)
         {
@@ -28,40 +45,40 @@ internal static class CmdNavigationModule
         }
 
         int target = dir > 0 ? Math.Min(idx + 1, list.Count - 1) : Math.Max(idx - 1, 0);
-        ui.SelectEpisodeIndex(target);
+        _ui.SelectEpisodeIndex(target);
 
-        if (playAfterSelect && playback != null)
+        if (playAfterSelect)
         {
             var ep = list[target];
-            playback.Play(ep);
-            ui.SetWindowTitle(ep.Title);
-            ui.ShowDetails(ep);
-            ui.SetNowPlaying(ep.Id);
+            _playback.Play(ep);
+            _ui.SetWindowTitle(ep.Title);
+            _ui.ShowDetails(ep);
+            _ui.SetNowPlaying(ep.Id);
         }
     }
 
-    public static void SelectAbsolute(int index, IUiShell ui, AppData data, IEpisodeStore episodes)
+    public void SelectAbsolute(int index)
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
+        var list = EpisodeListBuilder.BuildCurrentList(_ui, _data, _episodes);
         if (list.Count == 0) return;
         int target = Math.Clamp(index, 0, list.Count - 1);
-        ui.SelectEpisodeIndex(target);
+        _ui.SelectEpisodeIndex(target);
     }
 
-    public static void SelectMiddle(IUiShell ui, AppData data, IEpisodeStore episodes)
+    public void SelectMiddle()
     {
-        var list = EpisodeListBuilder.BuildCurrentList(ui, data, episodes);
+        var list = EpisodeListBuilder.BuildCurrentList(_ui, _data, _episodes);
         if (list.Count == 0) return;
         int target = list.Count / 2;
-        ui.SelectEpisodeIndex(target);
+        _ui.SelectEpisodeIndex(target);
     }
 
-    public static void JumpUnplayed(int dir, IUiShell ui, PlaybackCoordinator playback, AppData data, IEpisodeStore episodes)
+    public void JumpUnplayed(int dir)
     {
-        var feedId = ui.GetSelectedFeedId();
+        var feedId = _ui.GetSelectedFeedId();
         if (feedId is null) return;
 
-        IEnumerable<Episode> baseList = episodes.Snapshot();
+        IEnumerable<Episode> baseList = _episodes.Snapshot();
 
         if (feedId == VirtualFeedsCatalog.Saved) baseList = baseList.Where(e => e.Saved);
         else if (feedId == VirtualFeedsCatalog.Downloaded) baseList = baseList.Where(e => Program.IsDownloaded(e.Id));
@@ -76,7 +93,7 @@ internal static class CmdNavigationModule
 
         if (eps.Count == 0) return;
 
-        var cur = ui.GetSelectedEpisode();
+        var cur = _ui.GetSelectedEpisode();
         var startIdx = cur is null ? -1 : eps.FindIndex(x => ReferenceEquals(x, cur) || x.Id == cur.Id);
         int i = startIdx;
 
@@ -86,10 +103,10 @@ internal static class CmdNavigationModule
             if (!eps[i].ManuallyMarkedPlayed)
             {
                 var target = eps[i];
-                playback.Play(target);
-                ui.SetWindowTitle(target.Title);
-                ui.ShowDetails(target);
-                ui.SetNowPlaying(target.Id);
+                _playback.Play(target);
+                _ui.SetWindowTitle(target.Title);
+                _ui.ShowDetails(target);
+                _ui.SetNowPlaying(target.Id);
                 return;
             }
         }

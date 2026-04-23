@@ -179,8 +179,19 @@ internal class Program
             // ignored
         }
 
+        // Build the CmdCases container once every store, service and player
+        // exists. Downstream UI wiring + NetworkMonitor hold references to
+        // individual UseCases (e.g. ViewUseCase) so we construct it here
+        // before NetworkMonitor starts.
+        Func<string, Task> engineSwitch = pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
+        var cases = new StuiPodcast.App.Command.UseCases.CmdCases(
+            ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
+            episodes: _episodes!, feedStore: _feedStore!, queue: _queue!,
+            audioPlayer: _player!, playback: _playback!, dlm: _downloader!,
+            switchEngine: engineSwitch, sync: _gpodder);
+
         // network monitor
-        _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync, _episodes);
+        _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync, _episodes, cases.View);
         _net.Start(out _netTimerToken);
 
         // wire ui behaviors (sorter, lookups, events)
@@ -209,8 +220,6 @@ internal class Program
         // Build the composition-root record now that every service exists.
         // UiComposer + CmdApplier pull dependencies from this record instead
         // of reaching into Program's private statics via reflection.
-        // EpisodeStore was constructed earlier (right after LibraryStore
-        // loaded) so background services can use it. Just reference here.
         var services = new AppServices(
             Ui: _ui, Data: _data, App: _app!,
             ConfigStore: _configStore!, LibraryStore: _libraryStore!,
@@ -218,14 +227,15 @@ internal class Program
             Feeds: _feeds!, Player: _player!, Playback: _playback!,
             Downloader: _downloader!, DownloadLookup: _downloadLookup!,
             MemLog: _memLog, GpodderStore: _gpodderStore!, Gpodder: _gpodder,
-            Saver: _saver!, Net: _net!, EngineSvc: _engineSvc!
+            Saver: _saver!, Net: _net!, EngineSvc: _engineSvc!,
+            Cases: cases
         );
 
         // build remaining ui behaviors
         UiComposer.WireUi(
             ctx: services,
             save: _saver.RequestSaveAsync,
-            engineSwitch: pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
+            engineSwitch: engineSwitch,
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data, services.Episodes),
             hasFeedWithUrl: HasFeedWithUrl
         );
@@ -252,8 +262,8 @@ internal class Program
         // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
             cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader,
-            pref => _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync),
-            _episodes, _feedStore, _queue, _gpodder);
+            engineSwitch,
+            _episodes, _feedStore, _queue, cases, _gpodder);
 
         // initial lists
         UiComposer.ShowInitialLists(services);

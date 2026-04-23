@@ -1,16 +1,27 @@
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
-using StuiPodcast.Core;
 
-namespace StuiPodcast.App.Command.Module;
+namespace StuiPodcast.App.Command.UseCases;
 
-internal static class CmdIoModule
+// Handles the OS-level side-effects for :open (hand a URL to the default
+// browser / xdg-open) and :copy (stuff text into the clipboard). Reflection
+// is used to tolerate the many feed-metadata property names publishers use.
+internal sealed class IoUseCase
 {
-    public static void ExecOpen(string[] args, IUiShell ui, AppData data, IFeedStore feedStore)
+    readonly IUiShell _ui;
+    readonly IFeedStore _feedStore;
+
+    public IoUseCase(IUiShell ui, IFeedStore feedStore)
+    {
+        _ui = ui;
+        _feedStore = feedStore;
+    }
+
+    public void ExecOpen(string[] args)
     {
         var mode = (args.Length > 0 ? args[0] : "site").Trim().ToLowerInvariant(); // "site" | "audio"
-        var ep = ui.GetSelectedEpisode();
-        if (ep == null) { ui.ShowOsd("no episode selected"); return; }
+        var ep = _ui.GetSelectedEpisode();
+        if (ep == null) { _ui.ShowOsd("no episode selected"); return; }
 
         string? url = null;
 
@@ -20,21 +31,21 @@ internal static class CmdIoModule
             url = GetPropString(ep, "Link", "PageUrl", "Website", "WebsiteUrl", "HtmlUrl");
             if (string.IsNullOrWhiteSpace(url))
             {
-                var feed = feedStore.Find(ep.FeedId);
+                var feed = _feedStore.Find(ep.FeedId);
                 url = GetPropString(feed, "Link", "Website", "WebsiteUrl", "HtmlUrl", "Home");
             }
             if (string.IsNullOrWhiteSpace(url)) url = ep.AudioUrl;
         }
 
-        if (string.IsNullOrWhiteSpace(url)) { ui.ShowOsd("no URL to open"); return; }
-        if (!TryOpenSystem(url)) ui.ShowOsd(url, 2000);
+        if (string.IsNullOrWhiteSpace(url)) { _ui.ShowOsd("no URL to open"); return; }
+        if (!TryOpenSystem(url)) _ui.ShowOsd(url, 2000);
     }
 
-    public static void ExecCopy(string[] args, IUiShell ui, AppData data)
+    public void ExecCopy(string[] args)
     {
         var what = (args.Length > 0 ? args[0] : "url").Trim().ToLowerInvariant(); // url|title|guid
-        var ep = ui.GetSelectedEpisode();
-        if (ep == null) { ui.ShowOsd("no episode selected"); return; }
+        var ep = _ui.GetSelectedEpisode();
+        if (ep == null) { _ui.ShowOsd("no episode selected"); return; }
 
         string? text = what switch
         {
@@ -43,13 +54,15 @@ internal static class CmdIoModule
             _       => ep.AudioUrl ?? ""
         };
 
-        if (string.IsNullOrWhiteSpace(text)) { ui.ShowOsd("nothing to copy"); return; }
+        if (string.IsNullOrWhiteSpace(text)) { _ui.ShowOsd("nothing to copy"); return; }
 
-        if (TryCopyToClipboard(text)) ui.ShowOsd("copied", 800);
-        else ui.ShowOsd(text, 3000);
+        if (TryCopyToClipboard(text)) _ui.ShowOsd("copied", 800);
+        else _ui.ShowOsd(text, 3000);
     }
 
-    private static bool TryOpenSystem(string url)
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    static bool TryOpenSystem(string url)
     {
         try
         {
@@ -63,7 +76,7 @@ internal static class CmdIoModule
         catch { return false; }
     }
 
-    private static string? GetPropString(object? obj, params string[] names)
+    static string? GetPropString(object? obj, params string[] names)
     {
         if (obj == null) return null;
         var t = obj.GetType();
@@ -79,7 +92,7 @@ internal static class CmdIoModule
         return null;
     }
 
-    private static bool TryCopyToClipboard(string text)
+    static bool TryCopyToClipboard(string text)
     {
         try
         {

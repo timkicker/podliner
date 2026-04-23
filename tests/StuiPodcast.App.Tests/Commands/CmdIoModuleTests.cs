@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -13,14 +13,19 @@ namespace StuiPodcast.App.Tests.Commands;
 public sealed class CmdIoModuleTests
 {
     private readonly FakeUiShell _ui = new();
-    private readonly AppData _data = new();
     private readonly FakeFeedStore _feeds = new();
+    private readonly IoUseCase _sut;
+
+    public CmdIoModuleTests()
+    {
+        _sut = new IoUseCase(_ui, _feeds);
+    }
 
     [Fact]
     public void ExecCopy_no_episode_shows_error()
     {
         _ui.SelectedEpisode = null;
-        CmdIoModule.ExecCopy(new[] { "url" }, _ui, _data);
+        _sut.ExecCopy(new[] { "url" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("no episode selected"));
     }
 
@@ -30,9 +35,8 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "t", AudioUrl = "https://x.com/e.mp3" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecCopy(Array.Empty<string>(), _ui, _data);
+        _sut.ExecCopy(Array.Empty<string>());
 
-        // Either "copied" (clipboard worked) or the text itself as OSD (fallback).
         _ui.OsdMessages.Should().Contain(m =>
             m.Text == "copied" || m.Text.Contains("https://x.com/e.mp3"));
     }
@@ -43,7 +47,7 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "My Title", AudioUrl = "https://x.com/e.mp3" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecCopy(new[] { "title" }, _ui, _data);
+        _sut.ExecCopy(new[] { "title" });
 
         _ui.OsdMessages.Should().Contain(m =>
             m.Text == "copied" || m.Text.Contains("My Title"));
@@ -55,7 +59,7 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "", AudioUrl = "https://x.com/e.mp3" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecCopy(new[] { "title" }, _ui, _data);
+        _sut.ExecCopy(new[] { "title" });
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("nothing to copy"));
     }
@@ -66,9 +70,8 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "t", AudioUrl = "https://x.com/e.mp3" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecCopy(new[] { "guid" }, _ui, _data);
+        _sut.ExecCopy(new[] { "guid" });
 
-        // Either "copied" or the ID itself
         _ui.OsdMessages.Should().Contain(m =>
             m.Text == "copied" || m.Text.Contains(ep.Id.ToString()));
     }
@@ -79,7 +82,7 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "t", AudioUrl = "" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecCopy(new[] { "url" }, _ui, _data);
+        _sut.ExecCopy(new[] { "url" });
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("nothing to copy"));
     }
@@ -88,7 +91,7 @@ public sealed class CmdIoModuleTests
     public void ExecOpen_no_episode_shows_error()
     {
         _ui.SelectedEpisode = null;
-        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data, _feeds);
+        _sut.ExecOpen(new[] { "audio" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("no episode selected"));
     }
 
@@ -98,7 +101,7 @@ public sealed class CmdIoModuleTests
         var ep = new Episode { Title = "t", AudioUrl = "" };
         _ui.SelectedEpisode = ep;
 
-        CmdIoModule.ExecOpen(new[] { "audio" }, _ui, _data, _feeds);
+        _sut.ExecOpen(new[] { "audio" });
 
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("no URL"));
     }

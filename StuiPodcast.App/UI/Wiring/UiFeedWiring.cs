@@ -119,6 +119,7 @@ internal static class UiFeedWiring
         var feedStore = ctx.FeedStore;
         var episodeStore = ctx.Episodes;
 
+        var cases = ctx.Cases;
         ui.RefreshRequested += async () =>
         {
             await feeds!.RefreshAllAsync();
@@ -129,7 +130,7 @@ internal static class UiFeedWiring
             if (selected != null)
                 ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
 
-            CmdRouter.ApplyList(ui, data, episodeStore);
+            cases.View.ApplyList();
         };
     }
 

@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using Xunit;
 
@@ -9,26 +9,29 @@ public sealed class CmdSystemModuleTests
 {
     private readonly FakeUiShell _ui = new();
 
+    static SystemUseCase Make(FakeUiShell ui, Func<Task>? persist = null)
+        => new(ui, persist ?? (() => Task.CompletedTask));
+
     // ── ExecOsd ──────────────────────────────────────────────────────────────
 
     [Fact]
     public void ExecOsd_shows_joined_text()
     {
-        CmdSystemModule.ExecOsd(new[] { "Hello", "World" }, _ui);
+        Make(_ui).ExecOsd(new[] { "Hello", "World" });
         _ui.OsdMessages.Should().Contain(m => m.Text == "Hello World");
     }
 
     [Fact]
     public void ExecOsd_empty_args_shows_usage()
     {
-        CmdSystemModule.ExecOsd(Array.Empty<string>(), _ui);
+        Make(_ui).ExecOsd(Array.Empty<string>());
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage: :osd"));
     }
 
     [Fact]
     public void ExecOsd_whitespace_only_shows_usage()
     {
-        CmdSystemModule.ExecOsd(new[] { "   " }, _ui);
+        Make(_ui).ExecOsd(new[] { "   " });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage: :osd"));
     }
 
@@ -37,35 +40,35 @@ public sealed class CmdSystemModuleTests
     [Fact]
     public void ExecLogs_default_tail_is_500()
     {
-        CmdSystemModule.ExecLogs(Array.Empty<string>(), _ui);
+        Make(_ui).ExecLogs(Array.Empty<string>());
         _ui.LastLogsOverlayTail.Should().Be(500);
     }
 
     [Fact]
     public void ExecLogs_parses_tail_from_arg()
     {
-        CmdSystemModule.ExecLogs(new[] { "1000" }, _ui);
+        Make(_ui).ExecLogs(new[] { "1000" });
         _ui.LastLogsOverlayTail.Should().Be(1000);
     }
 
     [Fact]
     public void ExecLogs_clamps_huge_tail_to_5000()
     {
-        CmdSystemModule.ExecLogs(new[] { "99999" }, _ui);
+        Make(_ui).ExecLogs(new[] { "99999" });
         _ui.LastLogsOverlayTail.Should().Be(5000);
     }
 
     [Fact]
     public void ExecLogs_invalid_arg_uses_default()
     {
-        CmdSystemModule.ExecLogs(new[] { "banana" }, _ui);
+        Make(_ui).ExecLogs(new[] { "banana" });
         _ui.LastLogsOverlayTail.Should().Be(500);
     }
 
     [Fact]
     public void ExecLogs_negative_arg_uses_default()
     {
-        CmdSystemModule.ExecLogs(new[] { "-100" }, _ui);
+        Make(_ui).ExecLogs(new[] { "-100" });
         _ui.LastLogsOverlayTail.Should().Be(500);
     }
 
@@ -77,7 +80,7 @@ public sealed class CmdSystemModuleTests
         int saveCalls = 0;
         Func<Task> persist = () => { saveCalls++; return Task.CompletedTask; };
 
-        CmdSystemModule.ExecWrite(persist, _ui);
+        Make(_ui, persist).ExecWrite();
 
         // Fire-and-forget: wait briefly for the Task.Run to execute.
         for (int i = 0; i < 20 && saveCalls == 0; i++) await Task.Delay(25);
@@ -91,7 +94,7 @@ public sealed class CmdSystemModuleTests
         Func<Task> slowPersist = async () => { await Task.Delay(500); };
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        CmdSystemModule.ExecWrite(slowPersist, _ui);
+        Make(_ui, slowPersist).ExecWrite();
         sw.Stop();
 
         // Should return immediately (fire-and-forget).

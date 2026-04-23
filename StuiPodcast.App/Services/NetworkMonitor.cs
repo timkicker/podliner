@@ -1,5 +1,6 @@
 using System.Net.NetworkInformation;
 using Serilog;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using Terminal.Gui;
@@ -12,6 +13,7 @@ sealed class NetworkMonitor
     readonly UiShell _ui;
     readonly Func<Task> _saveAsync;
     readonly IEpisodeStore _episodes;
+    readonly ViewUseCase _view;
 
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
@@ -26,12 +28,13 @@ sealed class NetworkMonitor
     DateTimeOffset _lastHeartbeat = DateTimeOffset.MinValue;
     static readonly TimeSpan _heartbeatEvery = TimeSpan.FromMinutes(2);
 
-    public NetworkMonitor(AppData data, UiShell ui, Func<Task> saveAsync, IEpisodeStore episodes)
+    public NetworkMonitor(AppData data, UiShell ui, Func<Task> saveAsync, IEpisodeStore episodes, ViewUseCase view)
     {
         _data = data;
         _ui = ui;
         _saveAsync = saveAsync;
         _episodes = episodes ?? throw new ArgumentNullException(nameof(episodes));
+        _view = view ?? throw new ArgumentNullException(nameof(view));
     }
 
     public void Start(out object? timerToken)
@@ -116,7 +119,7 @@ sealed class NetworkMonitor
         {
             if (_ui == null) return;
 
-            CmdRouter.ApplyList(_ui, _data, _episodes);
+            _view.ApplyList();
             _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
 
             var nowId = _ui.GetNowPlayingId();

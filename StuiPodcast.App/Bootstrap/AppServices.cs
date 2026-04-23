@@ -1,3 +1,4 @@
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
@@ -39,5 +40,6 @@ internal sealed record AppServices(
     GpodderSyncService?   Gpodder,
     SaveScheduler         Saver,
     NetworkMonitor        Net,
-    EngineService         EngineSvc
+    EngineService         EngineSvc,
+    CmdCases              Cases
 );

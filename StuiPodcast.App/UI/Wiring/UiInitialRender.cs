@@ -1,5 +1,4 @@
 using StuiPodcast.App.Bootstrap;
-using StuiPodcast.App.Command.Module;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI.Wiring;
@@ -14,11 +13,11 @@ internal static class UiInitialRender
         var ui = ctx.Ui;
         var data = ctx.Data;
         var episodeStore = ctx.Episodes;
-        var feedStore = ctx.FeedStore;
+        var cases = ctx.Cases;
 
-        CmdViewModule.ApplyFeedList(ui, data, feedStore, episodeStore);
+        cases.View.ApplyFeedList();
         ui.SetUnplayedHint(data.UnplayedOnly);
-        CmdRouter.ApplyList(ui, data, episodeStore);
+        cases.View.ApplyList();
 
         var initialFeed = ui.GetSelectedFeedId();
         if (initialFeed != null)

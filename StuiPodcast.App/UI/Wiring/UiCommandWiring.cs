@@ -28,24 +28,25 @@ internal static class UiCommandWiring
         var feedStore = ctx.FeedStore;
         var queueService = ctx.Queue;
         var syncService = ctx.Gpodder;
+        var cases = ctx.Cases;
 
         ui.Command += cmd =>
         {
             Log.Debug("cmd {Cmd}", cmd);
             if (audioPlayer == null || playback == null || Program.SkipSaveOnExit) { /* guard no-op */ }
 
-            if (CmdRouter.HandleQueue(cmd, ui, data, save, episodeStore, queueService))
+            if (CmdRouter.HandleQueue(cases, cmd))
             {
                 ui.SetQueueOrder(queueService.Snapshot());
                 ui.RefreshEpisodesForSelectedFeed(episodeStore.Snapshot());
                 return;
             }
 
-            if (CmdRouter.HandleDownloads(cmd, ui, data, ctx.Downloader, save, episodeStore))
+            if (CmdRouter.HandleDownloads(cases, cmd))
                 return;
 
             CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader,
-                episodeStore, feedStore, queueService, engineSwitch, syncService);
+                episodeStore, feedStore, queueService, cases, engineSwitch, syncService);
         };
     }
 

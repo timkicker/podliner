@@ -1,3 +1,4 @@
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
@@ -21,10 +22,12 @@ internal sealed class CmdContext
     public IEpisodeStore Episodes { get; }
     public IFeedStore    FeedStore { get; }
     public IQueueService Queue { get; }
+    public CmdCases Cases { get; }
 
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, IUiShell ui, MemoryLogSink mem,
         AppData data, Func<Task> persist, DownloadManager dlm, Func<string, Task>? switchEngine,
         IEpisodeStore episodes, IFeedStore feedStore, IQueueService queue,
+        CmdCases cases,
         GpodderSyncService? sync = null)
     {
         AudioPlayer = audioPlayer; Playback = playback; Ui = ui; Mem = mem;
@@ -32,5 +35,6 @@ internal sealed class CmdContext
         Episodes  = episodes  ?? throw new ArgumentNullException(nameof(episodes));
         FeedStore = feedStore ?? throw new ArgumentNullException(nameof(feedStore));
         Queue     = queue     ?? throw new ArgumentNullException(nameof(queue));
+        Cases     = cases     ?? throw new ArgumentNullException(nameof(cases));
     }
 }

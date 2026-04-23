@@ -1,5 +1,3 @@
-using StuiPodcast.App.Command.Module;
-
 namespace StuiPodcast.App.Command.Handler;
 
 internal sealed class CmdNavigationHandler : ICmdHandler
@@ -11,17 +9,17 @@ internal sealed class CmdNavigationHandler : ICmdHandler
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
-        var ui = ctx.Ui; var data = ctx.Data; var ep = ctx.Episodes;
+        var nav = ctx.Cases.Navigation;
         switch (cmd.Kind)
         {
-            case TopCommand.Next: CmdNavigationModule.SelectRelative(+1, ui, data, ep); return;
-            case TopCommand.Prev: CmdNavigationModule.SelectRelative(-1, ui, data, ep); return;
-            case TopCommand.Goto: CmdNavigationModule.ExecGoto(cmd.Args, ui, data, ep); return;
-            case TopCommand.VimTop:    CmdNavigationModule.SelectAbsolute(0, ui, data, ep); return;
-            case TopCommand.VimMiddle: CmdNavigationModule.SelectMiddle(ui, data, ep);     return;
-            case TopCommand.VimBottom: CmdNavigationModule.SelectAbsolute(int.MaxValue, ui, data, ep); return;
-            case TopCommand.NextUnplayed: CmdNavigationModule.JumpUnplayed(+1, ui, ctx.Playback, data, ep); return;
-            case TopCommand.PrevUnplayed: CmdNavigationModule.JumpUnplayed(-1, ui, ctx.Playback, data, ep); return;
+            case TopCommand.Next: nav.SelectRelative(+1); return;
+            case TopCommand.Prev: nav.SelectRelative(-1); return;
+            case TopCommand.Goto: nav.ExecGoto(cmd.Args); return;
+            case TopCommand.VimTop:       nav.SelectAbsolute(0); return;
+            case TopCommand.VimMiddle:    nav.SelectMiddle();    return;
+            case TopCommand.VimBottom:    nav.SelectAbsolute(int.MaxValue); return;
+            case TopCommand.NextUnplayed: nav.JumpUnplayed(+1); return;
+            case TopCommand.PrevUnplayed: nav.JumpUnplayed(-1); return;
         }
     }
 }

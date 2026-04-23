@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -9,11 +9,16 @@ namespace StuiPodcast.App.Tests.Commands;
 public sealed class CmdQueueModuleTests
 {
     private readonly FakeUiShell _ui = new();
-    private readonly AppData _data = new();
     private readonly FakeEpisodeStore _episodes = new();
     private readonly FakeQueueService _queue = new();
+    private readonly QueueUseCase _sut;
     private bool _saved;
     private Task SaveAsync() { _saved = true; return Task.CompletedTask; }
+
+    public CmdQueueModuleTests()
+    {
+        _sut = new QueueUseCase(_ui, SaveAsync, _episodes, _queue);
+    }
 
     private Episode MakeEpisode()
     {
@@ -26,14 +31,14 @@ public sealed class CmdQueueModuleTests
     [Fact]
     public void Returns_false_for_unrelated_command()
     {
-        CmdQueueModule.HandleQueue(":help", _ui, _data, SaveAsync, _episodes, _queue).Should().BeFalse();
+        _sut.Handle(":help").Should().BeFalse();
     }
 
     [Fact]
     public void Add_adds_episode_to_queue()
     {
         var ep = MakeEpisode();
-        CmdQueueModule.HandleQueue(":queue add", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue add").Should().BeTrue();
         _queue.Snapshot().Should().Contain(ep.Id);
         _saved.Should().BeTrue();
     }
@@ -43,7 +48,7 @@ public sealed class CmdQueueModuleTests
     {
         var ep = MakeEpisode();
         _queue.Seed(ep.Id);
-        CmdQueueModule.HandleQueue(":queue toggle", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue toggle").Should().BeTrue();
         _queue.Snapshot().Should().NotContain(ep.Id);
     }
 
@@ -51,7 +56,7 @@ public sealed class CmdQueueModuleTests
     public void Toggle_adds_if_not_queued()
     {
         var ep = MakeEpisode();
-        CmdQueueModule.HandleQueue(":queue toggle", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue toggle").Should().BeTrue();
         _queue.Snapshot().Should().Contain(ep.Id);
     }
 
@@ -60,7 +65,7 @@ public sealed class CmdQueueModuleTests
     {
         var ep = MakeEpisode();
         _queue.Seed(ep.Id);
-        CmdQueueModule.HandleQueue(":queue rm", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue rm").Should().BeTrue();
         _queue.Snapshot().Should().NotContain(ep.Id);
     }
 
@@ -69,7 +74,7 @@ public sealed class CmdQueueModuleTests
     {
         var ep = MakeEpisode();
         _queue.Seed(ep.Id, Guid.NewGuid());
-        CmdQueueModule.HandleQueue(":queue clear", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue clear").Should().BeTrue();
         _queue.Snapshot().Should().BeEmpty();
     }
 
@@ -78,7 +83,7 @@ public sealed class CmdQueueModuleTests
     {
         var ep = MakeEpisode();
         _queue.Seed(ep.Id, ep.Id, ep.Id);
-        CmdQueueModule.HandleQueue(":queue uniq", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue uniq").Should().BeTrue();
         _queue.Snapshot().Should().HaveCount(1);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("uniq"));
     }
@@ -90,7 +95,7 @@ public sealed class CmdQueueModuleTests
         _queue.Seed(ids.ToArray());
         var ep = MakeEpisode();
 
-        CmdQueueModule.HandleQueue(":queue shuffle", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue shuffle").Should().BeTrue();
         _queue.Snapshot().Should().BeEquivalentTo(ids);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("shuffled"));
     }
@@ -104,7 +109,7 @@ public sealed class CmdQueueModuleTests
         _queue.Seed(ep1.Id, ep2.Id);
         _ui.SelectedEpisode = ep1;
 
-        CmdQueueModule.HandleQueue(":queue move down", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue move down").Should().BeTrue();
         _queue.Snapshot().Should().Equal(ep2.Id, ep1.Id);
     }
 
@@ -118,7 +123,7 @@ public sealed class CmdQueueModuleTests
         _queue.Seed(ep1.Id, ep2.Id, ep3.Id);
         _ui.SelectedEpisode = ep3;
 
-        CmdQueueModule.HandleQueue(":queue move top", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue move top").Should().BeTrue();
         _queue.Snapshot()[0].Should().Be(ep3.Id);
     }
 
@@ -126,7 +131,7 @@ public sealed class CmdQueueModuleTests
     public void Q_shortcut_acts_as_queue_add()
     {
         var ep = MakeEpisode();
-        CmdQueueModule.HandleQueue("q", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle("q").Should().BeTrue();
         _queue.Snapshot().Should().Contain(ep.Id);
     }
 
@@ -134,7 +139,7 @@ public sealed class CmdQueueModuleTests
     public void No_selected_episode_is_noop()
     {
         _ui.SelectedEpisode = null;
-        CmdQueueModule.HandleQueue(":queue add", _ui, _data, SaveAsync, _episodes, _queue).Should().BeTrue();
+        _sut.Handle(":queue add").Should().BeTrue();
         _queue.Snapshot().Should().BeEmpty();
     }
 }

@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -11,7 +11,15 @@ public sealed class CmdHistoryModuleTests
     private readonly FakeUiShell _ui = new();
     private readonly AppData _data = new();
     private readonly FakeEpisodeStore _episodes = new();
-    private Task SaveAsync() => Task.CompletedTask;
+    private readonly FakeFeedStore _feeds = new();
+    private readonly HistoryUseCase _sut;
+
+    public CmdHistoryModuleTests()
+    {
+        Task SaveAsync() => Task.CompletedTask;
+        var view = new ViewUseCase(_ui, _data, SaveAsync, _episodes, _feeds);
+        _sut = new HistoryUseCase(_ui, _data, SaveAsync, _episodes, view);
+    }
 
     [Fact]
     public void Clear_resets_all_play_timestamps()
@@ -29,7 +37,7 @@ public sealed class CmdHistoryModuleTests
             Progress = new EpisodeProgress { LastPlayedAt = DateTimeOffset.UtcNow }
         });
 
-        CmdHistoryModule.ExecHistory(new[] { "clear" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "clear" });
 
         _episodes.Snapshot().Should().OnlyContain(e => e.Progress.LastPlayedAt == null);
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared") && m.Text.Contains("2"));
@@ -38,7 +46,7 @@ public sealed class CmdHistoryModuleTests
     [Fact]
     public void Size_sets_history_size()
     {
-        CmdHistoryModule.ExecHistory(new[] { "size", "50" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "size", "50" });
         _data.HistorySize.Should().Be(50);
         _ui.LastHistoryLimit.Should().Be(50);
     }
@@ -46,28 +54,28 @@ public sealed class CmdHistoryModuleTests
     [Fact]
     public void Size_clamps_to_minimum_10()
     {
-        CmdHistoryModule.ExecHistory(new[] { "size", "1" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "size", "1" });
         _data.HistorySize.Should().Be(10);
     }
 
     [Fact]
     public void Size_clamps_to_maximum_10000()
     {
-        CmdHistoryModule.ExecHistory(new[] { "size", "99999" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "size", "99999" });
         _data.HistorySize.Should().Be(10000);
     }
 
     [Fact]
     public void Size_without_number_shows_usage()
     {
-        CmdHistoryModule.ExecHistory(new[] { "size" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "size" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 
     [Fact]
     public void Unknown_subcommand_shows_help()
     {
-        CmdHistoryModule.ExecHistory(new[] { "banana" }, _ui, _data, SaveAsync, _episodes);
+        _sut.Exec(new[] { "banana" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("clear") && m.Text.Contains("size"));
     }
 }

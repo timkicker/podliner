@@ -1,5 +1,5 @@
 using FluentAssertions;
-using StuiPodcast.App.Command.Module;
+using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
 using Xunit;
@@ -12,14 +12,20 @@ public sealed class CmdViewModuleTests
     private readonly AppData _data = new();
     private readonly FakeEpisodeStore _episodes = new();
     private readonly FakeFeedStore _feeds = new();
+    private readonly ViewUseCase _sut;
     private bool _saved;
-    private Task SaveAsync() { _saved = true; return Task.CompletedTask; }
+
+    public CmdViewModuleTests()
+    {
+        Task SaveAsync() { _saved = true; return Task.CompletedTask; }
+        _sut = new ViewUseCase(_ui, _data, SaveAsync, _episodes, _feeds);
+    }
 
     [Fact]
     public void Filter_unplayed_sets_flag()
     {
         _data.UnplayedOnly = false;
-        CmdViewModule.ExecFilter(new[] { "unplayed" }, _ui, _data, SaveAsync);
+        _sut.ExecFilter(new[] { "unplayed" });
         _data.UnplayedOnly.Should().BeTrue();
         _ui.LastUnplayedFilterVisual.Should().BeTrue();
         _saved.Should().BeTrue();
@@ -29,7 +35,7 @@ public sealed class CmdViewModuleTests
     public void Filter_all_clears_flag()
     {
         _data.UnplayedOnly = true;
-        CmdViewModule.ExecFilter(new[] { "all" }, _ui, _data, SaveAsync);
+        _sut.ExecFilter(new[] { "all" });
         _data.UnplayedOnly.Should().BeFalse();
     }
 
@@ -37,9 +43,9 @@ public sealed class CmdViewModuleTests
     public void Filter_toggle_flips()
     {
         _data.UnplayedOnly = false;
-        CmdViewModule.ExecFilter(new[] { "toggle" }, _ui, _data, SaveAsync);
+        _sut.ExecFilter(new[] { "toggle" });
         _data.UnplayedOnly.Should().BeTrue();
-        CmdViewModule.ExecFilter(new[] { "toggle" }, _ui, _data, SaveAsync);
+        _sut.ExecFilter(new[] { "toggle" });
         _data.UnplayedOnly.Should().BeFalse();
     }
 
@@ -47,14 +53,14 @@ public sealed class CmdViewModuleTests
     public void Filter_empty_arg_toggles()
     {
         _data.UnplayedOnly = false;
-        CmdViewModule.ExecFilter(Array.Empty<string>(), _ui, _data, SaveAsync);
+        _sut.ExecFilter(Array.Empty<string>());
         _data.UnplayedOnly.Should().BeTrue();
     }
 
     [Fact]
     public void Filter_invalid_shows_usage()
     {
-        CmdViewModule.ExecFilter(new[] { "bogus" }, _ui, _data, SaveAsync);
+        _sut.ExecFilter(new[] { "bogus" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("usage"));
     }
 
@@ -63,7 +69,7 @@ public sealed class CmdViewModuleTests
     {
         _data.SortBy = "title";
         _data.SortDir = "asc";
-        CmdViewModule.ExecSort(new[] { "reset" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "reset" });
         _data.SortBy.Should().Be("pubdate");
         _data.SortDir.Should().Be("desc");
         _saved.Should().BeTrue();
@@ -73,16 +79,16 @@ public sealed class CmdViewModuleTests
     public void Sort_reverse_toggles_direction()
     {
         _data.SortDir = "desc";
-        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "reverse" });
         _data.SortDir.Should().Be("asc");
-        CmdViewModule.ExecSort(new[] { "reverse" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "reverse" });
         _data.SortDir.Should().Be("desc");
     }
 
     [Fact]
     public void Sort_by_title_asc()
     {
-        CmdViewModule.ExecSort(new[] { "by", "title", "asc" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "by", "title", "asc" });
         _data.SortBy.Should().Be("title");
         _data.SortDir.Should().Be("asc");
     }
@@ -90,7 +96,7 @@ public sealed class CmdViewModuleTests
     [Fact]
     public void Sort_by_invalid_key_shows_error()
     {
-        CmdViewModule.ExecSort(new[] { "by", "bogus" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "by", "bogus" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("invalid"));
     }
 
@@ -99,7 +105,7 @@ public sealed class CmdViewModuleTests
     {
         _data.SortBy = "title";
         _data.SortDir = "asc";
-        CmdViewModule.ExecSort(new[] { "show" }, _ui, _data, SaveAsync, _feeds, _episodes);
+        _sut.ExecSort(new[] { "show" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("title") && m.Text.Contains("asc"));
     }
 
@@ -107,7 +113,7 @@ public sealed class CmdViewModuleTests
     public void PlayerBar_toggle()
     {
         _data.PlayerAtTop = false;
-        CmdViewModule.ExecPlayerBar(Array.Empty<string>(), _ui, _data, SaveAsync);
+        _sut.ExecPlayerBar(Array.Empty<string>());
         _ui.PlayerPlacementToggled.Should().BeTrue();
         _data.PlayerAtTop.Should().BeTrue();
     }
@@ -115,7 +121,7 @@ public sealed class CmdViewModuleTests
     [Fact]
     public void PlayerBar_top()
     {
-        CmdViewModule.ExecPlayerBar(new[] { "top" }, _ui, _data, SaveAsync);
+        _sut.ExecPlayerBar(new[] { "top" });
         _ui.LastPlayerPlacement.Should().BeTrue();
         _data.PlayerAtTop.Should().BeTrue();
     }
@@ -123,7 +129,7 @@ public sealed class CmdViewModuleTests
     [Fact]
     public void PlayerBar_bottom()
     {
-        CmdViewModule.ExecPlayerBar(new[] { "bottom" }, _ui, _data, SaveAsync);
+        _sut.ExecPlayerBar(new[] { "bottom" });
         _ui.LastPlayerPlacement.Should().BeFalse();
         _data.PlayerAtTop.Should().BeFalse();
     }
@@ -136,7 +142,7 @@ public sealed class CmdViewModuleTests
         _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Hello World", AudioUrl = "x" });
         _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Goodbye", AudioUrl = "y" });
 
-        CmdViewModule.ExecSearch(new[] { "Hello" }, _ui, _data, _episodes);
+        _sut.ExecSearch(new[] { "Hello" });
 
         _ui.SetEpisodeCalls.Should().HaveCount(1);
         _ui.SetEpisodeCalls[0].Episodes.Should().HaveCount(1);
@@ -150,7 +156,7 @@ public sealed class CmdViewModuleTests
         _ui.SelectedFeedId = feedId;
         _episodes.Seed(new Episode { Id = Guid.NewGuid(), FeedId = feedId, Title = "Ep1", AudioUrl = "x" });
 
-        CmdViewModule.ExecSearch(new[] { "clear" }, _ui, _data, _episodes);
+        _sut.ExecSearch(new[] { "clear" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared"));
     }
 }
