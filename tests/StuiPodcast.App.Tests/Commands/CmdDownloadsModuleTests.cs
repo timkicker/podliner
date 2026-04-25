@@ -30,7 +30,7 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         _dlm = new DownloadManager(_data, _lib, _dir);
         _ui = new FakeUiShell();
         var view = new ViewUseCase(_ui, _data, Save, _episodes, _feeds);
-        _sut = new DownloadUseCase(_ui, Save, _episodes, _dlm, view);
+        _sut = new DownloadUseCase(_ui, Save, _episodes, _dlm, view, _data);
     }
 
     public void Dispose()
@@ -229,5 +229,49 @@ public sealed class CmdDownloadsModuleTests : IDisposable
         _sut.DlToggle("on");
 
         _ui.OsdMessages.Should().BeEmpty();
+    }
+
+    // ── :downloads set-dir (issue #25) ───────────────────────────────────────
+
+    [Fact]
+    public void SetDir_with_no_args_shows_current_default()
+    {
+        _sut.Handle(":downloads set-dir").Should().BeTrue();
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("default") || m.Text.Contains("usage"));
+    }
+
+    [Fact]
+    public void SetDir_with_path_writes_AppData_and_persists()
+    {
+        var target = Path.Combine(_dir, "my-podcasts");
+        _sut.Handle($":downloads set-dir {target}").Should().BeTrue();
+
+        _data.DownloadDir.Should().Be(target);
+        _saved.Should().BeTrue("changing the dir must trigger a save");
+    }
+
+    [Fact]
+    public void SetDir_resets_to_default_on_reset_keyword()
+    {
+        _data.DownloadDir = Path.Combine(_dir, "anything");
+
+        _sut.Handle(":downloads set-dir reset").Should().BeTrue();
+
+        _data.DownloadDir.Should().BeNull();
+    }
+
+    [Fact]
+    public void SetDir_strips_quotes_from_path()
+    {
+        var target = Path.Combine(_dir, "with space");
+        _sut.Handle($":downloads set-dir \"{target}\"").Should().BeTrue();
+        _data.DownloadDir.Should().Be(target);
+    }
+
+    [Fact]
+    public void SetDir_resolves_relative_to_absolute()
+    {
+        _sut.Handle(":downloads set-dir relative-folder").Should().BeTrue();
+        Path.IsPathRooted(_data.DownloadDir).Should().BeTrue();
     }
 }

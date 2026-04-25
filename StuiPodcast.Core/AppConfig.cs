@@ -19,6 +19,12 @@ namespace StuiPodcast.Core
         public NetworkProfile NetworkProfile { get; set; } = NetworkProfile.Standard;
         public bool StartOffline { get; set; } = false;
 
+        // Override for the directory where episodes get downloaded. Null
+        // means "use the platform default" (~/Podcasts on Linux/macOS,
+        // %USERPROFILE%\Podcasts on Windows). Persisted so the value
+        // survives runs.
+        public string? DownloadDir { get; set; }
+
         // ui layout
         public UiBlock Ui { get; set; } = new();
 

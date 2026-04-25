@@ -17,14 +17,16 @@ internal sealed class DownloadUseCase
     readonly IEpisodeStore _episodes;
     readonly DownloadManager _dlm;
     readonly ViewUseCase _view;
+    readonly AppData? _data;
 
-    public DownloadUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, DownloadManager dlm, ViewUseCase view)
+    public DownloadUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, DownloadManager dlm, ViewUseCase view, AppData? data = null)
     {
         _ui = ui;
         _persist = persist;
         _episodes = episodes;
         _dlm = dlm;
         _view = view;
+        _data = data;
     }
 
     public bool Handle(string cmd)
@@ -75,7 +77,46 @@ internal sealed class DownloadUseCase
                 return true;
             }
 
-            _ui.ShowOsd("downloads: retry-failed | clear-queue | open-dir", 1200);
+            if (sub == "set-dir")
+            {
+                if (_data == null) { _ui.ShowOsd("downloads: set-dir not available here", 1500); return true; }
+
+                // Everything after "set-dir" is the path. Quotes optional.
+                var rest = cmd.Substring(":downloads".Length).TrimStart();
+                if (rest.StartsWith("set-dir", StringComparison.OrdinalIgnoreCase))
+                    rest = rest.Substring("set-dir".Length).Trim();
+                rest = rest.Trim('"', '\'');
+
+                if (rest.Length == 0)
+                {
+                    var current = _data.DownloadDir;
+                    _ui.ShowOsd(current is null
+                        ? "downloads dir: (default ~/Podcasts) — usage: :downloads set-dir <path|reset>"
+                        : $"downloads dir: {current} — usage: :downloads set-dir <path|reset>", 2500);
+                    return true;
+                }
+
+                if (rest.Equals("reset", StringComparison.OrdinalIgnoreCase) ||
+                    rest.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+                    rest.Equals("clear", StringComparison.OrdinalIgnoreCase))
+                {
+                    _data.DownloadDir = null;
+                    _ = _persist();
+                    _ui.ShowOsd("downloads dir: reset to default", 1500);
+                    return true;
+                }
+
+                // Tilde + relative paths to absolute. Basic checks only — we
+                // don't try to mkdir here, the next download will create the
+                // dir on demand and surface any failure via Serilog.
+                var expanded = ExpandPath(rest);
+                _data.DownloadDir = expanded;
+                _ = _persist();
+                _ui.ShowOsd($"downloads dir: {expanded}", 2000);
+                return true;
+            }
+
+            _ui.ShowOsd("downloads: retry-failed | clear-queue | open-dir | set-dir <path>", 1500);
             return true;
         }
 
@@ -164,6 +205,18 @@ internal sealed class DownloadUseCase
             return any;
         }
         catch { return null; }
+    }
+
+    // Expands "~" and resolves relative paths against the user's home so
+    // typing `:downloads set-dir ~/podcasts` does what the user expects.
+    static string ExpandPath(string raw)
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var p = raw;
+        if (p == "~") p = home;
+        else if (p.StartsWith("~/") || p.StartsWith("~\\"))
+            p = Path.Combine(home, p.Substring(2));
+        return Path.IsPathRooted(p) ? p : Path.GetFullPath(p);
     }
 
     static bool TryOpenSystem(string url)

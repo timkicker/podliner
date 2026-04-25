@@ -20,6 +20,7 @@ static class AppBridge
         data.SortDir         = app.SortDir;
         data.FeedSortBy      = app.FeedSortBy;
         data.FeedSortDir     = app.FeedSortDir;
+        data.DownloadDir     = app.DownloadDir;
     }
 
     public static void SyncFromAppDataToFacade(AppData data, AppFacade app)
@@ -34,5 +35,6 @@ static class AppBridge
         app.SortDir          = data.SortDir;
         app.FeedSortBy       = data.FeedSortBy;
         app.FeedSortDir      = data.FeedSortDir;
+        app.DownloadDir      = data.DownloadDir;
     }
 }

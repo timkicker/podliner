@@ -688,17 +688,28 @@ namespace StuiPodcast.Infra.Download
 
         #region helpers
 
+        // Public diagnostic accessor. Lets tests + the UI ask "where would
+        // a new download land right now?" without having to actually enqueue
+        // a download. Wraps ResolveDownloadRoot so the algorithm stays in
+        // one place.
+        public string CurrentDownloadRoot() => ResolveDownloadRoot();
+
+        // Returns the directory to download episodes into. Honours the
+        // user's AppData.DownloadDir override; falls back to the platform
+        // default when null/empty. Pure read: we deliberately do NOT
+        // write the default back into AppData.DownloadDir, so the config
+        // file stays clean (null = "use platform default") and the user's
+        // explicit override is never accidentally clobbered.
         private string ResolveDownloadRoot()
         {
             string root;
             lock (_gate)
             {
-                root = _data.DownloadDir;
+                root = _data.DownloadDir ?? "";
                 if (string.IsNullOrWhiteSpace(root))
                 {
                     var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                     root = Path.Combine(home, "Podcasts");
-                    _data.DownloadDir = root;
                 }
             }
             Directory.CreateDirectory(root);

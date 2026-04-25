@@ -144,4 +144,40 @@ public sealed class AppFacadeTests : IDisposable
         _facade.TryGetLocalPath(Guid.NewGuid(), out var path).Should().BeFalse();
         path.Should().BeNull();
     }
+
+    // ── DownloadDir override (issue #25) ────────────────────────────────────
+
+    [Fact]
+    public void DownloadDir_defaults_to_null_meaning_use_platform_default()
+    {
+        _facade.DownloadDir.Should().BeNull();
+    }
+
+    [Fact]
+    public void DownloadDir_roundtrips_through_facade()
+    {
+        var path = Path.Combine(_dir, "podcasts");
+        _facade.DownloadDir = path;
+        _facade.DownloadDir.Should().Be(path);
+        _config.Current.DownloadDir.Should().Be(path);
+    }
+
+    [Fact]
+    public void DownloadDir_whitespace_normalises_to_null()
+    {
+        _facade.DownloadDir = "   ";
+        _facade.DownloadDir.Should().BeNull();
+    }
+
+    [Fact]
+    public void DownloadDir_persists_to_disk_after_save()
+    {
+        var path = Path.Combine(_dir, "music", "podcasts");
+        _facade.DownloadDir = path;
+        _config.SaveNow();
+
+        var fresh = new ConfigStore(_dir);
+        fresh.Load();
+        fresh.Current.DownloadDir.Should().Be(path);
+    }
 }

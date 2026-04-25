@@ -211,8 +211,15 @@ namespace StuiPodcast.App
                 Category: HelpCategory.Downloads, Rank: 18),
 
             new(":downloads", "Downloads overview & actions.",
-                "[retry-failed | clear-queue | open-dir]",
-                Examples: new[]{ ":downloads", ":downloads retry-failed", ":downloads clear-queue", ":downloads open-dir" },
+                "[retry-failed | clear-queue | open-dir | set-dir <path|reset>]",
+                Examples: new[]{
+                    ":downloads",
+                    ":downloads retry-failed",
+                    ":downloads clear-queue",
+                    ":downloads open-dir",
+                    ":downloads set-dir ~/Music/podcasts",
+                    ":downloads set-dir reset"
+                },
                 Category: HelpCategory.Downloads, Rank: 32),
 
             // queue

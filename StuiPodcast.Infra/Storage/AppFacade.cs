@@ -102,6 +102,19 @@ namespace StuiPodcast.Infra.Storage
             get => ConfigStore.Current.ViewDefaults.FeedSortDir;
             set { ConfigStore.Current.ViewDefaults.FeedSortDir = value ?? "asc"; ConfigStore.SaveAsync(); }
         }
+
+        // Override directory for episode downloads. Null means "use the
+        // platform default". Whitespace-only values normalise to null so
+        // a stray edit in appsettings.json doesn't try to mkdir " ".
+        public string? DownloadDir
+        {
+            get => ConfigStore.Current.DownloadDir;
+            set
+            {
+                ConfigStore.Current.DownloadDir = string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
+                ConfigStore.SaveAsync();
+            }
+        }
         #endregion
 
         #region read only views

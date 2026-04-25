@@ -58,7 +58,7 @@ internal sealed class CmdCases
         Feed       = new FeedUseCase(ui, data, persist, episodes, feedStore);
         Navigation = new NavigationUseCase(ui, data, episodes, playback);
         Queue      = new QueueUseCase(ui, persist, episodes, queue);
-        Download   = new DownloadUseCase(ui, persist, episodes, dlm, View);
+        Download   = new DownloadUseCase(ui, persist, episodes, dlm, View, data);
         Opml       = new OpmlUseCase(ui, persist, feedStore);
         Transport  = new TransportUseCase(audioPlayer, ui, data, persist, episodes);
         Engine     = new EngineUseCase(audioPlayer, ui, data, persist, switchEngine);

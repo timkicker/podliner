@@ -203,7 +203,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
   - Windows: `%LOCALAPPDATA%\podliner\logs\`
   - File pattern: `podliner-.log` (daily)
   - Example: `…/podliner/logs/podliner-YYYYMMDD.log`
-- **Downloads**: `~/Podcasts/` by default (all platforms); override by setting `DownloadDir` in `appsettings.json`
+- **Downloads**: `~/Podcasts/` by default (all platforms). Override at runtime with `:downloads set-dir <path>` (or `set-dir reset` to restore default), or by setting `DownloadDir` in `appsettings.json`.
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
 > Back up `appsettings.json` and `library.json` to migrate settings and library to another machine.
