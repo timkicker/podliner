@@ -131,20 +131,7 @@ Podliner syncs your subscriptions and play history with any gPodder-compatible s
 
 **Nextcloud + 2FA / WebAuthn:** generic Basic-Auth with your normal password fails with HTTP 401 on 2FA-enabled accounts. Create a dedicated App-Password in Nextcloud (Settings → Security → Devices & sessions → *Create new app password*) and use that.
 
-The detected flavor is stored in `gpodder.json` so subsequent launches don't re-probe. `:sync status` shows which flavor is active.
-
-**Common commands**
-
-| Command | Description |
-|---------|-------------|
-| `:sync login <server> <user> <pass>` | Log in and store credentials |
-| `:sync` | Full sync (pull then push) |
-| `:sync push` | Upload subscription changes and play history |
-| `:sync pull` | Download subscription changes |
-| `:sync status` | Show server, flavor, device, pending actions |
-| `:sync auto on\|off` | Toggle auto-sync |
-| `:sync logout` | Remove credentials |
-| `:sync help` | In-app guide |
+The detected flavor is stored in `gpodder.json` so subsequent launches don't re-probe. `:sync status` shows which flavor is active. Run `:sync help` in the app for the full command reference.
 
 Credentials are stored in the OS keyring when available (libsecret on Linux, Keychain on macOS, Credential Store on Windows), with a plaintext fallback in `gpodder.json` if the keyring is unavailable.
 
