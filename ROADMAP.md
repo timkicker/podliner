@@ -54,6 +54,8 @@
 - [X] Removed the dead `switchEngine` chain: it was threaded from `Program.Main` through `WireUi`, `UiCommandWiring`, `CmdRouter` into `CmdContext.SwitchEngine` and never read; `:engine` has always gone through the delegate `CmdCases` was built with
 
 ### Refactor
+- [X] `UiPlaybackWiring` play path covered through the full `WireUi` fixture
+- [X] Fixed a misleading message: with `:play-source local` and no download the app said "offline: not downloaded" even while online; it now names the setting
 - [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)
 - [X] Drop the duplicate `QueueUseCase` construction in `CmdCases` (first instance is overwritten immediately)
 - [X] Add a `VerySlowNetwork` status, the second stage in `PlaybackCoordinator` fires `SlowNetwork` twice

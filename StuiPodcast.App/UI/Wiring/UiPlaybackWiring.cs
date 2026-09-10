@@ -45,8 +45,16 @@ internal static class UiPlaybackWiring
             var source = Services.PlaySourceResolver.Resolve(data, localPath, ep);
             if (source == null)
             {
+                // Name the actual reason. Blaming the network while online
+                // sends the user looking in the wrong place; with
+                // ":play-source local" the setting is what blocks playback.
                 ui.SetPlayerLoading(false);
-                ui.ShowOsd(localPath == null ? "offline: not downloaded" : "no playable source", 1500);
+                var mode = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
+                var why =
+                    mode == "local"       ? "play-source is local, but this episode isn't downloaded"
+                    : !data.NetworkOnline ? "offline: not downloaded"
+                    :                       "no playable source";
+                ui.ShowOsd(why, 1500);
                 return;
             }
 

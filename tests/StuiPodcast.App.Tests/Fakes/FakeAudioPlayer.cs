@@ -29,7 +29,16 @@ sealed class FakeAudioPlayer : IAudioPlayer
     public void SetSpeed(double s)  { LastSetSpeed  = s; State.Speed = s; }
     public void TogglePause()       { State.IsPlaying = !State.IsPlaying; }
     public void Stop()              { State.IsPlaying = false; State.EpisodeId = null; }
-    public void Play(string url, long? startMs = null) { }
+    // Records what the app asked to play, so tests can check the resolved
+    // source (local file vs feed URL) without a real engine.
+    public readonly List<(string Url, long? StartMs)> PlayCalls = new();
+    public string? LastPlayedUrl => PlayCalls.LastOrDefault().Url;
+
+    public void Play(string url, long? startMs = null)
+    {
+        lock (PlayCalls) PlayCalls.Add((url, startMs));
+        State.IsPlaying = true;
+    }
     public void SeekTo(TimeSpan t)      { State.Position = t; }
     public void SeekRelative(TimeSpan dt) { State.Position += dt; }
     public void Dispose() { }

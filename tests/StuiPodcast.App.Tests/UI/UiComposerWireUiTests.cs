@@ -178,6 +178,122 @@ public sealed class UiComposerWireUiTests
         f.Ui.ThemeToggled.Should().BeTrue();
     }
 
+    // ── playing an episode ──────────────────────────────────────────────────
+
+    // Play() is dispatched off the main loop, so give it a moment to land.
+    private static void SettlePlayback(Fixture f)
+    {
+        for (int i = 0; i < 50 && f.B.Player.PlayCalls.Count == 0; i++)
+        {
+            f.Tui.Pump();
+            Thread.Sleep(10);
+        }
+        f.Tui.Pump();
+    }
+
+    [Fact]
+    public void Pressing_enter_plays_the_selected_episode()
+    {
+        using var f = new Fixture();
+        var ep = f.Seed("Playable");
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = true;
+
+        f.Ui.RaisePlaySelected();
+        SettlePlayback(f);
+
+        f.B.Player.LastPlayedUrl.Should().Be(ep.AudioUrl);
+    }
+
+    [Fact]
+    public void Playing_marks_the_episode_as_now_playing()
+    {
+        using var f = new Fixture();
+        var ep = f.Seed("Playable");
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = true;
+
+        f.Ui.RaisePlaySelected();
+        SettlePlayback(f);
+
+        f.Ui.NowPlayingId.Should().Be(ep.Id);
+    }
+
+    [Fact]
+    public void Playing_stamps_the_last_played_time()
+    {
+        using var f = new Fixture();
+        var ep = f.Seed("Playable");
+        ep.Progress.LastPlayedAt = null;
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = true;
+
+        f.Ui.RaisePlaySelected();
+
+        ep.Progress.LastPlayedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Playing_offline_without_a_download_says_so()
+    {
+        using var f = new Fixture();
+        var ep = f.Seed("Not Downloaded");
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = false;
+
+        f.Ui.RaisePlaySelected();
+
+        f.B.Player.PlayCalls.Should().BeEmpty();
+        f.Ui.OsdMessages.Should().Contain(m => m.Text.Contains("not downloaded"));
+    }
+
+    [Fact]
+    public void Play_source_local_without_a_file_reports_no_source()
+    {
+        using var f = new Fixture();
+        var ep = f.Seed("Remote Only");
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = true;
+        f.B.Data.PlaySource = "local";
+
+        f.Ui.RaisePlaySelected();
+
+        f.B.Player.PlayCalls.Should().BeEmpty();
+        // It must not blame the network: we are online, the setting is what
+        // blocks playback.
+        f.Ui.OsdMessages.Should().Contain(m => m.Text.Contains("play-source is local"));
+        f.Ui.OsdMessages.Should().NotContain(m => m.Text.Contains("offline"));
+    }
+
+    [Fact]
+    public void Pressing_enter_with_nothing_selected_is_harmless()
+    {
+        using var f = new Fixture();
+        f.Ui.SelectedEpisode = null;
+
+        var act = () => f.Ui.RaisePlaySelected();
+
+        act.Should().NotThrow();
+        f.B.Player.PlayCalls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Playing_does_not_taint_the_stored_audio_url()
+    {
+        // The resolved source is swapped into the episode for the duration of
+        // Play() and must be restored, or a file:// URI ends up persisted.
+        using var f = new Fixture();
+        var ep = f.Seed("Playable");
+        var original = ep.AudioUrl;
+        f.Ui.SelectedEpisode = ep;
+        f.B.Data.NetworkOnline = true;
+
+        f.Ui.RaisePlaySelected();
+        SettlePlayback(f);
+
+        ep.AudioUrl.Should().Be(original);
+    }
+
     // ── refresh path ────────────────────────────────────────────────────────
 
     [Fact]
