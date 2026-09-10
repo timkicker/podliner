@@ -19,6 +19,18 @@ body:
       label: Platform
       multiple: true
       options: [Windows, macOS, Linux]
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install podliner?
+      description: Packages can lag behind the latest release, so this helps narrow things down.
+      options:
+        - Release binary / install script
+        - AUR (podliner-bin)
+        - winget
+        - Built from source
+        - Other / not sure
+    validations: { required: true }
   - type: input
     id: version
     attributes:
