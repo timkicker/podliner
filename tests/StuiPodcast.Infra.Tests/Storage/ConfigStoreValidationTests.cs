@@ -1,4 +1,5 @@
 using FluentAssertions;
+using StuiPodcast.Core;
 using StuiPodcast.Infra.Storage;
 using System.Text;
 using Xunit;
@@ -79,13 +80,35 @@ public sealed class ConfigStoreValidationTests : IDisposable
 
     [Theory]
     [InlineData("auto")]
+    [InlineData("vlc")]
     [InlineData("libvlc")]
     [InlineData("mpv")]
     [InlineData("ffplay")]
+    [InlineData("mediafoundation")]
     public void Known_engine_preferences_are_preserved(string engine)
     {
         var store = LoadWith("{ \"EnginePreference\": \"" + engine + "\" }");
         store.Current.EnginePreference.Should().Be(engine);
+    }
+
+    // Every value AudioEngineExt.ToWire can emit has to survive a load.
+    // AppBridge persists the engine through ToWire, so anything ConfigStore
+    // rejects here silently resets the user's engine choice to "auto" on the
+    // next launch.
+    [Theory]
+    [InlineData(AudioEngine.Auto)]
+    [InlineData(AudioEngine.Vlc)]
+    [InlineData(AudioEngine.Mpv)]
+    [InlineData(AudioEngine.Ffplay)]
+    [InlineData(AudioEngine.MediaFoundation)]
+    public void Engine_preference_survives_a_ToWire_roundtrip(AudioEngine engine)
+    {
+        var wire = engine.ToWire();
+
+        var store = LoadWith("{ \"EnginePreference\": \"" + wire + "\" }");
+
+        store.Current.EnginePreference.Should().Be(wire);
+        AudioEngineExt.FromWire(store.Current.EnginePreference).Should().Be(engine);
     }
 
     [Fact]

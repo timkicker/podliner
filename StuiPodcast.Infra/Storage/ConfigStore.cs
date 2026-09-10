@@ -32,7 +32,11 @@ namespace StuiPodcast.Infra.Storage
             if (c.Speed < 0.25) c.Speed = 0.25;
             if (c.Speed > 4.0) c.Speed = 4.0;
 
-            c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "libvlc", "mpv", "ffplay");
+            // Must accept everything AudioEngineExt.ToWire emits, plus "libvlc"
+            // as a legacy alias. A value missing here is silently reset to
+            // "auto" on load, which used to wipe a vlc/mediafoundation choice
+            // on every launch.
+            c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "vlc", "libvlc", "mpv", "ffplay", "mediafoundation");
             c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "HighContrast", "Native");
             c.GlyphSet         = NormalizeChoice(c.GlyphSet, "auto", "unicode", "ascii");
 
