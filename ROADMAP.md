@@ -42,10 +42,10 @@
 - [ ] `UI/Wiring/*` event subscription itself (needs `AppServices` to be constructible in a test)
 
 ### Refactor
-- [ ] Refactor Shell: split into subclasses
+- [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)
 - [X] Drop the duplicate `QueueUseCase` construction in `CmdCases` (first instance is overwritten immediately)
 - [X] Add a `VerySlowNetwork` status, the second stage in `PlaybackCoordinator` fires `SlowNetwork` twice
-- [ ] Update CLAUDE.md (describes `CmdQueueModule`/`CmdSyncModule` and "12 handler modules"; actual layout is `Command/Handler/` plus `Command/UseCases/`, and the stores, `AppServices`, `SleepTimer`, `UndoStack`, `ChaptersFetcher` and the gPodder flavors are missing)
+- [X] Update CLAUDE.md
 
 ## Later
 
