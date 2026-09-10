@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.UI;
 using Terminal.Gui;
 using Xunit;
@@ -373,5 +373,27 @@ public sealed class UiShellKeyBindingsTests
         Press(r, 'z').Should().BeFalse();
 
         r.Commands.Should().BeEmpty();
+    }
+
+    // ── leaving a search ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Esc_clears_an_active_search()
+    {
+        var r = new Recorder { LastSearch = "letters" };
+
+        Press(r, Key.Esc).Should().BeTrue();
+
+        r.Commands.Should().Contain(":search clear");
+    }
+
+    [Fact]
+    public void Esc_does_nothing_when_no_search_is_active()
+    {
+        var r = new Recorder { LastSearch = null };
+
+        Press(r, Key.Esc);
+
+        r.Commands.Should().NotContain(":search clear");
     }
 }

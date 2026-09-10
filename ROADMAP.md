@@ -13,6 +13,7 @@
 - [X] Help browser: the `Search:` label sat at the same X/Y as the search field and was overdrawn, so both tabs showed a blank first row
 - [X] `:theme` with no argument toggled the theme and then wiped `ThemePref`, losing the choice on the next start; unknown names silently applied MenuAccent
 - [X] F12 logs overlay showed a single line above 27 blank rows: `TextView.MoveEnd` parks the view on the last line even when the log fits
+- [X] A search could not be left: the episodes pane re-applies the last query on every rebuild and `:search clear` only rebuilt the list. `:search clear` now drops the filter and Esc on the list does the same
 
 ### Dependencies
 - [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)

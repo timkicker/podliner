@@ -44,14 +44,19 @@ internal sealed class ViewUseCase
     {
         var query = string.Join(' ', args ?? Array.Empty<string>()).Trim();
 
-        if (string.Equals(query, "clear", StringComparison.OrdinalIgnoreCase))
+        if (query.Length == 0 || string.Equals(query, "clear", StringComparison.OrdinalIgnoreCase))
         {
+            // Dropping the sticky filter is the part that matters; without it
+            // the pane keeps filtering every rebuild and the list never
+            // recovers, whatever we hand it here.
+            _ui.SetSearchFilter(null);
             var fid = _ui.GetSelectedFeedId();
             if (fid != null) _ui.SetEpisodesForFeed(fid.Value, _episodes.Snapshot());
             _ui.ShowOsd("search cleared", 800);
             return;
         }
 
+        _ui.SetSearchFilter(query);
         var feedId = _ui.GetSelectedFeedId();
         IEnumerable<Episode> list = _episodes.Snapshot();
 

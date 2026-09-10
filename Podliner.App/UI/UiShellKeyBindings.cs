@@ -107,6 +107,15 @@ internal static class UiShellKeyBindings
             return true;
         }
 
+        // On the list itself Esc is the way out of a search. The pane keeps
+        // the last query as a sticky filter, so without this there is no
+        // keyboard route back to the full list.
+        if (key == Key.Esc && !string.IsNullOrWhiteSpace(b.GetLastSearch()))
+        {
+            b.InvokeCommand(":search clear");
+            return true;
+        }
+
         if (key == Key.Space)
         {
             b.Player?.OptimisticToggle();

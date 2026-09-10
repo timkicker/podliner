@@ -66,6 +66,10 @@ internal interface IUiShell
     void RequestRefresh();
     void RequestQuit();
     void SetUnplayedFilterVisual(bool on);
+    // The episodes pane re-applies the last query on every rebuild, so the
+    // filter has to be settable and clearable from outside the search box.
+    void SetSearchFilter(string? query);
+
     // Returns the mode it landed on so callers can report and persist it.
     ThemeMode ToggleTheme();
     void SetTheme(ThemeMode mode);

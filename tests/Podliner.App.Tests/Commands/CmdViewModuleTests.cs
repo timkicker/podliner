@@ -205,4 +205,39 @@ public sealed class CmdViewModuleTests
         _ui.OsdMessages.Should().ContainSingle()
             .Which.Text.Should().Contain("banana").And.Contain("native");
     }
+
+    // ── :search ──────────────────────────────────────────────────────────────
+    //
+    // The episodes pane keeps the last query as a sticky filter and re-applies
+    // it on every rebuild, so clearing the list is not enough: the filter
+    // itself has to be dropped or the search can never be left.
+
+    [Fact]
+    public void Search_sets_the_sticky_filter()
+    {
+        _sut.ExecSearch(new[] { "letters" });
+
+        _ui.SearchFilter.Should().Be("letters");
+    }
+
+    [Fact]
+    public void Search_clear_drops_the_sticky_filter()
+    {
+        _sut.ExecSearch(new[] { "letters" });
+
+        _sut.ExecSearch(new[] { "clear" });
+
+        _ui.SearchFilter.Should().BeNull("otherwise the pane keeps filtering and the list never comes back");
+        _ui.OsdMessages.Last().Text.Should().Be("search cleared");
+    }
+
+    [Fact]
+    public void Search_with_no_argument_clears_too()
+    {
+        _sut.ExecSearch(new[] { "letters" });
+
+        _sut.ExecSearch(Array.Empty<string>());
+
+        _ui.SearchFilter.Should().BeNull();
+    }
 }

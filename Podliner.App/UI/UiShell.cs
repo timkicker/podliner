@@ -105,6 +105,12 @@ public sealed partial class UiShell : IUiShell
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
+    public void SetSearchFilter(string? query)
+    {
+        _lastSearch = string.IsNullOrWhiteSpace(query) ? null : query;
+        SelectedFeedChanged?.Invoke();
+    }
+
     public ThemeMode ToggleTheme()
     {
         _theme = _theme switch
