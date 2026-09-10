@@ -204,10 +204,10 @@ namespace Podliner.App
                 Examples: new[]{ ":save", ":save on", ":save -" },
                 Category: HelpCategory.Downloads, Rank: 44),
 
-            new(":download", "Mark/unmark for download (auto-queued).",
-                "[start|cancel]",
+            new(":download", "Queue, cancel or delete the download of the selected episode.",
+                "[start|cancel|rm]",
                 Aliases: new[]{ ":dl" },
-                Examples: new[]{ ":download", ":download start", ":dl", ":dl cancel" },
+                Examples: new[]{ ":download", ":download start", ":dl cancel", ":dl rm" },
                 Category: HelpCategory.Downloads, Rank: 18),
 
             new(":downloads", "Downloads overview & actions.",

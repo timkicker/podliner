@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 using Podliner.Infra.Download;
 
 namespace Podliner.App.Tests.Fakes;
@@ -54,6 +54,20 @@ sealed class FakeDownloadManager : IDownloadManager
         Forgotten.Add(episodeId);
         _queue.Remove(episodeId);
         _map.Remove(episodeId);
+    }
+
+    // Episodes whose file the caller asked to delete, and the bytes each
+    // delete should report back.
+    public List<Guid> Deleted { get; } = new();
+    public long BytesFreedPerDelete { get; set; } = 1024;
+
+    public long DeleteLocalFile(Guid episodeId)
+    {
+        var known = _map.ContainsKey(episodeId);
+        Deleted.Add(episodeId);
+        _queue.Remove(episodeId);
+        _map.Remove(episodeId);
+        return known ? BytesFreedPerDelete : 0;
     }
 
     public int ClearQueue()

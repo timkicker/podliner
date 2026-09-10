@@ -123,9 +123,9 @@ Full in-app help: `:h`
   Jump selection to top, middle, or bottom of the current list.
 
 ### Downloads
-- `:download [start|cancel]` (alias `:dl`)  
-  Mark or unmark the episode for download, optionally start or cancel.  
-  Examples: `:download`, `:dl`, `:dl cancel`
+- `:download [start|cancel|rm]` (alias `:dl`)  
+  Queue the episode for download, or start, cancel or delete it. `rm` deletes the downloaded file and frees the space.  
+  Examples: `:download`, `:dl cancel`, `:dl rm`
 - `:downloads [retry-failed | clear-queue | open-dir]`  
   Show downloads overview and actions.  
   Examples: `:downloads`, `:downloads retry-failed`, `:downloads open-dir`

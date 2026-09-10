@@ -19,6 +19,8 @@
 - [X] `:queue add` was a second name for `toggle`, so running it on a queued episode dropped it back out. `add` now appends, `toggle` toggles, both say which way it went
 - [X] `:queue rm` was not undoable although `:undo` advertises reverting the last destructive action. It now restores the episode at the index it held
 - [X] The help browser and COMMANDS.md still named the default OPML export `stui-feeds.opml` after the rename, while the code writes `podliner-feeds.opml`. A test now fails if the old name reappears in any help text
+- [X] No way to delete a download. `:download` on a finished one called `Forget()`, which drops the bookkeeping and leaves the file, and reported "Download unqueued". Added `:download rm` (`IDownloadManager.DeleteLocalFile`) and made the bare command say what is actually true
+- [X] `JsonStoreContractTests.Debounced_SaveAsync_coalesces_bursts` slept a flat 300ms against a 100ms debounce and failed on every macOS and Windows CI runner. It polls for the timer now
 
 ### Dependencies
 - [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)

@@ -105,6 +105,11 @@ namespace Podliner.Infra.Download
 
         private void SaveIndexDebounced() => _indexStore.SaveDebounced(CollectDoneItems);
 
+        // Writes the index straight away. Deleting a file has to survive a
+        // crash in the next 800ms, or the entry comes back on restart and
+        // points at a file that is gone.
+        public void SaveIndexNow() => _indexStore.SaveNow(CollectDoneItems);
+
         #endregion
 
         #region public control api
@@ -205,6 +210,42 @@ namespace Podliner.Infra.Download
                 Log.Information("dl/cancel id={Id} removedFromQueue={Removed} wasRunning={WasRunning}",
                     episodeId, pulsed, _running.ContainsKey(episodeId));
             }
+        }
+
+        // Deletes the downloaded file and drops the episode's download state.
+        // Returns the number of bytes freed; 0 when there was nothing on disk.
+        //
+        // Forget() alone only clears the bookkeeping, which is why ":download"
+        // on a finished download used to report success and free nothing.
+        public long DeleteLocalFile(Guid episodeId)
+        {
+            string? path;
+            lock (_gate)
+            {
+                path = _data.DownloadMap.TryGetValue(episodeId, out var st) ? st.LocalPath : null;
+            }
+
+            long freed = 0;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                try
+                {
+                    var fi = new FileInfo(path);
+                    if (fi.Exists) { freed = fi.Length; fi.Delete(); }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "dl/delete failed id={Id} path={Path}", episodeId, path);
+                    throw;
+                }
+            }
+
+            Forget(episodeId);
+            SaveIndexNow();
+            try { StatusChanged?.Invoke(episodeId, new DownloadStatus { State = DownloadState.None }); } catch { }
+
+            Log.Information("dl/delete id={Id} freed={Freed} path={Path}", episodeId, freed, path);
+            return freed;
         }
 
         // Thread-safe "cancel + drop all state" for an episode. Replaces the

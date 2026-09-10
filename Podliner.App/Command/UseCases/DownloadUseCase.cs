@@ -143,6 +143,28 @@ internal sealed class DownloadUseCase
                 _ui.ShowOsd("Download canceled ✖");
                 break;
 
+            case "rm":
+            case "remove":
+            case "delete":
+            {
+                if (_dlm.GetState(ep.Id) != DownloadState.Done)
+                {
+                    _ui.ShowOsd("download: nothing to delete", 1500);
+                    break;
+                }
+
+                try
+                {
+                    var freed = _dlm.DeleteLocalFile(ep.Id);
+                    _ui.ShowOsd($"Download removed ({FormatBytes(freed)} freed)", 2000);
+                }
+                catch (Exception ex)
+                {
+                    _ui.ShowOsd($"download: delete failed ({ex.GetType().Name})", 2500);
+                }
+                break;
+            }
+
             default:
             {
                 var st = _dlm.GetState(ep.Id);
@@ -151,6 +173,13 @@ internal sealed class DownloadUseCase
                     _dlm.Enqueue(ep.Id);
                     _dlm.EnsureRunning();
                     _ui.ShowOsd("Download queued ⌵");
+                }
+                else if (st == DownloadState.Done)
+                {
+                    // Forget() drops the bookkeeping and leaves the file, so
+                    // this used to report "unqueued" and free nothing. Deleting
+                    // media is not something a bare :download should do.
+                    _ui.ShowOsd("already downloaded, :download rm deletes it", 2500);
                 }
                 else
                 {
@@ -164,6 +193,14 @@ internal sealed class DownloadUseCase
         _ = _persist();
         _ui.RefreshEpisodesForSelectedFeed(_episodes.Snapshot());
         return true;
+    }
+
+    static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):0.0} GB";
+        if (bytes >= 1024L * 1024)        return $"{bytes / (1024.0 * 1024):0.0} MB";
+        if (bytes >= 1024)                return $"{bytes / 1024.0:0.0} KB";
+        return $"{bytes} B";
     }
 
     public void DlToggle(string arg)
