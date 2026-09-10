@@ -1,4 +1,4 @@
-using Podliner.App.Services;
+﻿using Podliner.App.Services;
 using Podliner.App.UI;
 
 namespace Podliner.App.Command.UseCases;
@@ -92,41 +92,59 @@ internal sealed class IoUseCase
         return null;
     }
 
+    // Runs the platform's clipboard tools in order until one of them takes
+    // the text. A tool that is not installed throws on Start and we move on;
+    // one that exits non-zero has failed and we move on too.
+    //
+    // The old version tried xclip and xsel and returned true unconditionally,
+    // so on Wayland ":copy" reported "copied" while the clipboard kept its
+    // previous contents: xclip exits 0 there without owning the selection.
     static bool TryCopyToClipboard(string text)
     {
-        try
+        var candidates = Services.ClipboardCommand.Candidates(
+            OperatingSystem.IsWindows(),
+            OperatingSystem.IsMacOS(),
+            Services.ClipboardCommand.HasWaylandSession(),
+            text);
+
+        foreach (var c in candidates)
         {
-            if (OperatingSystem.IsWindows())
+            try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo("powershell", $"-NoProfile -Command Set-Clipboard -Value @'\n{text}\n'@")
-                { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true };
+                var psi = new System.Diagnostics.ProcessStartInfo(c.File, c.Arguments)
+                {
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardInput = Services.ClipboardCommand.WritesToStdin(c)
+                };
+
                 using var p = System.Diagnostics.Process.Start(psi);
-                p?.WaitForExit(1200);
-                return p != null && p.ExitCode == 0;
-            }
-            if (OperatingSystem.IsMacOS())
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo("pbcopy") { UseShellExecute = false, RedirectStandardInput = true };
-                using var p = System.Diagnostics.Process.Start(psi);
-                p!.StandardInput.Write(text); p.StandardInput.Close(); p.WaitForExit(800);
+                if (p == null) continue;
+
+                if (Services.ClipboardCommand.WritesToStdin(c))
+                {
+                    p.StandardInput.Write(text);
+                    p.StandardInput.Close();
+                }
+
+                // xclip and wl-copy fork and keep running to serve the
+                // selection, which is a success, not a hang. Only an exit
+                // inside the window with a non-zero code means it failed.
+                if (p.WaitForExit(1200) && p.ExitCode != 0)
+                {
+                    Serilog.Log.Debug("copy: {Tool} exited {Code}", c.File, p.ExitCode);
+                    continue;
+                }
+
                 return true;
             }
-            foreach (var tool in new[] { "xclip", "xsel" })
+            catch (Exception ex)
             {
-                try
-                {
-                    var psi = tool == "xclip"
-                        ? new System.Diagnostics.ProcessStartInfo("xclip", "-selection clipboard")
-                        : new System.Diagnostics.ProcessStartInfo("xsel", "--clipboard --input");
-                    psi.UseShellExecute = false; psi.RedirectStandardInput = true;
-                    using var p = System.Diagnostics.Process.Start(psi);
-                    p!.StandardInput.Write(text); p.StandardInput.Close(); p.WaitForExit(800);
-                    return true;
-                }
-                catch { }
+                Serilog.Log.Debug(ex, "copy: {Tool} unavailable", c.File);
             }
         }
-        catch { }
+
         return false;
     }
 }

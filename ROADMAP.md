@@ -11,6 +11,8 @@
 - [ ] Fix playerui update (windows only?)
 - [X] Player control row overlaps itself below ~140 columns (now drops controls by tier: download, then skips + volume bar, then ±spd)
 - [X] `:add <url>` fetched, persisted and logged the feed and then left the sidebar empty until the next start. `FeedService` lives in Infra and writes through `AppFacade` into `LibraryStore`, which the App-side `FeedStore`/`EpisodeStore` snapshot caches cannot observe, so they kept handing out a list from before the feed existed. `LibraryStore.Revision` now stamps every structural change and both caches compare against it. Same root cause for episodes pulled by `:refresh`
+- [X] `:engine show` printed one of its three lines. `UiOsdOverlay` was pinned to `Height 3` and sized its width off the raw string, newlines included, so the box ran past the screen edge and painted only the middle line
+- [X] `:copy` reported "copied" and left the clipboard untouched on Wayland. The Linux path only tried xclip and xsel, and xclip exits 0 on a Wayland session without owning the selection; the result was never checked either. `wl-copy` is tried first there now and a non-zero exit falls through to the next tool
 - [X] Help browser: the `Search:` label sat at the same X/Y as the search field and was overdrawn, so both tabs showed a blank first row
 - [X] `:theme` with no argument toggled the theme and then wiped `ThemePref`, losing the choice on the next start; unknown names silently applied MenuAccent
 - [X] F12 logs overlay showed a single line above 27 blank rows: `TextView.MoveEnd` parks the view on the last line even when the log fits

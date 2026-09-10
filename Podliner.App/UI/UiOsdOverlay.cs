@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Terminal.Gui;
 
 namespace Podliner.App.UI;
@@ -70,24 +70,32 @@ internal sealed class UiOsdOverlay
 
         var driverCols = Application.Driver?.Cols ?? 80;
         var maxWidth = Math.Max(MinWidth, driverCols - 4); // 2 cols margin each side
-        var desired = Math.Clamp(text.Length + Padding, MinWidth, maxWidth);
 
-        // clip to one line (no wrapping)
-        var clippedText = text;
-        if (text.Length + Padding > maxWidth && maxWidth >= Padding)
+        // Callers may pass more than one line (":engine show" sends three).
+        // Each line is clipped on its own; sizing off the raw string counted
+        // the newlines and every line's length together, which made the box
+        // wider than the screen and still painted only one line of it.
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var roomForText = Math.Max(0, maxWidth - Padding - 1); // leave space for ellipsis
+
+        for (int i = 0; i < lines.Length; i++)
         {
-            var roomForText = Math.Max(0, maxWidth - Padding - 1); // leave space for ellipsis
-            clippedText = roomForText > 0 && text.Length > roomForText
-                ? text.Substring(0, roomForText) + "…"
-                : text;
-            desired = Math.Clamp(clippedText.Length + Padding, MinWidth, maxWidth);
+            var line = lines[i];
+            if (line.Length + Padding > maxWidth && maxWidth >= Padding && roomForText > 0 && line.Length > roomForText)
+                lines[i] = line.Substring(0, roomForText) + "…";
         }
+
+        var widest = 0;
+        foreach (var line in lines) widest = Math.Max(widest, line.Length);
+        var desired = Math.Clamp(widest + Padding, MinWidth, maxWidth);
+
+        var clippedText = string.Join("\n", lines);
 
         _lastText = clippedText;
         _label!.Text = _lastText;
 
         _win!.Width = Dim.Sized(desired);
-        _win.Height = Dim.Sized(3);
+        _win.Height = Dim.Sized(lines.Length + 2); // one row per line plus the borders
         _win.X = Pos.Center();
         _win.Y = Pos.At(1); // slightly below top edge
         _win.Visible = true;

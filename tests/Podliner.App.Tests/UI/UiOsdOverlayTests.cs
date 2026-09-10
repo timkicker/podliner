@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Debug;
 using Podliner.App.UI;
 using Terminal.Gui;
@@ -143,5 +143,58 @@ public sealed class UiOsdOverlayTests
         ShowAndPump(shell, tui, "💤 sleep timer: playback stopped");
 
         tui.ScreenContains("sleep timer").Should().BeTrue();
+    }
+
+    // ── multi-line messages ─────────────────────────────────────────────────
+    //
+    // ":engine show" builds three lines: the active engine, the preference and
+    // the capability list. The overlay was pinned to Height 3 and sized its
+    // width from the raw string length, so it painted one line of the three
+    // and made itself as wide as all of them put together.
+
+    [Fact]
+    public void Every_line_of_a_multi_line_message_reaches_the_screen()
+    {
+        using var tui = new TuiHarness(120, 30);
+        var shell = BuildShell();
+        tui.Render();
+
+        ShowAndPump(shell, tui, "engine active: mpv\npreference: auto\nsupports: seek speed volume");
+
+        tui.ScreenContains("engine active: mpv").Should().BeTrue(tui.Screen());
+        tui.ScreenContains("preference: auto").Should().BeTrue(tui.Screen());
+        tui.ScreenContains("supports: seek speed volume").Should().BeTrue(tui.Screen());
+    }
+
+    [Fact]
+    public void A_multi_line_box_is_only_as_wide_as_its_longest_line()
+    {
+        using var tui = new TuiHarness(120, 30);
+        var shell = BuildShell();
+        tui.Render();
+
+        ShowAndPump(shell, tui, "short\na much longer second line\nmid");
+
+        var row = tui.RowOf("a much longer second line");
+        row.Should().BeGreaterThan(-1);
+
+        // The box borders sit on the rows above and below the text block.
+        var top = tui.Line(row - 2);
+        top.Trim().Length.Should().BeLessThan(40,
+            "the width used to come from the whole string, newlines included");
+    }
+
+    [Fact]
+    public void A_single_line_message_still_gets_a_three_row_box()
+    {
+        using var tui = new TuiHarness(120, 30);
+        var shell = BuildShell();
+        tui.Render();
+
+        ShowAndPump(shell, tui, "queue: added");
+
+        var row = tui.RowOf("queue: added");
+        tui.Line(row - 1).Should().Contain("╭").And.NotContain("queue");
+        tui.Line(row + 1).Should().Contain("╰");
     }
 }
