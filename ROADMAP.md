@@ -72,6 +72,7 @@
 - [X] `q` now only quits; the bare-`q` alias for `:queue add` is gone from `QueueUseCase` and the help catalog
 
 ### Bugs
+- [X] The player bar showed 0% volume after launch: `ShowStartupEpisode` took `volume` and `speed` and used neither, so the persisted values were never painted. Found by driving the real app under tmux, not by the test suite
 - [X] `ConfigStore` rejected the theme name `User`, the toggle's fourth stop, and rewrote it to `auto` on load. Not user-visible, because `UiThemeResolver` maps `auto` to `User` as well, but the stored value was wrong and would have drifted with any change of default. Also dropped `HighContrast`, which was never a `ThemeMode`
 - [X] Removed `:feed remove` from the help catalog: it was documented as an alias of `:remove-feed` but `FeedUseCase` has no such subcommand, so it only ever printed a usage line
 - [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.

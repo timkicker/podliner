@@ -181,6 +181,54 @@ public sealed class UiShellRenderTests
         line.Length.Should().BeLessThanOrEqualTo(tui.Cols);
     }
 
+    // ── startup episode ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void The_startup_episode_shows_the_restored_volume()
+    {
+        // ShowStartupEpisode took volume and speed and ignored both, so the
+        // player bar read 0% after launch even with a volume of 100 saved.
+        using var tui = new TuiHarness();
+        var shell = BuildShell();
+        var ep = MakeEpisode("Resumed");
+        shell.SetFeeds(new[] { MakeFeed("Feed") });
+        shell.SetEpisodesForFeed(FeedId, new[] { ep });
+
+        shell.ShowStartupEpisode(ep, volume: 100, speed: 1.5);
+        tui.Render();
+
+        tui.ScreenContains("100%").Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_startup_episode_shows_the_restored_speed()
+    {
+        using var tui = new TuiHarness();
+        var shell = BuildShell();
+        var ep = MakeEpisode("Resumed");
+        shell.SetFeeds(new[] { MakeFeed("Feed") });
+        shell.SetEpisodesForFeed(FeedId, new[] { ep });
+
+        shell.ShowStartupEpisode(ep, volume: 42, speed: 1.5);
+        tui.Render();
+
+        tui.ScreenContains("1.5").Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_startup_episode_without_saved_values_does_not_throw()
+    {
+        using var tui = new TuiHarness();
+        var shell = BuildShell();
+        var ep = MakeEpisode("Resumed");
+        shell.SetFeeds(new[] { MakeFeed("Feed") });
+        shell.SetEpisodesForFeed(FeedId, new[] { ep });
+
+        var act = () => { shell.ShowStartupEpisode(ep); tui.Render(); };
+
+        act.Should().NotThrow();
+    }
+
     // ── resize (issue #4) ───────────────────────────────────────────────────
 
     [Fact]

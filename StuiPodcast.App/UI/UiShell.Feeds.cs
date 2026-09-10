@@ -157,6 +157,11 @@ public sealed partial class UiShell
             var remStr = len == 0 ? "--:--" : UIGlyphSet.FormatTime(lenTs - posTs);
             _player?.TimeLabel?.SetText($"⏸ {posStr} / {lenStr}  (-{remStr})");
 
+            // The persisted volume and speed have no snapshot to ride in on
+            // yet, so paint them here; otherwise the bar reads 0% until the
+            // user touches something.
+            _player?.SetVolumeAndSpeed(volume, speed);
+
             _episodesPane?.InjectNowPlaying(_nowPlayingId);
         });
     }

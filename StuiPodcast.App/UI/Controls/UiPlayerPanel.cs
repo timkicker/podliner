@@ -324,6 +324,23 @@ internal sealed class UiPlayerPanel : FrameView
     }
 
     private bool? _speedEnabledCache;
+    // Paints volume and speed without a playback snapshot. Used at startup,
+    // where the app restores the persisted values but has not played
+    // anything yet, so no snapshot exists to carry them.
+    public void SetVolumeAndSpeed(int? volume, double? speed)
+    {
+        if (volume is { } v)
+        {
+            var clamped = Math.Clamp(v, 0, 100);
+            VolBar.Fraction  = clamped / 100f;
+            VolPctLabel.Text = UIGlyphSet.VolumePercent(clamped);
+        }
+        if (speed is { } sp && sp > 0)
+            SpeedLabel.Text = UIGlyphSet.SpeedLabel(sp);
+
+        try { SetNeedsDisplay(); } catch { }
+    }
+
     public void SetSpeedEnabled(bool enabled)
     {
         // Called on every playback tick (~4×/sec); skip the Terminal.Gui
