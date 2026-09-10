@@ -1,4 +1,4 @@
-using StuiPodcast.App.Command.UseCases;
+﻿using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
@@ -30,7 +30,7 @@ internal sealed record AppServices(
     IEpisodeStore         Episodes,
     IFeedStore            FeedStore,
     IQueueService         Queue,
-    FeedService           Feeds,
+    IFeedService          Feeds,
     SwappableAudioPlayer  Player,
     PlaybackCoordinator   Playback,
     DownloadManager       Downloader,

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.Tests.Fakes;
@@ -97,7 +97,7 @@ public sealed class CmdFeedsModuleTests
     {
         _ui.SelectedFeedId = Guid.NewGuid();
         _sut.RemoveSelectedFeed();
-        _ui.RemoveFeedRequested.Should().BeTrue();
+        _ui.RequestedRemoveFeed.Should().BeTrue();
     }
 
     // ── Per-feed settings: :feed speed, :feed auto-download ─────────────────

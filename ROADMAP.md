@@ -47,7 +47,8 @@
 - [X] `UI/Wiring/*` decision logic, extracted into `PlaySourceResolver` and `DownloadProgressSummary`
 - [X] `UiSelectionWiring` and `UiPlaybackEventBridge` (narrowed to the deps they use instead of the whole `AppServices`)
 - [X] `UiCommandWiring` search half and `UiInitialRender`'s startup-episode pick (both narrowed to the deps they use)
-- [ ] `UiCommandWiring` command routing, `UiFeedWiring`, `UiDownloaderBridge` (still need `CmdCases` / `DownloadManager` / `FeedService` behind interfaces)
+- [X] `IFeedService` extracted; `UiFeedWiring` remove and refresh covered, including the failure aggregation
+- [ ] `UiCommandWiring` command routing, `UiDownloaderBridge` (still need `CmdCases` / `DownloadManager` behind interfaces)
 
 ### Refactor
 - [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)

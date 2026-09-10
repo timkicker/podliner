@@ -15,6 +15,13 @@ internal interface IUiShell
     event Action? EpisodeSelectionChanged;
     // Live-typed search from the `/` minibuffer.
     event Action<string>? SearchApplied;
+
+    // Feed-lifecycle requests raised by keys, the menu bar or commands.
+    event Action? QuitRequested;
+    event Action? RemoveFeedRequested;
+    event Action? ToggleThemeRequested;
+    event Func<string, Task>? AddFeedRequested;
+    event Func<Task>? RefreshRequested;
     void SetChaptersLoading(string message);
     void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1);
     void SetChaptersEmpty(Guid episodeId, string message);

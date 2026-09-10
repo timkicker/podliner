@@ -1,4 +1,4 @@
-using CodeHollow.FeedReader;
+﻿using CodeHollow.FeedReader;
 using Serilog;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Feeds;
@@ -19,7 +19,7 @@ namespace StuiPodcast.Infra
     //
     // The UI marshals mutations onto the main loop via _uiDispatch so
     // concurrent enumerations don't race with the refresh loop.
-    public class FeedService : IDisposable
+    public class FeedService : IFeedService
     {
         #region fields and ctor
 

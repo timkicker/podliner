@@ -1,5 +1,7 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.App.Bootstrap;
+using StuiPodcast.Core;
+using StuiPodcast.Infra;
 using StuiPodcast.App.Services;
 
 namespace StuiPodcast.App.UI.Wiring;
@@ -80,12 +82,13 @@ internal static class UiFeedWiring
     }
 
     static void WireRemoveFeed(AppServices ctx)
-    {
-        var ui = ctx.Ui;
-        var feeds = ctx.Feeds;
-        var feedStore = ctx.FeedStore;
-        var episodeStore = ctx.Episodes;
+        => WireRemoveFeed(ctx.Ui, ctx.Feeds, ctx.FeedStore, ctx.Episodes);
 
+    // Narrow overload: removal only needs the shell, the feed service and the
+    // two stores, so it can run against fakes.
+    public static void WireRemoveFeed(IUiShell ui, IFeedService feeds,
+                                      Services.IFeedStore feedStore, Services.IEpisodeStore episodeStore)
+    {
         ui.RemoveFeedRequested += async () =>
         {
             var fid = ui.GetSelectedFeedId();
@@ -112,12 +115,14 @@ internal static class UiFeedWiring
     }
 
     static void WireRefresh(AppServices ctx, Func<Task> save)
+        => WireRefresh(ctx.Ui, ctx.Data, ctx.Feeds, ctx.FeedStore, ctx.Episodes, ctx.Cases.View);
+
+    // Narrow overload. The failure aggregation below is the part worth
+    // testing: one bad feed shows its reason, several show only a count.
+    public static void WireRefresh(IUiShell ui, AppData data, IFeedService feeds,
+                                   Services.IFeedStore feedStore, Services.IEpisodeStore episodeStore,
+                                   Command.UseCases.ViewUseCase view)
     {
-        var ui = ctx.Ui;
-        var data = ctx.Data;
-        var feeds = ctx.Feeds;
-        var feedStore = ctx.FeedStore;
-        var episodeStore = ctx.Episodes;
 
         // Collect per-feed failures during each refresh pass and summarise
         // at the end — OSDing every individual failure would flood the UI
@@ -128,7 +133,6 @@ internal static class UiFeedWiring
             lock (failures) { failures.Add($"{feed.Title}: {reason}"); }
         };
 
-        var cases = ctx.Cases;
         ui.RefreshRequested += async () =>
         {
             lock (failures) failures.Clear();
@@ -147,7 +151,7 @@ internal static class UiFeedWiring
             if (selected != null)
                 ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
 
-            cases.View.ApplyList();
+            view.ApplyList();
 
             List<string> snap;
             lock (failures) snap = failures.ToList();

@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI.Wiring;
@@ -211,7 +211,7 @@ static class UiComposer
 
     #region shutdown
 
-    public static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, FeedService feeds, Func<Task> save)
+    public static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, IFeedService feeds, Func<Task> save)
     {
         if (Program.MarkExiting()) return;
 

@@ -19,9 +19,9 @@ sealed class FakeUiShell : IUiShell
     public Guid? LastSetFeedsSelectId { get; set; }
     public bool? LastUnplayedFilterVisual { get; set; }
     public string? LastRequestedAddFeedUrl { get; set; }
-    public bool RemoveFeedRequested { get; set; }
-    public bool RefreshRequested { get; set; }
-    public bool QuitRequested { get; set; }
+    public bool RequestedRemoveFeed { get; set; }
+    public bool RequestedRefresh { get; set; }
+    public bool RequestedQuit { get; set; }
     public bool ThemeToggled { get; set; }
     public ThemeMode? LastSetTheme { get; set; }
     public bool PlayerPlacementToggled { get; set; }
@@ -83,9 +83,9 @@ sealed class FakeUiShell : IUiShell
     public PlaybackSnapshot? LastActiveProgressSnap { get; private set; }
     public void RefreshActiveProgress(PlaybackSnapshot snap) => LastActiveProgressSnap = snap;
     public void RequestAddFeed(string url) => LastRequestedAddFeedUrl = url;
-    public void RequestRemoveFeed() => RemoveFeedRequested = true;
-    public void RequestRefresh() => RefreshRequested = true;
-    public void RequestQuit() => QuitRequested = true;
+    public void RequestRemoveFeed() => RequestedRemoveFeed = true;
+    public void RequestRefresh() => RequestedRefresh = true;
+    public void RequestQuit() => RequestedQuit = true;
     public void SetUnplayedFilterVisual(bool on) => LastUnplayedFilterVisual = on;
     public void ToggleTheme() => ThemeToggled = true;
     public void SetTheme(ThemeMode mode) => LastSetTheme = mode;
@@ -112,6 +112,18 @@ sealed class FakeUiShell : IUiShell
     public readonly List<(bool On, string? Text)> LoadingCalls = new();
     public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
         => LoadingCalls.Add((on, text));
+
+    public event Action? QuitRequested;
+    public event Action? RemoveFeedRequested;
+    public event Action? ToggleThemeRequested;
+    public event Func<string, Task>? AddFeedRequested;
+    public event Func<Task>? RefreshRequested;
+
+    public void RaiseQuitRequested()        => QuitRequested?.Invoke();
+    public void RaiseRemoveFeedRequested()  => RemoveFeedRequested?.Invoke();
+    public void RaiseToggleThemeRequested() => ToggleThemeRequested?.Invoke();
+    public Task RaiseAddFeedRequested(string url) => AddFeedRequested?.Invoke(url) ?? Task.CompletedTask;
+    public Task RaiseRefreshRequested()           => RefreshRequested?.Invoke() ?? Task.CompletedTask;
 
     public event Action<string>? SearchApplied;
     public void RaiseSearchApplied(string q) => SearchApplied?.Invoke(q);
