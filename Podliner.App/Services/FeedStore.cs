@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 using Podliner.Infra.Storage;
 
 namespace Podliner.App.Services;
@@ -14,6 +14,12 @@ internal sealed class FeedStore : IFeedStore
     IReadOnlyList<Feed>? _snapshot;
     Dictionary<string, Feed>? _byUrl;
 
+    // LibraryStore.Revision at the time the cache above was built. FeedService
+    // writes into the library directly, so our own mutations are not the only
+    // ones and dropping the cache on those alone left ":add" painting a list
+    // from before the feed existed.
+    int _cachedRevision = -1;
+
     public event Action<FeedChange>? Changed;
 
     public FeedStore(LibraryStore lib)
@@ -28,7 +34,20 @@ internal sealed class FeedStore : IFeedStore
 
     public IReadOnlyList<Feed> Snapshot()
     {
-        lock (_gate) return _snapshot ??= _lib.Current.Feeds.ToArray();
+        lock (_gate)
+        {
+            DropCacheIfLibraryMoved_Locked();
+            return _snapshot ??= _lib.Current.Feeds.ToArray();
+        }
+    }
+
+    void DropCacheIfLibraryMoved_Locked()
+    {
+        var rev = _lib.Revision;
+        if (rev == _cachedRevision) return;
+        _cachedRevision = rev;
+        _snapshot = null;
+        _byUrl = null;
     }
 
     public bool TryGet(Guid id, out Feed? feed)
@@ -55,6 +74,7 @@ internal sealed class FeedStore : IFeedStore
         if (string.IsNullOrWhiteSpace(url)) return null;
         lock (_gate)
         {
+            DropCacheIfLibraryMoved_Locked();
             EnsureUrlIndex_Locked();
             return _byUrl!.TryGetValue(url, out var f) ? f : null;
         }
@@ -74,6 +94,7 @@ internal sealed class FeedStore : IFeedStore
             persisted = _lib.AddOrUpdateFeed(feed);
             _snapshot = null;
             _byUrl = null; // invalidate URL index
+            _cachedRevision = _lib.Revision;
         }
 
         Fire(wasNew ? FeedChangeKind.Added : FeedChangeKind.Updated, persisted);
@@ -90,6 +111,7 @@ internal sealed class FeedStore : IFeedStore
             _lib.RemoveFeed(id);
             _snapshot = null;
             _byUrl = null;
+            _cachedRevision = _lib.Revision;
         }
 
         Fire(FeedChangeKind.Removed, gone);

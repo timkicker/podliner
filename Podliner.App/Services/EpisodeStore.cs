@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 using Podliner.Infra.Storage;
 
 namespace Podliner.App.Services;
@@ -13,6 +13,11 @@ internal sealed class EpisodeStore : IEpisodeStore
     readonly LibraryStore _lib;
     readonly object _gate = new();
     IReadOnlyList<Episode>? _snapshot;
+
+    // LibraryStore.Revision at the time _snapshot was built. A feed refresh
+    // adds every new episode through FeedService, which writes into the
+    // library directly, so our own mutations are not the only ones.
+    int _cachedRevision = -1;
 
     public event Action<EpisodeChange>? Changed;
 
@@ -30,6 +35,8 @@ internal sealed class EpisodeStore : IEpisodeStore
     {
         lock (_gate)
         {
+            var rev = _lib.Revision;
+            if (rev != _cachedRevision) { _cachedRevision = rev; _snapshot = null; }
             return _snapshot ??= _lib.Current.Episodes.ToArray();
         }
     }
@@ -75,6 +82,7 @@ internal sealed class EpisodeStore : IEpisodeStore
             wasNew = !_lib.TryGetEpisode(ep.Id, out _);
             persisted = _lib.AddOrUpdateEpisode(ep);
             _snapshot = null;
+            _cachedRevision = _lib.Revision;
         }
 
         Fire(wasNew ? EpisodeChangeKind.Added : EpisodeChangeKind.Updated, persisted);
@@ -89,6 +97,7 @@ internal sealed class EpisodeStore : IEpisodeStore
             if (!_lib.TryGetEpisode(id, out gone) || gone == null) return false;
             _lib.RemoveEpisode(id);
             _snapshot = null;
+            _cachedRevision = _lib.Revision;
         }
 
         Fire(EpisodeChangeKind.Removed, gone);
@@ -104,6 +113,7 @@ internal sealed class EpisodeStore : IEpisodeStore
             if (removed.Count == 0) return 0;
             _lib.RemoveEpisodesByFeed(feedId);
             _snapshot = null;
+            _cachedRevision = _lib.Revision;
         }
 
         foreach (var ep in removed) Fire(EpisodeChangeKind.Removed, ep);
