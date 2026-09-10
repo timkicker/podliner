@@ -148,13 +148,15 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 
 **Navigation & filters**
 - j / k: move down / up
+- h / l: walk the panes left / right (feeds → episodes → shownotes → chapters)
 - gg / G: jump to top / bottom
-- / : search in current list
+- / : search in current list • `Esc`: leave the search
 - u : toggle "unplayed only"
 - `i`: open Shownotes tab • `Esc`: back to episodes
+- q : quit
 
 **Chapters**
-- Dedicated **Chapters** tab next to Episodes/Details; shows `Chapters (N)` with a count
+- Dedicated **Chapters** tab next to Episodes/Details; shows `Chapters (N)` with a count. Reach it with `l` from the shownotes tab
 - `,` / `.`: jump to previous / next chapter globally
 - Enter on a chapter row: seek to that chapter
 - `:chapter list|next|prev|jump <n>`: explicit commands
@@ -162,10 +164,11 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 
 **Downloads & queue**
 - d : download or show status
+- `:download rm` (alias `:dl rm`) : delete the downloaded file and free the space
 - :feed queue : switch to queue view
-- :queue add|rm|clear|shuffle : queue ops for selected episode
+- :queue add|toggle|rm|clear|shuffle : queue ops for selected episode
 - :play-next / :play-prev : next/previous in queue
-- `:undo` : revert the last destructive action (e.g. `:queue clear`)
+- `:undo` : revert the last destructive action (`:queue clear`, `:queue rm`)
 
 **Feeds**
 - `:add <url>` : add feed
