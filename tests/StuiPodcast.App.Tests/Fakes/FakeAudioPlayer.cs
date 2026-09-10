@@ -1,4 +1,4 @@
-using StuiPodcast.Core;
+﻿using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
 
 namespace StuiPodcast.App.Tests.Fakes;
@@ -17,6 +17,10 @@ sealed class FakeAudioPlayer : IAudioPlayer
         PlayerCapabilities.Volume | PlayerCapabilities.Speed;
 
     public event Action<PlayerState>? StateChanged;
+
+    // Lets a test drive the IAudioPlayer.StateChanged path (the wiring in
+    // UiPlaybackEventBridge subscribes to it).
+    public void RaiseStateChanged() => StateChanged?.Invoke(State);
 
     public int    LastSetVolume { get; private set; }
     public double LastSetSpeed  { get; private set; }

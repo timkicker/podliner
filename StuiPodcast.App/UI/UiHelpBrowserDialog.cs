@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections.Generic;
 using Terminal.Gui;
@@ -152,7 +152,7 @@ namespace StuiPodcast.App.UI
                 if (cat.HasValue && (int)cat.Value >= 0)
                 {
                     src = src.Where(c => {
-                        try { return c.Category != null && c.Category.Equals(cat.Value); }
+                        try { return c.Category.Equals(cat.Value); }
                         catch { return true; }
                     });
                 }
@@ -218,7 +218,7 @@ namespace StuiPodcast.App.UI
                 var item = cmdFiltered[idx];
 
                 string catLine = "";
-                try { if (item.Category != null) catLine = $"Category: {item.Category}\n"; } catch { }
+                try { catLine = $"Category: {item.Category}\n"; } catch { }
 
                 string aliases  = (item.Aliases is { Length: > 0 }) ? $"Aliases: {string.Join(", ", item.Aliases)}\n" : "";
                 string args     = string.IsNullOrWhiteSpace(item.Args) ? "" : $"Args: {item.Args}\n";

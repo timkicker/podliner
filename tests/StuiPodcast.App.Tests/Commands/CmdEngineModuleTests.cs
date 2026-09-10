@@ -29,6 +29,18 @@ public sealed class CmdEngineModuleTests
     }
 
     [Fact]
+    public void Null_args_behave_like_no_args()
+    {
+        // Exec already guarded the join against null but then read
+        // args.Length unguarded, so a null argv threw instead of showing
+        // the engine info.
+        var act = () => Make().Exec(null!);
+
+        act.Should().NotThrow();
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("engine active"));
+    }
+
+    [Fact]
     public void Show_arg_shows_engine_info()
     {
         Make().Exec(new[] { "show" });

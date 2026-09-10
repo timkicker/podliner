@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Text;
 using FluentAssertions;
 using StuiPodcast.Infra.Feeds;
@@ -50,8 +50,9 @@ public sealed class Id3ChaptersParserTests
         using var ms = new MemoryStream(blob);
         var result = Id3ChaptersParser.TryParse(ms);
 
-        result!.Select(c => c.Title).Should().Equal("Intro", "Main", "Outro");
-        result[1].StartSeconds.Should().Be(120.0);
+        var chapters = result!;
+        chapters.Select(c => c.Title).Should().Equal("Intro", "Main", "Outro");
+        chapters[1].StartSeconds.Should().Be(120.0);
     }
 
     [Fact]
@@ -64,8 +65,9 @@ public sealed class Id3ChaptersParserTests
         using var ms = new MemoryStream(blob);
         var result = Id3ChaptersParser.TryParse(ms);
 
-        result!.Single().StartSeconds.Should().Be(5.0);
-        result.Single().Title.Should().Be("Chapter A");
+        var chapters = result!;
+        chapters.Single().StartSeconds.Should().Be(5.0);
+        chapters.Single().Title.Should().Be("Chapter A");
     }
 
     [Fact]

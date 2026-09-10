@@ -3,19 +3,20 @@
 ## Next release
 
 ### Bugs
-- [ ] Fix engine preference reset on restart (`ConfigStore` validates `libvlc`, `AudioEngineExt.ToWire` writes `vlc`/`mediafoundation`, so both fall back to `auto`)
-- [ ] Fix the same wrong engine list in `ConfigStoreValidationTests`
-- [ ] Fix `CS8602` in `DownloadManager.cs:732` and `EngineUseCase.cs:31`
-- [ ] Fix `CS0472` dead null checks in `UiHelpBrowserDialog.cs:155` and `:221`
+- [X] Fix engine preference reset on restart (`ConfigStore` validates `libvlc`, `AudioEngineExt.ToWire` writes `vlc`/`mediafoundation`, so both fall back to `auto`)
+- [X] Fix the same wrong engine list in `ConfigStoreValidationTests`
+- [X] Fix `CS8602` in `DownloadManager.cs:732` and `EngineUseCase.cs:31`
+- [X] Fix `CS0472` dead null checks in `UiHelpBrowserDialog.cs:155` and `:221`
+- [X] Clear the remaining compiler warnings in the test projects
 - [ ] Fix playerui update (windows only?)
 
 ### Dependencies
-- [ ] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)
-- [ ] Bump AngleSharp past 1.1.2 (moderate advisory)
+- [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)
+- [X] Bump AngleSharp past 1.1.2 (moderate advisory)
 
 ### CI
-- [ ] Add a build+test workflow on push and pull request (today only `release.yml` on tags, nothing gates a merge)
-- [ ] Align target frameworks (app/infra/core on net9.0, both test projects on net10.0, CI pins 9.0.x)
+- [X] Add a build+test workflow on push and pull request (today only `release.yml` on tags, nothing gates a merge)
+- [X] Align target frameworks (app/infra/core on net9.0, both test projects on net10.0, CI pins 9.0.x)
 
 ### UI test harness
 - [ ] Add a `FakeDriver` fixture so `Application.Init` runs headless in `dotnet test`
@@ -25,9 +26,9 @@
 - [ ] Regression test for redraw after a resize event (issue #4)
 
 ### Coverage gaps, cheapest first
-- [ ] `CliEntrypoint` (87 lines, pure arg parsing, no tests, silently drops a flag with a missing value)
-- [ ] `DownloadRetryPolicy` (78 lines, pure)
-- [ ] `RssParser` (215 lines, pure, feeds every episode field)
+- [X] `CliEntrypoint` (87 lines, pure arg parsing)
+- [X] `DownloadRetryPolicy` (78 lines, pure)
+- [X] `RssParser` (215 lines, pure, feeds every episode field)
 - [ ] `VlcPathResolver` (244 lines)
 - [ ] `AudioPlayerFactory` engine selection chain (255 lines, needs the probes behind an interface first)
 - [ ] `NetworkMonitor` (222 lines)

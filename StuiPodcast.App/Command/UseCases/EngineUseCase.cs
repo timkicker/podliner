@@ -26,7 +26,8 @@ internal sealed class EngineUseCase
 
     public void Exec(string[] args)
     {
-        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        args ??= Array.Empty<string>();
+        var arg = string.Join(' ', args).Trim().ToLowerInvariant();
 
         if (args.Length > 0 && string.Equals(args[0], "diag", StringComparison.OrdinalIgnoreCase))
         {

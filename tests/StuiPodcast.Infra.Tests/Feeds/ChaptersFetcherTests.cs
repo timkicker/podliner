@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.Infra.Feeds;
 using Xunit;
 
@@ -30,11 +30,13 @@ public sealed class ChaptersFetcherTests
 
         var result = ChaptersFetcher.Parse(json);
         result.Should().NotBeNull();
-        result!.Should().HaveCount(3);
-        result[0].StartSeconds.Should().Be(0);
-        result[0].Title.Should().Be("Intro");
-        result[1].Url.Should().Be("https://ex/main");
-        result[1].Img.Should().Be("https://ex/img.jpg");
+
+        var chapters = result!;
+        chapters.Should().HaveCount(3);
+        chapters[0].StartSeconds.Should().Be(0);
+        chapters[0].Title.Should().Be("Intro");
+        chapters[1].Url.Should().Be("https://ex/main");
+        chapters[1].Img.Should().Be("https://ex/img.jpg");
     }
 
     [Fact]

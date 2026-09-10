@@ -724,15 +724,14 @@ namespace StuiPodcast.Infra.Download
 
             lock (_gate)
             {
-                var had = _data.DownloadMap.TryGetValue(epId, out var s);
-                if (had)
+                if (_data.DownloadMap.TryGetValue(epId, out var s) && s is not null)
                 {
                     before = new DownloadStatus
                     {
                         State = s.State, BytesReceived = s.BytesReceived, TotalBytes = s.TotalBytes,
                         LocalPath = s.LocalPath, Error = s.Error, UpdatedAt = s.UpdatedAt
                     };
-                    st = s!;
+                    st = s;
                 }
                 else
                 {
