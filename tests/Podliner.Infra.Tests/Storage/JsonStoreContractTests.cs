@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.Infra.Storage;
 using Xunit;
 
@@ -163,7 +163,9 @@ public sealed class JsonStoreContractTests : IDisposable
         store.Load();
 
         int fires = 0;
-        store.Changed += () => fires++;
+        // Changed is raised from the debounce timer, so the counter is touched
+        // from another thread.
+        store.Changed += () => Interlocked.Increment(ref fires);
 
         // Fire 20 rapid save requests; the debouncer should coalesce them.
         for (int i = 0; i < 20; i++)
@@ -172,13 +174,25 @@ public sealed class JsonStoreContractTests : IDisposable
             store.SaveAsync();
         }
 
-        await Task.Delay(300);
-        fires.Should().BeGreaterThan(0);
-        fires.Should().BeLessThanOrEqualTo(3, "rapid bursts must not cause 20 file writes");
+        // Wait for the debouncer to settle rather than sleeping a fixed span.
+        // A flat 300ms passed here but not on a loaded CI runner, which had
+        // main red for hours over a timer that had simply not fired yet.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        int persisted = -1;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (Volatile.Read(ref fires) > 0)
+            {
+                using var probe = new ProbeStore(_file, TimeSpan.FromMilliseconds(100));
+                persisted = probe.Load().Value;
+                if (persisted == 19) break;
+            }
+            await Task.Delay(20);
+        }
 
-        // Verify the last value actually persisted.
-        using var s2 = new ProbeStore(_file, TimeSpan.FromMilliseconds(100));
-        s2.Load().Value.Should().Be(19);
+        Volatile.Read(ref fires).Should().BeGreaterThan(0, "the 100ms debounce had up to 10s to fire");
+        Volatile.Read(ref fires).Should().BeLessThanOrEqualTo(3, "rapid bursts must not cause 20 file writes");
+        persisted.Should().Be(19, "the last value in the burst is the one that belongs on disk");
     }
 
     [Fact]
