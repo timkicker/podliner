@@ -12,6 +12,7 @@
 - [X] Player control row overlaps itself below ~140 columns (now drops controls by tier: download, then skips + volume bar, then ±spd)
 - [X] Help browser: the `Search:` label sat at the same X/Y as the search field and was overdrawn, so both tabs showed a blank first row
 - [X] `:theme` with no argument toggled the theme and then wiped `ThemePref`, losing the choice on the next start; unknown names silently applied MenuAccent
+- [X] F12 logs overlay showed a single line above 27 blank rows: `TextView.MoveEnd` parks the view on the last line even when the log fits
 
 ### Dependencies
 - [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)
