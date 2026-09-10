@@ -146,6 +146,20 @@ public sealed class UiRedrawRecoveryTests
     }
 
     [Fact]
+    public void NeedsRelayout_is_quiet_under_the_fake_driver()
+    {
+        // TryTellCursesTheSize only engages for a real CursesDriver. Under
+        // FakeDriver it must stay out of the way, or every harness test would
+        // report a phantom resize.
+        using var tui = new TuiHarness();
+        BuildShell();
+        tui.Render();
+
+        UiShell.NeedsRelayout().Should().BeFalse();
+        UiShell.NeedsRelayout().Should().BeFalse();
+    }
+
+    [Fact]
     public void NeedsRelayout_reports_the_desync()
     {
         using var tui = new TuiHarness();

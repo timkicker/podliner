@@ -112,11 +112,60 @@ public sealed partial class UiShell
     // .ProcessWinChange → Curses.CheckWinChange), and a missed poll leaves
     // every Toplevel rendering at the previous geometry — the crooked
     // layout from issue #4.
+    // Terminal.Gui's CursesDriver learns the terminal size from ncurses'
+    // LINES/COLS globals, and ncurses only refreshes those while it is
+    // reading input. podliner can miss a SIGWINCH entirely: after a resize
+    // the OS reports the new size through Console.WindowWidth while the
+    // driver still holds the old one, so every view keeps rendering at the
+    // stale geometry. That is issue #4.
+    //
+    // ncurses exposes resizeterm() to be told the size explicitly; once told,
+    // the driver's next poll sees the change and the normal resize path runs.
+    // Guarded on the driver type and wrapped, because the call only exists on
+    // Unix. Anywhere else this is a no-op and behaviour is as before.
+    private static bool TryTellCursesTheSize()
+    {
+        try
+        {
+            var drv = Application.Driver;
+            if (drv == null || drv.GetType().Name != "CursesDriver") return false;
+
+            int cols, rows;
+            try { cols = Console.WindowWidth; rows = Console.WindowHeight; }
+            catch { return false; }
+
+            if (cols <= 0 || rows <= 0) return false;
+            if (cols == drv.Cols && rows == drv.Rows) return false;
+
+            var curses = typeof(Application).Assembly.GetType("Unix.Terminal.Curses");
+            var resize = curses?.GetMethod("resizeterm",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            if (resize == null)
+            {
+                Serilog.Log.Debug("resize: Unix.Terminal.Curses.resizeterm not found");
+                return false;
+            }
+
+            resize.Invoke(null, new object[] { rows, cols });
+            Serilog.Log.Debug("resize: terminal is {Cols}x{Rows}, driver had {DC}x{DR}; told ncurses",
+                cols, rows, drv.Cols, drv.Rows);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Debug(ex, "resize: could not hand the size to ncurses");
+            return false;
+        }
+    }
+
     public static bool NeedsRelayout()
     {
         var drv = Application.Driver;
         var top = Application.Top;
         if (drv == null || top == null) return false;
+
+        // A resize the driver slept through counts too.
+        if (TryTellCursesTheSize()) return true;
 
         return top.Frame.Width != drv.Cols || top.Frame.Height != drv.Rows;
     }
@@ -142,6 +191,12 @@ public sealed partial class UiShell
 
                 RequestRepaint();
                 Application.Refresh();
+
+                // After a resize the driver only rewrites what was marked
+                // dirty, so the parts of the old, smaller frame that nothing
+                // redrew stay on screen. Push the whole buffer out.
+                try { drv?.UpdateScreen(); } catch { }
+                try { drv?.Refresh(); }      catch { }
             }
             catch (Exception ex)
             {
