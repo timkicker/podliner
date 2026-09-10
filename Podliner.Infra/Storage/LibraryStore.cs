@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 
 namespace Podliner.Infra.Storage
 {
@@ -270,6 +270,19 @@ namespace Podliner.Infra.Storage
         }
 
         // ── feed upsert ─────────────────────────────────────────────────────
+        // Bumped whenever the feed or episode collections change shape.
+        //
+        // FeedService lives in Infra and writes through AppFacade straight into
+        // this store, which the App-side FeedStore and EpisodeStore caches
+        // cannot observe. They compare this counter instead of trusting their
+        // own mutations to be the only ones. Field edits (progress, saved,
+        // queue, history) deliberately do not bump it: the caches hold the
+        // same Episode references, and progress alone fires four times a
+        // second during playback.
+        public int Revision => System.Threading.Volatile.Read(ref _revision);
+        int _revision;
+        void BumpRevision() => System.Threading.Interlocked.Increment(ref _revision);
+
         public Feed AddOrUpdateFeed(Feed feed)
         {
             if (feed == null) throw new ArgumentNullException(nameof(feed));
@@ -289,6 +302,7 @@ namespace Podliner.Infra.Storage
                 {
                     if (!string.IsNullOrWhiteSpace(feed.Title)) dup.Title = feed.Title;
                     if (feed.LastChecked.HasValue)              dup.LastChecked = feed.LastChecked;
+                    BumpRevision();
                     SaveAsync();
                     return dup;
                 }
@@ -308,6 +322,7 @@ namespace Podliner.Infra.Storage
                 _feedsById[feed.Id] = feed;
             }
 
+            BumpRevision();
             SaveAsync();
             return _feedsById[feed.Id];
         }
@@ -341,6 +356,7 @@ namespace Podliner.Infra.Storage
                 _episodesById[ep.Id] = ep;
             }
 
+            BumpRevision();
             SaveAsync();
             return _episodesById[ep.Id];
         }
@@ -484,6 +500,7 @@ namespace Podliner.Infra.Storage
             // immediate notification that the in-memory state changed.
             // The subsequent debounced save will run Changed a second time;
             // subscribers that care must be idempotent.
+            BumpRevision();
             SaveAsync();
         }
     }

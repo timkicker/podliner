@@ -10,6 +10,7 @@
 - [X] Clear the remaining compiler warnings in the test projects
 - [ ] Fix playerui update (windows only?)
 - [X] Player control row overlaps itself below ~140 columns (now drops controls by tier: download, then skips + volume bar, then ±spd)
+- [X] `:add <url>` fetched, persisted and logged the feed and then left the sidebar empty until the next start. `FeedService` lives in Infra and writes through `AppFacade` into `LibraryStore`, which the App-side `FeedStore`/`EpisodeStore` snapshot caches cannot observe, so they kept handing out a list from before the feed existed. `LibraryStore.Revision` now stamps every structural change and both caches compare against it. Same root cause for episodes pulled by `:refresh`
 - [X] Help browser: the `Search:` label sat at the same X/Y as the search field and was overdrawn, so both tabs showed a blank first row
 - [X] `:theme` with no argument toggled the theme and then wiped `ThemePref`, losing the choice on the next start; unknown names silently applied MenuAccent
 - [X] F12 logs overlay showed a single line above 27 blank rows: `TextView.MoveEnd` parks the view on the last line even when the log fits
@@ -92,7 +93,8 @@
 - [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.
 
 ### Packaging
-- [ ] Add the nixpkgs entry to README and the bug-report template once the package lands
+- [ ] Nix packaging has no owner. odilf packaged podliner for his own dotfiles while fixing the Terminal.Gui HintPath (PR #27) but will not submit it to nixpkgs, so nothing is landing. Either someone picks it up or the README and the bug-report template keep no nix entry.
+      Whoever does it needs a wrapper setting `LD_LIBRARY_PATH` and `LIBVLC_PLUGIN_PATH`, because LibVLCSharp dlopens libvlc at runtime and engine detection otherwise falls back to mpv or ffplay without saying so.
 
 ## Done
 
