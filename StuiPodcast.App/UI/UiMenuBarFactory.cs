@@ -132,42 +132,42 @@ namespace StuiPodcast.App.UI
             // Quick access entries that should remain visible at the top of their menus
             var quickFeeds = new[]
             {
-                Cmd("_All Episodes", "", ":feed all"),
-                Cmd("_Saved ★",      "", ":feed saved"),
-                Cmd("_Downloaded ⬇", "", ":feed downloaded"),
+                Cmd("All Episodes", "", ":feed all"),
+                Cmd("Saved ★",      "", ":feed saved"),
+                Cmd("Downloaded ⬇", "", ":feed downloaded"),
                 new MenuItem("-", "", null),
             };
 
             var quickPlayback = new[]
             {
-                Cmd("_Play/Pause (Space)", "", ":toggle"),
+                Cmd("Play/Pause (Space)", "", ":toggle"),
                 new MenuItem("-", "", null),
-                Cmd("Seek _-10s (←/h/H)", "", ":seek -10"),
-                Cmd("Seek _+10s (→/l/L)", "", ":seek +10"),
-                Cmd("Seek _Start (g)",    "", ":seek 0:00"),
-                Cmd("Seek _End (G)",      "", ":seek 100%"),
+                Cmd("Seek -10s (←/h/H)", "", ":seek -10"),
+                Cmd("Seek +10s (→/l/L)", "", ":seek +10"),
+                Cmd("Seek Start (g)",    "", ":seek 0:00"),
+                Cmd("Seek End (G)",      "", ":seek 100%"),
                 new MenuItem("-", "", null),
             };
 
             var quickView = new[]
             {
-                Act("Toggle _Player Position (Ctrl+P)", "bar top/bottom", () => cb.Command(":audioPlayer toggle")),
-                Act("Toggle _Theme (t)", "cycle theme", cb.ToggleTheme),
-                Cmd("Filter: _Unplayed (u)", "", ":filter toggle"),
+                Act("Toggle Player Position (Ctrl+P)", "bar top/bottom", () => cb.Command(":audioPlayer toggle")),
+                Act("Toggle Theme (t)", "cycle theme", cb.ToggleTheme),
+                Cmd("Filter: Unplayed (u)", "", ":filter toggle"),
                 new MenuItem("-", "", null),
             };
 
             var quickNavigate = new[]
             {
-                Act("Focus _Feeds (h)",         "focus feeds",          cb.FocusFeeds),
-                Act("Focus _Episodes (l)",      "focus episodes",       cb.FocusEpisodes),
-                Act("Open _Details (i)",        "show details",         cb.OpenDetails),
-                Act("_Back from Details (Esc)", "back to list",         cb.BackFromDetails),
+                Act("Focus Feeds (h)",         "focus feeds",          cb.FocusFeeds),
+                Act("Focus Episodes (l)",      "focus episodes",       cb.FocusEpisodes),
+                Act("Open Details (i)",        "show details",         cb.OpenDetails),
+                Act("Back from Details (Esc)", "back to list",         cb.BackFromDetails),
                 new MenuItem("-", "", null),
-                Act("Next _Unplayed (J)",       "next unplayed",        cb.JumpNextUnplayed),
-                Act("Prev _Unplayed (K)",       "prev unplayed",        cb.JumpPrevUnplayed),
+                Act("Next Unplayed (J)",       "next unplayed",        cb.JumpNextUnplayed),
+                Act("Prev Unplayed (K)",       "prev unplayed",        cb.JumpPrevUnplayed),
                 new MenuItem("-", "", null),
-                Act("Open _Command Line (:)",   "command box",          cb.ShowCommand),
+                Act("Open Command Line (:)",   "command box",          cb.ShowCommand),
                 // search is kept in Shell's keybinds; no menu item required here
                 new MenuItem("-", "", null),
             };
@@ -181,8 +181,8 @@ namespace StuiPodcast.App.UI
             var downloads   = BuildFromCatalog(HelpCategory.Downloads);
 
             // Newly placed groups:
-            var queue       = BuildFromCatalog(HelpCategory.Queue);       // will go under _Navigate
-            var opml        = BuildFromCatalog(HelpCategory.OPML);        // will go under _File
+            var queue       = BuildFromCatalog(HelpCategory.Queue);       // will go under Navigate
+            var opml        = BuildFromCatalog(HelpCategory.OPML);        // will go under File
 
             var miscTop     = HelpCatalog.MostUsed(6)
                                .Select(c => new MenuItem(
@@ -197,15 +197,15 @@ namespace StuiPodcast.App.UI
                                .ToArray();
 
             // File menu: partially manual (better UX labels), now includes OPML section
-            var addFeedItem    = Act("_Add Feed… (:add URL)",  "open :add", cb.AddFeed);
-            var refreshAllItem = new MenuItem("_Refresh All (:refresh)", "refresh feeds", null);
+            var addFeedItem    = Act("Add Feed… (:add URL)",  "open :add", cb.AddFeed);
+            var refreshAllItem = new MenuItem("Refresh All (:refresh)", "refresh feeds", null);
             AttachRunner(
                 refreshAllItem,
                 async () => { if (cb.RefreshRequested != null) await cb.RefreshRequested(); },
                 busyOsdText: "refreshing",
                 doneOsdText: "refreshed"
             );
-            var quitItem       = Act("_Quit (Q)", "quit", cb.Quit);
+            var quitItem       = Act("Quit (Q)", "quit", cb.Quit);
 
             var fileItems = new List<MenuItem>
             {
@@ -244,22 +244,22 @@ namespace StuiPodcast.App.UI
                 .Concat(new[]
                 {
                     new MenuItem("-", "", null),
-                    new MenuItem("_Keys & Commands (:h)", "help", () => cb.Command(":help")),
-                    new MenuItem("_Logs (F12)", "logs overlay", () => cb.Command(":logs")),
-                    new MenuItem("_About", "", () => MessageBox.Query("About", "Podliner: TUI podcast player", "OK")),
+                    new MenuItem("Keys & Commands (:h)", "help", () => cb.Command(":help")),
+                    new MenuItem("Logs (F12)", "logs overlay", () => cb.Command(":logs")),
+                    new MenuItem("About", "", () => MessageBox.Query("About", "Podliner: TUI podcast player", "OK")),
                 })
                 .ToArray();
 
             var menu = new MenuBar(new[]
             {
-                new MenuBarItem("_File",      fileItems.ToArray()),
-                new MenuBarItem("_Feeds",     quickFeeds.Concat(feeds).ToArray()),
-                new MenuBarItem("_Playback",  quickPlayback.Concat(playback).ToArray()),
-                new MenuBarItem("_View",      quickView.Concat(viewSort).ToArray()),
-                new MenuBarItem("_Navigate",  navigateItems.ToArray()),
-                new MenuBarItem("_Downloads", downloads),
-                new MenuBarItem("_Network",   BuildFromCatalog(HelpCategory.NetworkEngine)),
-                new MenuBarItem("_Help",      helpItems),
+                new MenuBarItem("File",      fileItems.ToArray()),
+                new MenuBarItem("Feeds",     quickFeeds.Concat(feeds).ToArray()),
+                new MenuBarItem("Playback",  quickPlayback.Concat(playback).ToArray()),
+                new MenuBarItem("View",      quickView.Concat(viewSort).ToArray()),
+                new MenuBarItem("Navigate",  navigateItems.ToArray()),
+                new MenuBarItem("Downloads", downloads),
+                new MenuBarItem("Network",   BuildFromCatalog(HelpCategory.NetworkEngine)),
+                new MenuBarItem("Help",      helpItems),
             });
 
             return menu;

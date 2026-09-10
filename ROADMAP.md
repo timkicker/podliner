@@ -62,8 +62,8 @@
 - [ ] Add native os-player interop (pausing via headphones, os-ui, ...)
 
 ### UX
-- [ ] Rethink first-letter-highlighting
-- [ ] `q` means two different things: the `q` key quits, but bare `q` typed into the command box is a documented alias for `:queue add` (`QueueUseCase.Handle`). The help browser lists both. Pick one and drop the other.
+- [X] Rethink first-letter-highlighting: the `_` hotkey markers are gone from all 19 menu labels
+- [X] `q` now only quits; the bare-`q` alias for `:queue add` is gone from `QueueUseCase` and the help catalog
 
 ### Bugs
 - [X] `ConfigStore` rejected the theme name `User`, the toggle's fourth stop, and rewrote it to `auto` on load. Not user-visible, because `UiThemeResolver` maps `auto` to `User` as well, but the stored value was wrong and would have drifted with any change of default. Also dropped `HighContrast`, which was never a `ThemeMode`

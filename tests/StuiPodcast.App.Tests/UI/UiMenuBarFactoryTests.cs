@@ -76,8 +76,7 @@ public sealed class UiMenuBarFactoryTests
         => CmdParser.Parse(raw).Kind != TopCommand.Unknown
            || raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase)
            || raw.StartsWith(":download", StringComparison.OrdinalIgnoreCase)
-           || raw.StartsWith(":queue", StringComparison.OrdinalIgnoreCase)
-           || raw.Equals("q", StringComparison.OrdinalIgnoreCase);
+           || raw.StartsWith(":queue", StringComparison.OrdinalIgnoreCase);
 
     // ── structure ───────────────────────────────────────────────────────────
 
@@ -108,6 +107,37 @@ public sealed class UiMenuBarFactoryTests
 
         Leaves(bar).Select(i => i.Title.ToString())
             .Should().OnlyContain(t => !string.IsNullOrWhiteSpace(t));
+    }
+
+    [Fact]
+    public void No_label_carries_a_hotkey_underscore()
+    {
+        // Issue #5: Terminal.Gui turns "_X" into an Alt+X hotkey and paints
+        // the letter in the accent colour. People read the highlight as
+        // "press this key" and it does nothing outside an open menu, so the
+        // markers are gone. A stray underscore would also render literally.
+        using var tui = new TuiHarness();
+        var bar = UiMenuBarFactory.Build(new Recorder().Build());
+
+        var labels = bar.Menus.Select(m => m.Title.ToString())
+            .Concat(Leaves(bar).Select(i => i.Title.ToString()))
+            .ToList();
+
+        labels.Should().OnlyContain(l => !l!.Contains('_'));
+    }
+
+    [Fact]
+    public void The_labels_still_name_their_commands()
+    {
+        // Stripping the markers must not have eaten anything else.
+        using var tui = new TuiHarness();
+        var bar = UiMenuBarFactory.Build(new Recorder().Build());
+
+        var labels = Leaves(bar).Select(i => i.Title.ToString()!).ToList();
+
+        labels.Should().Contain(l => l.Contains("All Episodes"));
+        labels.Should().Contain(l => l.Contains("Quit"));
+        labels.Should().Contain(l => l.Contains("Play/Pause"));
     }
 
     [Fact]
