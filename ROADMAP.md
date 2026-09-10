@@ -90,7 +90,8 @@
 - [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.
 
 ### Packaging
-- [ ] Add the nixpkgs entry to README and the bug-report template once the package lands
+- [ ] Nix packaging has no owner. odilf packaged podliner for his own dotfiles while fixing the Terminal.Gui HintPath (PR #27) but will not submit it to nixpkgs, so nothing is landing. Either someone picks it up or the README and the bug-report template keep no nix entry.
+      Whoever does it needs a wrapper setting `LD_LIBRARY_PATH` and `LIBVLC_PLUGIN_PATH`, because LibVLCSharp dlopens libvlc at runtime and engine detection otherwise falls back to mpv or ffplay without saying so.
 
 ## Done
 
