@@ -1,4 +1,4 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
 
 namespace StuiPodcast.App.Command.Handler;
 
@@ -6,7 +6,7 @@ internal sealed class CmdSystemHandler : ICmdHandler
 {
     public bool CanHandle(TopCommand k) => k is TopCommand.Help or TopCommand.Quit or TopCommand.Logs or TopCommand.Osd
         or TopCommand.Write or TopCommand.WriteQuit or TopCommand.WriteQuitBang or TopCommand.QuitBang
-        or TopCommand.Refresh or TopCommand.Undo;
+        or TopCommand.Refresh or TopCommand.Undo or TopCommand.Redraw;
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
@@ -32,7 +32,8 @@ internal sealed class CmdSystemHandler : ICmdHandler
                 ctx.Ui.RequestRefresh();
                 return;
 
-            case TopCommand.Undo: ctx.Cases.Undo.Exec(cmd.Args); return;
+            case TopCommand.Undo:   ctx.Cases.Undo.Exec(cmd.Args); return;
+            case TopCommand.Redraw: system.ExecRedraw(); return;
         }
     }
 }

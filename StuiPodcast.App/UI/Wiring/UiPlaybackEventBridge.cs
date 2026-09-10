@@ -81,11 +81,15 @@ internal static class UiPlaybackEventBridge
                     case PlaybackStatus.Loading:
                         ui.SetPlayerLoading(true, "loading…", null);
                         break;
+                    // The play button is a fixed 12 columns wide, so the
+                    // label has to stay short; the longer explanation goes
+                    // to the OSD, which has the whole width to work with.
                     case PlaybackStatus.SlowNetwork:
-                        ui.SetPlayerLoading(true, "connecting… (slow)", null);
+                        ui.SetPlayerLoading(true, "slow…", null);
                         break;
                     case PlaybackStatus.VerySlowNetwork:
-                        ui.SetPlayerLoading(true, "still connecting… check your network", null);
+                        ui.SetPlayerLoading(true, "slow…", null);
+                        ui.ShowOsd("still connecting — check your network", 3000);
                         break;
                     case PlaybackStatus.Playing:
                     case PlaybackStatus.Ended:

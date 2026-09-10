@@ -1,4 +1,4 @@
-using StuiPodcast.App;
+﻿using StuiPodcast.App;
 using StuiPodcast.App.Command;
 using StuiPodcast.App.Command.Handler;
 using StuiPodcast.App.Command.UseCases;
@@ -86,7 +86,8 @@ internal enum TopCommand
     Sync,
     Sleep,
     Undo,
-    Chapter
+    Chapter,
+    Redraw
 }
 #endregion
 

@@ -49,7 +49,9 @@ public sealed class TuiHarness : IDisposable
         // FakeDriver always comes up 80x25 and ignores FakeConsole until
         // SetWindowSize runs, so anything else has to be applied after Init.
         if (cols != DefaultCols || rows != DefaultRows)
+        {
             Driver.SetWindowSize(cols, rows);
+        }
     }
 
     // Drains the main-loop queue. UiShell marshals almost every update
@@ -72,21 +74,48 @@ public sealed class TuiHarness : IDisposable
     public void Render(Toplevel top)
     {
         Application.Begin(top);
+
+        // Application.Init sizes Top from the driver, but a size applied
+        // afterwards only reaches the Toplevel once TerminalResized runs and
+        // there is a running Toplevel to lay out. Begin gives us that, so
+        // reconcile here rather than in the constructor.
+        if (Application.Top.Frame.Width != Cols || Application.Top.Frame.Height != Rows)
+            RaiseTerminalResized();
+
         Pump();
         Application.Refresh();
     }
 
     public void Render() => Render(Application.Top);
 
-    // Drives a terminal resize the way the real drivers do on SIGWINCH, so
-    // tests can assert the layout recovers. FakeDriver.SetWindowSize updates
-    // FakeConsole, re-runs ResizeScreen and fires the TerminalResized hook
-    // Application installed during Init.
+    // Drives a terminal resize the way the real drivers do on SIGWINCH.
+    //
+    // FakeDriver.SetWindowSize resizes the backing buffer, but on its own it
+    // leaves every Toplevel at its old frame, so views keep rendering at the
+    // previous width and a resize test would pass without proving anything.
+    // Application.TerminalResized is the hook the real drivers call; it
+    // re-runs the layout pass over the open Toplevels.
     public void Resize(int cols, int rows)
     {
         Driver.SetWindowSize(cols, rows);
+        RaiseTerminalResized();
         Pump();
         Application.Refresh();
+    }
+
+    // Application.TerminalResized is the internal hook the real console
+    // drivers call on SIGWINCH. It walks the open Toplevels and re-runs
+    // their layout against the new driver size.
+    private static void RaiseTerminalResized()
+    {
+        var m = typeof(Application).GetMethod(
+            "TerminalResized", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static);
+
+        if (m == null)
+            throw new InvalidOperationException(
+                "Application.TerminalResized not found; did the Terminal.Gui version change?");
+
+        m.Invoke(null, null);
     }
 
     // ── screen readback ─────────────────────────────────────────────────────

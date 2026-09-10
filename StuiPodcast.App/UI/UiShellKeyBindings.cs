@@ -1,4 +1,4 @@
-using StuiPodcast.App.Services;
+﻿using StuiPodcast.App.Services;
 using StuiPodcast.App.UI.Controls;
 using Terminal.Gui;
 
@@ -70,6 +70,9 @@ internal static class UiShellKeyBindings
 
         if (kv == 'm' || kv == 'M') { b.TogglePlayed(); return true; }
         if (key == Key.F12) { b.ShowLogs(500); return true; }
+        // Ctrl+L is the long-standing terminal convention for "repaint the
+        // screen"; here it also re-syncs the layout after a missed resize.
+        if (key == (Key.L | Key.CtrlMask)) { b.InvokeCommand(":redraw"); return true; }
         if (key == (Key.Q | Key.CtrlMask) || key == Key.Q || kv == 'Q' || kv == 'q') { b.Quit(); return true; }
         if (kv == 't' || kv == 'T') { b.ToggleTheme(); return true; }
         if (kv == 'u' || kv == 'U') { b.InvokeCommand(":filter toggle"); return true; }

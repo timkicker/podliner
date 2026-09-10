@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using Xunit;
@@ -11,6 +11,24 @@ public sealed class CmdSystemModuleTests
 
     static SystemUseCase Make(FakeUiShell ui, Func<Task>? persist = null)
         => new(ui, persist ?? (() => Task.CompletedTask));
+
+    // ── ExecRedraw ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ExecRedraw_forces_a_redraw()
+    {
+        Make(_ui).ExecRedraw();
+
+        _ui.ForceRedrawCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void ExecRedraw_confirms_on_the_osd()
+    {
+        Make(_ui).ExecRedraw();
+
+        _ui.OsdMessages.Should().Contain(m => m.Text.Contains("redrawn"));
+    }
 
     // ── ExecOsd ──────────────────────────────────────────────────────────────
 

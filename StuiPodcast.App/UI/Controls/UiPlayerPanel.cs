@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Terminal.Gui;
 using StuiPodcast.Core;
 
@@ -26,6 +26,10 @@ internal sealed class UiPlayerPanel : FrameView
     public event Action<string>? Command;
 
     private const int SidePad = 1;
+    // Button chrome is "[ " + text + " ]", so this many columns are usable.
+    private const int PlayPauseW    = 12;
+    private const int PlayPauseTextW = PlayPauseW - 4;
+
     private const int PlayerContentH = 5;
     public  const int PlayerFrameH   = PlayerContentH + 2;
 
@@ -106,9 +110,9 @@ internal sealed class UiPlayerPanel : FrameView
 
         // toggle based on last known state
         var currentlyPlaying = _lastKnownPlaying;
-        BtnPlayPause.Text = currentlyPlaying
+        BtnPlayPause.Text = Clamp(currentlyPlaying
             ? (isUnicode ? "Play ⏵"  : "Play >")
-            : (isUnicode ? "Pause ⏸" : "Pause ||");
+            : (isUnicode ? "Pause ⏸" : "Pause ||"));
 
         // toggle icon at start of time label
         var t = TimeLabel.Text?.ToString() ?? "";
@@ -122,13 +126,20 @@ internal sealed class UiPlayerPanel : FrameView
     }
 
 
+    // Keeps button text inside the fixed width so the row layout holds.
+    private static string Clamp(string? text)
+    {
+        text ??= "";
+        return text.Length <= PlayPauseTextW ? text : text[..PlayPauseTextW];
+    }
+
     private void UpdateLoadingVisuals()
     {
         var isUnicode = UIGlyphSet.Current == UIGlyphSet.Profile.Unicode;
 
         if (_isLoading)
         {
-            BtnPlayPause.Text   = _loadingText;
+            BtnPlayPause.Text   = Clamp(_loadingText);
             BtnPlayPause.Enabled = false;
 
             var t = TimeLabel.Text?.ToString() ?? "";
@@ -166,7 +177,12 @@ internal sealed class UiPlayerPanel : FrameView
 
         const int gapL = 2;
         BtnBack10    = new Button(UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "«10s" : "<10") { X = 2, Y = 2 };
-        BtnPlayPause = new Button("Play " + (UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "⏵" : ">")) { X = Pos.Right(BtnBack10) + gapL, Y = 2, Width = 12};
+        // AutoSize would let the button grow with its text and overlap the
+        // speed and volume controls to its right; the loading messages are
+        // long enough to garble the whole row. Pin the width instead and
+        // clamp any text to it.
+        BtnPlayPause = new Button("Play " + (UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "⏵" : ">"))
+            { X = Pos.Right(BtnBack10) + gapL, Y = 2, Width = PlayPauseW, AutoSize = false };
         BtnFwd10     = new Button(UIGlyphSet.Current == UIGlyphSet.Profile.Unicode ? "10s»" : "10>") { X = Pos.Right(BtnPlayPause) + gapL, Y = 2 };
         BtnDownload  = new Button($"{UIGlyphSet.DownloadedMark} Download"){ X = Pos.Right(BtnFwd10) + gapL, Y = 2 };
 
@@ -174,9 +190,17 @@ internal sealed class UiPlayerPanel : FrameView
         SpeedLabel   = new Label(UIGlyphSet.SpeedLabel(1.0)) { Width = 6, Y = 0, X = 0, TextAlignment = TextAlignment.Left };
         BtnSpeedDown = new Button("-spd"){ Y = 0, X = Pos.Right(SpeedLabel) + midGap };
         BtnSpeedUp   = new Button("+spd"){ Y = 0, X = Pos.Right(BtnSpeedDown) + midGap };
-        var midWidth = 6 + midGap + 6 + midGap + 6;
-        var mid = new View { Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false };
-        mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp); // left -> right
+        // A Terminal.Gui Button renders as "[ text ]", so it is 4 columns
+        // wider than its label. The old maths assumed 6 per button and made
+        // the container 22 wide, which clipped both speed buttons off the
+        // right edge.
+        const int speedLabelW = 6;
+        const int spdButtonW  = 4 + 4; // "-spd" / "+spd"
+        var midWidth = speedLabelW + midGap + spdButtonW + midGap + spdButtonW;
+        _mid = new View { Y = 2, X = Pos.Center(), Width = midWidth, Height = 1, CanFocus = false };
+        _midWidth = midWidth;
+        _mid.Add(SpeedLabel, BtnSpeedDown, BtnSpeedUp); // left -> right
+        var mid = _mid;
 
         const int rightPad = 2;
         const int gap = 2;
@@ -215,6 +239,88 @@ internal sealed class UiPlayerPanel : FrameView
         Add(TitleLabel, TimeLabel,
             BtnBack10, BtnPlayPause, BtnFwd10, BtnDownload,
             mid, BtnVolDown, BtnVolUp, VolPctLabel, VolBar, Progress);
+
+        // Re-evaluate on every layout pass so a terminal resize is picked up.
+        LayoutComplete += _ => ApplyResponsiveLayout();
+    }
+
+    // ── responsive control row ──────────────────────────────────────────────
+    //
+    // The row is a left block of transport buttons, a centred speed block and
+    // a right block of volume controls. Below roughly 140 columns those three
+    // run into each other: at the default 80x25 the skip and download buttons
+    // vanished and the volume block painted over the speed buttons.
+    //
+    // Rather than shrink everything, drop what is least needed at each step.
+    // Download duplicates the `d` key, the skip buttons duplicate the arrow
+    // keys, and the volume bar is decoration next to the percentage readout.
+    private const int WideMinCols   = 140;  // everything fits
+    private const int MediumMinCols = 104;  // no download button
+    private const int VolBarMinCols = 112;  // volume bar needs its own headroom
+    private const int NarrowMinCols = 78;   // no ±spd buttons either
+
+    private View? _mid;
+    private int _midWidth;
+    private int _lastLayoutWidth = -1;
+
+    private void ApplyResponsiveLayout()
+    {
+        if (_mid == null || BtnPlayPause == null) return;
+
+        var w = Frame.Width;
+        if (w <= 0 || w == _lastLayoutWidth) return;
+        _lastLayoutWidth = w;
+
+        var showDownload  = w >= WideMinCols;
+        var showSkips     = w >= MediumMinCols;
+        // The bar eats 16 columns on the right. Tying it to the same
+        // threshold as the skip buttons left the speed and volume blocks
+        // touching between 104 and 111 columns.
+        var showVolBar    = w >= VolBarMinCols;
+        // The `[` and `]` keys cover this, so the buttons are the first thing
+        // to go once the row gets really tight.
+        var showSpeedBtns = w >= NarrowMinCols;
+
+        BtnDownload.Visible  = showDownload;
+        BtnBack10.Visible    = showSkips;
+        BtnFwd10.Visible     = showSkips;
+        VolBar.Visible       = showVolBar;
+        BtnSpeedDown.Visible = showSpeedBtns;
+        BtnSpeedUp.Visible   = showSpeedBtns;
+
+        // Positions are assigned numerically rather than through Pos.Right
+        // chains, because a hidden view still occupies its old frame and
+        // would leave a hole in the row.
+        const int pad = 2, gap = 2;
+        const int skipW = 8;              // "[ «10s ]"
+        const int speedLabelWidth = 6;    // "1.0×"
+
+        int x = pad;
+        if (showSkips) { BtnBack10.X = x; x += skipW + gap; }
+        BtnPlayPause.X = x; x += PlayPauseW + gap;
+        if (showSkips) { BtnFwd10.X = x; x += skipW + gap; }
+        if (showDownload) { BtnDownload.X = x; x += 14 + gap; }
+
+        // The volume controls are anchored to the right edge, and those
+        // anchors were computed with the bar included. Hiding the bar has to
+        // pull them back in, or the block still reserves its 16 columns and
+        // runs into the speed block.
+        const int volPctW = 5, volBtnW = 6, volBarW = 16;
+        int rr = pad;
+        if (showVolBar) { VolBar.X = Pos.AnchorEnd(rr + volBarW); rr += volBarW + gap - 2; }
+        VolPctLabel.X = Pos.AnchorEnd(rr + volPctW); rr += volPctW + gap + 1;
+        BtnVolUp.X    = Pos.AnchorEnd(rr + volBtnW); rr += volBtnW + gap;
+        BtnVolDown.X  = Pos.AnchorEnd(rr + volBtnW); rr += volBtnW + gap;
+
+        // Centring the speed block is only safe while there is room on both
+        // sides; when narrow, park it directly after the transport buttons.
+        // The gap keeps the blocks from touching, which reads as a glitch
+        // even when nothing actually overlaps.
+        var midW = showSpeedBtns ? _midWidth : speedLabelWidth;
+        var rightBlockStart = w - rr;
+        var centred = w >= MediumMinCols && x + midW + gap <= rightBlockStart;
+        _mid.X = centred ? Pos.Center() : Pos.At(x);
+        _mid.Width = midW;
     }
 
     private bool? _speedEnabledCache;

@@ -908,6 +908,49 @@ public sealed class UiShell : IUiShell
         RequestRepaint();
     }
 
+    // True when the driver knows about a terminal size the layout has not
+    // picked up yet. Terminal.Gui detects resizes by polling (CursesDriver
+    // .ProcessWinChange → Curses.CheckWinChange), and a missed poll leaves
+    // every Toplevel rendering at the previous geometry — the crooked
+    // layout from issue #4.
+    public static bool NeedsRelayout()
+    {
+        var drv = Application.Driver;
+        var top = Application.Top;
+        if (drv == null || top == null) return false;
+
+        return top.Frame.Width != drv.Cols || top.Frame.Height != drv.Rows;
+    }
+
+    // Re-syncs the layout with the driver and repaints everything. Recovers
+    // from a missed resize without restarting the app. Safe to call when
+    // nothing is wrong: it degrades to a plain full repaint.
+    public void ForceRedraw()
+    {
+        UI(() =>
+        {
+            try
+            {
+                var drv = Application.Driver;
+                var top = Application.Top;
+
+                if (drv != null && top != null &&
+                    (top.Frame.Width != drv.Cols || top.Frame.Height != drv.Rows))
+                {
+                    top.Frame = new Rect(0, 0, drv.Cols, drv.Rows);
+                    top.LayoutSubviews();
+                }
+
+                RequestRepaint();
+                Application.Refresh();
+            }
+            catch (Exception ex)
+            {
+                Serilog.Log.Debug(ex, "force-redraw failed");
+            }
+        });
+    }
+
     private void RequestRepaint()
     {
         Application.Top?.SetNeedsDisplay();

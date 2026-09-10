@@ -1,4 +1,4 @@
-using StuiPodcast.App.Services;
+﻿using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 
@@ -100,5 +100,8 @@ sealed class FakeUiShell : IUiShell
 
     public void ShowKeysHelp() => KeysHelpShown = true;
     public void ShowLogsOverlay(int tail = 500) => LastLogsOverlayTail = tail;
+
+    public int ForceRedrawCount { get; private set; }
+    public void ForceRedraw() => ForceRedrawCount++;
     public void SetHistoryLimit(int n) => LastHistoryLimit = n;
 }

@@ -1,4 +1,4 @@
-using StuiPodcast.Core;
+﻿using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI;
 
@@ -40,6 +40,9 @@ internal interface IUiShell
     void SetFeeds(IReadOnlyList<Feed> feeds, Guid? selectId = null);
     void ShowKeysHelp();
     void ShowLogsOverlay(int tail = 500);
+    // Re-syncs the layout with the terminal size and repaints. Recovery path
+    // for a missed Terminal.Gui resize poll (issue #4).
+    void ForceRedraw();
     void SetHistoryLimit(int n);
     Func<IEnumerable<Episode>, IEnumerable<Episode>>? EpisodeSorter { get; set; }
     Guid AllFeedId { get; }

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.App.Command;
 using Xunit;
 
@@ -67,4 +67,10 @@ public sealed class CmdParserTests
         var parsed3 = CmdParser.Parse(":update");
         parsed3.Kind.Should().Be(TopCommand.Refresh);
     }
+    [Theory]
+    [InlineData(":redraw")]
+    [InlineData(":REDRAW")]
+    public void Redraw_parses(string raw)
+        => CmdParser.Parse(raw).Kind.Should().Be(TopCommand.Redraw);
+
 }

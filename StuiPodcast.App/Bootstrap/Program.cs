@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using Serilog;
 using StuiPodcast.App.Command;
@@ -349,6 +349,16 @@ internal class Program
         {
             try
             {
+                // Terminal.Gui only notices a terminal resize when its poll
+                // happens to run (CursesDriver.ProcessWinChange). A missed
+                // poll leaves the layout at the old geometry and the UI looks
+                // crooked until restart. Catch that here and re-sync.
+                if (_ui != null && UiShell.NeedsRelayout())
+                {
+                    Log.Debug("ui-tick: terminal size drifted from layout — forcing relayout");
+                    _ui.ForceRedraw();
+                }
+
                 if (_ui != null && _player != null && _playback != null)
                 {
                     _playback.PersistProgressTick(

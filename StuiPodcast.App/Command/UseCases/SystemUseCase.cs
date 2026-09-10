@@ -1,4 +1,4 @@
-using StuiPodcast.App.UI;
+﻿using StuiPodcast.App.UI;
 using Terminal.Gui;
 
 namespace StuiPodcast.App.Command.UseCases;
@@ -31,6 +31,12 @@ internal sealed class SystemUseCase
         var text = string.Join(' ', args ?? Array.Empty<string>()).Trim();
         if (!string.IsNullOrEmpty(text)) _ui.ShowOsd(text);
         else _ui.ShowOsd("usage: :osd <text>");
+    }
+
+    public void ExecRedraw()
+    {
+        _ui.ForceRedraw();
+        _ui.ShowOsd("redrawn", 700);
     }
 
     public void ExecWrite()

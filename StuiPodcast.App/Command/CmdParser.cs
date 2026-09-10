@@ -1,4 +1,4 @@
-
+﻿
 namespace StuiPodcast.App.Command
 {
     internal static class CmdParser
@@ -53,6 +53,7 @@ namespace StuiPodcast.App.Command
             [":remove-feed"] = TopCommand.RemoveFeed,
 
             [":undo"]        = TopCommand.Undo,
+            [":redraw"]      = TopCommand.Redraw,
         };
 
         // perfix rules

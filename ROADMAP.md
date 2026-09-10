@@ -9,6 +9,7 @@
 - [X] Fix `CS0472` dead null checks in `UiHelpBrowserDialog.cs:155` and `:221`
 - [X] Clear the remaining compiler warnings in the test projects
 - [ ] Fix playerui update (windows only?)
+- [X] Player control row overlaps itself below ~140 columns (now drops controls by tier: download, then skips + volume bar, then ±spd)
 
 ### Dependencies
 - [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)
@@ -34,7 +35,8 @@
 - [X] `NetworkMonitor` hysteresis, extracted into `NetworkFlipPolicy`
 - [X] `DownloadIndexStore` and `OpmlIo`
 - [X] `FeedHttpFetcher`
-- [ ] `UiEpisodesPane`, `UiPlayerPanel`, `UiFeedsPane`, `UiOsdOverlay` via the harness above
+- [X] `UiPlayerPanel` via the harness above
+- [ ] `UiEpisodesPane`, `UiFeedsPane`, `UiOsdOverlay` via the harness above
 - [ ] `UI/Wiring/*` (7 classes, ~750 lines, no tests)
 
 ### Refactor
@@ -53,7 +55,7 @@
 - [ ] Rethink first-letter-highlighting
 
 ### Bugs
-- [ ] Refresh/Redraw ui on mac/linux after moving window
+- [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.
 
 ### Packaging
 - [ ] Add the nixpkgs entry to README and the bug-report template once the package lands
