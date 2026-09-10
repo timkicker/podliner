@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Services;
 using Podliner.Core;
 using Podliner.Infra.Storage;
@@ -33,7 +33,8 @@ public sealed class SaveSchedulerTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 
-    private SaveScheduler Create() => new(_data, _facade, () => _syncCount++);
+    // The scheduler bumps this from its debounce timer thread.
+    private SaveScheduler Create() => new(_data, _facade, () => Interlocked.Increment(ref _syncCount));
 
     [Fact]
     public async Task Flush_saves_immediately()
@@ -65,11 +66,16 @@ public sealed class SaveSchedulerTests : IDisposable
         await sched.RequestSaveAsync();
         await sched.RequestSaveAsync();
 
-        // Wait for debounce timer (MIN_INTERVAL_MS = 1000)
-        await Task.Delay(1500);
+        // Wait for the debounce timer (MIN_INTERVAL_MS = 1000) to fire rather
+        // than sleeping a fixed span past it. A flat 1500ms passed here and on
+        // ubuntu and failed on the slower macOS runner, where the timer had
+        // simply not run yet.
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline && Volatile.Read(ref _syncCount) < 2)
+            await Task.Delay(25);
 
         // Should have debounced: 1 immediate + 1 delayed = at least 2
-        _syncCount.Should().BeGreaterOrEqualTo(2);
+        Volatile.Read(ref _syncCount).Should().BeGreaterOrEqualTo(2);
     }
 
     [Fact]
