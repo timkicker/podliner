@@ -141,6 +141,23 @@ public sealed class UiMenuBarFactoryTests
     }
 
     [Fact]
+    public void Separators_are_real_separators()
+    {
+        // Terminal.Gui draws a null child as a rule. A MenuItem whose text is
+        // "-" is just an entry called "-", which is what the menu used to
+        // show.
+        using var tui = new TuiHarness();
+        var bar = UiMenuBarFactory.Build(new Recorder().Build());
+
+        var all = bar.Menus.SelectMany(m => m.Children ?? Array.Empty<MenuItem>()).ToList();
+
+        all.Count(i => i == null).Should().BeGreaterThan(0, "the menus do use separators");
+        all.Where(i => i is not null)
+           .Select(i => i!.Title.ToString())
+           .Should().NotContain("-");
+    }
+
+    [Fact]
     public void The_menu_renders()
     {
         using var tui = new TuiHarness();

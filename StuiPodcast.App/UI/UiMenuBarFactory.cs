@@ -33,7 +33,12 @@ namespace StuiPodcast.App.UI
         #region Build
         
         // internal so the seeding rule can be tested directly.
-        internal static string Seed(string cmd)
+        // Terminal.Gui draws a null child as a separator rule, but MenuItem[] is
+    // not annotated nullable, so each separator would need its own
+    // suppression. One helper keeps that in a single place.
+    private static MenuItem Separator => null!;
+
+    internal static string Seed(string cmd)
         {
             if (string.IsNullOrWhiteSpace(cmd)) return ":";
             cmd = cmd.Trim();
@@ -135,18 +140,18 @@ namespace StuiPodcast.App.UI
                 Cmd("All Episodes", "", ":feed all"),
                 Cmd("Saved ★",      "", ":feed saved"),
                 Cmd("Downloaded ⬇", "", ":feed downloaded"),
-                new MenuItem("-", "", null),
+                Separator,
             };
 
             var quickPlayback = new[]
             {
                 Cmd("Play/Pause (Space)", "", ":toggle"),
-                new MenuItem("-", "", null),
+                Separator,
                 Cmd("Seek -10s (←/h/H)", "", ":seek -10"),
                 Cmd("Seek +10s (→/l/L)", "", ":seek +10"),
                 Cmd("Seek Start (g)",    "", ":seek 0:00"),
                 Cmd("Seek End (G)",      "", ":seek 100%"),
-                new MenuItem("-", "", null),
+                Separator,
             };
 
             var quickView = new[]
@@ -154,7 +159,7 @@ namespace StuiPodcast.App.UI
                 Act("Toggle Player Position (Ctrl+P)", "bar top/bottom", () => cb.Command(":audioPlayer toggle")),
                 Act("Toggle Theme (t)", "cycle theme", cb.ToggleTheme),
                 Cmd("Filter: Unplayed (u)", "", ":filter toggle"),
-                new MenuItem("-", "", null),
+                Separator,
             };
 
             var quickNavigate = new[]
@@ -163,13 +168,13 @@ namespace StuiPodcast.App.UI
                 Act("Focus Episodes (l)",      "focus episodes",       cb.FocusEpisodes),
                 Act("Open Details (i)",        "show details",         cb.OpenDetails),
                 Act("Back from Details (Esc)", "back to list",         cb.BackFromDetails),
-                new MenuItem("-", "", null),
+                Separator,
                 Act("Next Unplayed (J)",       "next unplayed",        cb.JumpNextUnplayed),
                 Act("Prev Unplayed (K)",       "prev unplayed",        cb.JumpPrevUnplayed),
-                new MenuItem("-", "", null),
+                Separator,
                 Act("Open Command Line (:)",   "command box",          cb.ShowCommand),
                 // search is kept in Shell's keybinds; no menu item required here
-                new MenuItem("-", "", null),
+                Separator,
             };
 
             // Catalog-driven groups
@@ -215,12 +220,12 @@ namespace StuiPodcast.App.UI
 
             if (opml.Length > 0)
             {
-                fileItems.Add(new MenuItem("-", "", null));
+                fileItems.Add(Separator);
                 fileItems.Add(new MenuItem("OPML", "", null) { CanExecute = () => false });
                 fileItems.AddRange(opml);
             }
 
-            fileItems.Add(new MenuItem("-", "", null));
+            fileItems.Add(Separator);
             fileItems.Add(quitItem);
 
             // Navigate menu: append Queue section
@@ -229,7 +234,7 @@ namespace StuiPodcast.App.UI
             navigateItems.AddRange(navigate);
             if (queue.Length > 0)
             {
-                navigateItems.Add(new MenuItem("-", "", null));
+                navigateItems.Add(Separator);
                 navigateItems.Add(new MenuItem("— Queue —", "", null) { CanExecute = () => false });
                 navigateItems.AddRange(queue);
             }
@@ -243,7 +248,7 @@ namespace StuiPodcast.App.UI
                 .Concat(miscTop)
                 .Concat(new[]
                 {
-                    new MenuItem("-", "", null),
+                    Separator,
                     new MenuItem("Keys & Commands (:h)", "help", () => cb.Command(":help")),
                     new MenuItem("Logs (F12)", "logs overlay", () => cb.Command(":logs")),
                     new MenuItem("About", "", () => MessageBox.Query("About", "Podliner: TUI podcast player", "OK")),

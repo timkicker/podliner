@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
@@ -134,13 +134,20 @@ internal sealed class TransportUseCase
         if ((arg.StartsWith("+") || arg.StartsWith("-")) &&
             double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var delta))
         {
-            var s2 = Math.Clamp(cur + delta, 0.25, 3.0);
+            var s2 = NormalizeSpeed(cur + delta);
             _audioPlayer.SetSpeed(s2); _data.Speed = s2; _ = _persist(); _ui.ShowOsd($"Speed {s2:0.0}×"); return;
         }
         if (double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var abs))
         {
-            var s2 = Math.Clamp(abs, 0.25, 3.0);
+            var s2 = NormalizeSpeed(abs);
             _audioPlayer.SetSpeed(s2); _data.Speed = s2; _ = _persist(); _ui.ShowOsd($"Speed {s2:0.0}×");
         }
     }
+
+    // Clamps to the supported range and rounds to two decimals. Stepping with
+    // ":speed +0.1" / "-0.1" otherwise accumulates binary floating-point
+    // error, and 0.9999999999999997 ends up in appsettings.json where 1.0
+    // belongs. The display rounds, so nobody sees it until they read the file.
+    internal static double NormalizeSpeed(double speed)
+        => Math.Round(Math.Clamp(speed, 0.25, 3.0), 2, MidpointRounding.AwayFromZero);
 }

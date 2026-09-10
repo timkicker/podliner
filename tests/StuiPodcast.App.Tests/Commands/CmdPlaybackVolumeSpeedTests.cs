@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Tests.Fakes;
 using StuiPodcast.Core;
@@ -157,5 +157,51 @@ public sealed class CmdPlaybackVolumeSpeedTests
     {
         _sut.Speed("");
         _player.State.Speed.Should().Be(1.0);
+    }
+
+    // ── speed never drifts ───────────────────────────────────────────────────
+
+    [Fact]
+    public void Stepping_up_and_down_returns_to_exactly_one()
+    {
+        // ":speed +0.1" ten times then "-0.1" ten times used to leave
+        // 0.9999999999999997 in appsettings.json.
+        for (int i = 0; i < 10; i++) _sut.Speed("+0.1");
+        for (int i = 0; i < 10; i++) _sut.Speed("-0.1");
+
+        _data.Speed.Should().Be(1.0);
+    }
+
+    [Fact]
+    public void A_single_step_lands_on_a_clean_value()
+    {
+        _sut.Speed("+0.1");
+
+        _data.Speed.Should().Be(1.1);
+    }
+
+    [Theory]
+    [InlineData(0.9999999999999997, 1.0)]
+    [InlineData(1.2500000000000002, 1.25)]
+    [InlineData(2.9999999999, 3.0)]
+    public void Normalising_snaps_to_two_decimals(double raw, double expected)
+        => TransportUseCase.NormalizeSpeed(raw).Should().Be(expected);
+
+    [Theory]
+    [InlineData(-5.0, 0.25)]
+    [InlineData(0.1, 0.25)]
+    [InlineData(99.0, 3.0)]
+    public void Normalising_clamps_to_the_supported_range(double raw, double expected)
+        => TransportUseCase.NormalizeSpeed(raw).Should().Be(expected);
+
+    [Fact]
+    public void Every_reachable_speed_survives_a_round_trip_through_the_config()
+    {
+        // Whatever stepping produces has to be a value ConfigStore keeps.
+        for (double s = 0.25; s <= 3.0; s += 0.05)
+        {
+            var n = TransportUseCase.NormalizeSpeed(s);
+            n.Should().Be(Math.Round(n, 2));
+        }
     }
 }

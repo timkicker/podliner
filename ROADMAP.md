@@ -72,6 +72,8 @@
 - [X] `q` now only quits; the bare-`q` alias for `:queue add` is gone from `QueueUseCase` and the help catalog
 
 ### Bugs
+- [X] Menu separators rendered as a literal `-` row: Terminal.Gui draws a `null` child as a rule, the code passed `new MenuItem("-", "", null)`
+- [X] `:speed +0.1` / `-0.1` accumulated floating-point error and wrote `0.9999999999999997` into appsettings.json; values now snap to two decimals
 - [X] The player bar showed 0% volume after launch: `ShowStartupEpisode` took `volume` and `speed` and used neither, so the persisted values were never painted. Found by driving the real app under tmux, not by the test suite
 - [X] `ConfigStore` rejected the theme name `User`, the toggle's fourth stop, and rewrote it to `auto` on load. Not user-visible, because `UiThemeResolver` maps `auto` to `User` as well, but the stored value was wrong and would have drifted with any change of default. Also dropped `HighContrast`, which was never a `ThemeMode`
 - [X] Removed `:feed remove` from the help catalog: it was documented as an alias of `:remove-feed` but `FeedUseCase` has no such subcommand, so it only ever printed a usage line
