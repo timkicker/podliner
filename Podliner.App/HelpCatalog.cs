@@ -46,7 +46,7 @@ namespace Podliner.App
             new(", / .", "Previous / next chapter (if available)"),
 
             new("j / k", "Move selection down / up"),
-            new("h / l", "Focus feeds / episodes"),
+            new("h / l", "Walk the panes left / right: feeds, episodes, shownotes, chapters"),
             new("Enter", "Play selected episode (seek in Chapters tab)"),
             new("i", "Open Shownotes tab"),
             new("Esc (in Shownotes/Chapters)", "Back to Episodes"),

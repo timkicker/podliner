@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Command.UseCases;
 using Podliner.App.Tests.Fakes;
 using Podliner.Core;
@@ -52,5 +52,27 @@ public sealed class ChaptersUseCaseLoadForUiTests
         var uc = Make();
         var r = await uc.LoadForUiAsync(null!);
         r.Outcome.Should().Be(ChaptersUseCase.LoadOutcome.NoSource);
+    }
+
+    // Exec dispatches its work with a bare `_ = Task.Run(...)`. CLAUDE.md
+    // requires those blocks to catch and surface, because an exception on a
+    // background thread otherwise leaves :chapter answering with nothing.
+    [Fact]
+    public async Task A_failure_in_the_background_load_reaches_the_user()
+    {
+        var ep = new Episode { Id = Guid.NewGuid(), AudioUrl = "https://example.com/ep.mp3" };
+        _episodes.Seed(ep);
+        _ui.SelectedEpisode = ep;
+
+        var uc = Make(localPath: _ => throw new IOException("download folder is gone"));
+
+        uc.Exec(new[] { "list" });
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && _ui.OsdMessages.Count == 0)
+            await Task.Delay(20);
+
+        _ui.OsdMessages.Should().ContainSingle()
+            .Which.Text.Should().StartWith("chapters: failed");
     }
 }

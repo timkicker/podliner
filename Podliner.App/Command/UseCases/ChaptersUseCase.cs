@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using Podliner.App.Services;
 using Podliner.App.UI;
 using Podliner.Core;
@@ -88,6 +88,8 @@ internal sealed class ChaptersUseCase
         // before dispatching; subsequent calls hit the in-memory cache.
         _ = Task.Run(async () =>
         {
+          try
+          {
             var loaded = await EnsureLoadedAsync(ep);
             if (!loaded)
             {
@@ -114,6 +116,14 @@ internal sealed class ChaptersUseCase
                     _ui.ShowOsd("usage: :chapter list|next|prev|jump <n>", 1500);
                     break;
             }
+          }
+          catch (Exception ex)
+          {
+            // Fire-and-forget on a background thread: without this the
+            // exception disappears and :chapter answers with nothing at all.
+            Log.Error(ex, "chapters/{Sub} failed id={Id}", sub, ep.Id);
+            _ui.ShowOsd($"chapters: failed ({ex.GetType().Name})", 2500);
+          }
         });
     }
 

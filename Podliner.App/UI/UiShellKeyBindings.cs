@@ -82,9 +82,13 @@ internal static class UiShellKeyBindings
         if (key == (Key)(':')) { b.ShowCommandBox(":"); return true; }
         if (key == (Key)('/')) { b.ShowSearchBox("/"); return true; }
 
+        // h and l walk the whole pane row: feeds, episodes, details, chapters.
+        // They used to stop at details, which left the chapters tab reachable
+        // only by mouse.
         if (key == (Key)('h'))
         {
-            if (IsDetailsTabActive(b.EpisodesPane)) SwitchToListTab(b.EpisodesPane);
+            if (IsChaptersTabActive(b.EpisodesPane))     SwitchToDetailsTab(b.EpisodesPane);
+            else if (IsDetailsTabActive(b.EpisodesPane)) SwitchToListTab(b.EpisodesPane);
             else b.FocusFeeds();
             return true;
         }
@@ -92,7 +96,8 @@ internal static class UiShellKeyBindings
         if (key == (Key)('l'))
         {
             if (b.IsFeedsPaneActive()) b.FocusEpisodes();
-            else if (!IsDetailsTabActive(b.EpisodesPane)) SwitchToDetailsTab(b.EpisodesPane);
+            else if (IsDetailsTabActive(b.EpisodesPane)) SwitchToChaptersTab(b.EpisodesPane);
+            else if (!IsChaptersTabActive(b.EpisodesPane)) SwitchToDetailsTab(b.EpisodesPane);
             return true;
         }
 
@@ -195,5 +200,12 @@ internal static class UiShellKeyBindings
         if (pane == null) return;
         pane.Tabs.SelectedTab = pane.DetailsTab;
         pane.Details.SetFocus();
+    }
+
+    static void SwitchToChaptersTab(UiEpisodesPane? pane)
+    {
+        if (pane == null) return;
+        pane.Tabs.SelectedTab = pane.ChaptersTab;
+        pane.ChaptersList.List.SetFocus();
     }
 }
