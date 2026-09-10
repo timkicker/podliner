@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Storage;
 using System.Text;
@@ -109,6 +109,20 @@ public sealed class ConfigStoreValidationTests : IDisposable
 
         store.Current.EnginePreference.Should().Be(wire);
         AudioEngineExt.FromWire(store.Current.EnginePreference).Should().Be(engine);
+    }
+
+    // The theme toggle cycles through every ThemeMode, so each name has to
+    // load back unchanged. Mirrors the engine round-trip guard above.
+    [Theory]
+    [InlineData("Base")]
+    [InlineData("MenuAccent")]
+    [InlineData("Native")]
+    [InlineData("User")]
+    [InlineData("auto")]
+    public void Known_themes_are_preserved(string theme)
+    {
+        var store = LoadWith("{ \"Theme\": \"" + theme + "\" }");
+        store.Current.Theme.Should().Be(theme);
     }
 
     [Fact]

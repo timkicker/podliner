@@ -1,4 +1,4 @@
-using StuiPodcast.Core;
+﻿using StuiPodcast.Core;
 
 namespace StuiPodcast.Infra.Storage
 {
@@ -37,7 +37,12 @@ namespace StuiPodcast.Infra.Storage
             // "auto" on load, which used to wipe a vlc/mediafoundation choice
             // on every launch.
             c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "vlc", "libvlc", "mpv", "ffplay", "mediafoundation");
-            c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "HighContrast", "Native");
+            // Must accept every ThemeMode name plus "auto". "User" used to be
+            // missing, so the toggle's fourth stop was rewritten to "auto" on
+            // load; that happened to still resolve to User, but the stored
+            // value was wrong and would have moved with any change of default.
+            // "HighContrast" was never a ThemeMode and is gone.
+            c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "Native", "User");
             c.GlyphSet         = NormalizeChoice(c.GlyphSet, "auto", "unicode", "ascii");
 
             c.ViewDefaults.SortBy  = NormalizeChoice(c.ViewDefaults.SortBy, "pubdate", "title", "duration", "feed", "progress");

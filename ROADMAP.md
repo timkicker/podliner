@@ -27,6 +27,12 @@
 - [X] Regression test for redraw after a resize event (issue #4)
 
 ### Coverage gaps, cheapest first
+- [X] Theme rendering (every ThemeMode applies, renders and survives a resize)
+- [X] `LoggerSetup` log-directory resolution (regression guard for issue #19, logs next to the binary)
+- [X] `AppBridge` (round-trips every persisted preference through a real save and reload)
+- [X] `UiShellKeyBindings` (the whole keyboard map)
+- [X] `HelpCatalog` (tied to the parser so a renamed command breaks the build)
+- [X] `UiMenuBarFactory` (every entry clicked, checks it dispatches something real)
 - [X] `CliEntrypoint` (87 lines, pure arg parsing)
 - [X] `DownloadRetryPolicy` (78 lines, pure)
 - [X] `RssParser` (215 lines, pure, feeds every episode field)
@@ -60,6 +66,7 @@
 - [ ] `q` means two different things: the `q` key quits, but bare `q` typed into the command box is a documented alias for `:queue add` (`QueueUseCase.Handle`). The help browser lists both. Pick one and drop the other.
 
 ### Bugs
+- [X] `ConfigStore` rejected the theme name `User`, the toggle's fourth stop, and rewrote it to `auto` on load. Not user-visible, because `UiThemeResolver` maps `auto` to `User` as well, but the stored value was wrong and would have drifted with any change of default. Also dropped `HighContrast`, which was never a `ThemeMode`
 - [X] Removed `:feed remove` from the help catalog: it was documented as an alias of `:remove-feed` but `FeedUseCase` has no such subcommand, so it only ever printed a usage line
 - [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.
 

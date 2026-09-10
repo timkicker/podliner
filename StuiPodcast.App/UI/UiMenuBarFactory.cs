@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
@@ -32,7 +32,8 @@ namespace StuiPodcast.App.UI
 
         #region Build
         
-        static string Seed(string cmd)
+        // internal so the seeding rule can be tested directly.
+        internal static string Seed(string cmd)
         {
             if (string.IsNullOrWhiteSpace(cmd)) return ":";
             cmd = cmd.Trim();

@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using Serilog.Events;
 using StuiPodcast.App.Debug;
 using System.Runtime.InteropServices;
@@ -49,7 +49,9 @@ static class LoggerSetup
     
     #region helpers
 
-    static LogEventLevel ParseLevel(string? level)
+    // internal for tests: the level map and the log-directory resolution are
+    // the only real logic here, and issue #19 was a wrong log directory.
+    internal static LogEventLevel ParseLevel(string? level)
     {
         switch ((level ?? "").Trim().ToLowerInvariant())
         {
@@ -66,7 +68,7 @@ static class LoggerSetup
         return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("JOURNAL_STREAM"));
     }
 
-    static string? ResolveLogDir(string? cliLogDir)
+    internal static string? ResolveLogDir(string? cliLogDir)
     {
         if (!string.IsNullOrWhiteSpace(cliLogDir))
             return cliLogDir;
