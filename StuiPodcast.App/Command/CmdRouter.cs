@@ -31,7 +31,6 @@ static class CmdRouter
         IFeedStore feedStore,
         IQueueService queue,
         CmdCases cases,
-        Func<AudioEngine, Task>? switchEngine = null,
         GpodderSyncService? syncService = null)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
@@ -55,7 +54,7 @@ static class CmdRouter
         var parsed = CmdParser.Parse(raw);
         if (parsed.Kind == TopCommand.Unknown) { ui.ShowOsd($"unknown: {parsed.Cmd}"); return; }
 
-        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm, switchEngine,
+        var ctx = new CmdContext(audioPlayer, playback, ui, mem, data, persist, dlm,
             episodes, feedStore, queue, cases, syncService);
 
         // dispatch

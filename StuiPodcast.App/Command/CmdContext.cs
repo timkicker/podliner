@@ -17,7 +17,6 @@ internal sealed class CmdContext
     public AppData Data { get; }
     public Func<Task> Persist { get; }
     public IDownloadManager Dlm { get; }
-    public Func<AudioEngine, Task>? SwitchEngine { get; }
     public GpodderSyncService? Sync { get; }
     public IEpisodeStore Episodes { get; }
     public IFeedStore    FeedStore { get; }
@@ -25,13 +24,13 @@ internal sealed class CmdContext
     public CmdCases Cases { get; }
 
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, IUiShell ui, MemoryLogSink mem,
-        AppData data, Func<Task> persist, IDownloadManager dlm, Func<AudioEngine, Task>? switchEngine,
+        AppData data, Func<Task> persist, IDownloadManager dlm,
         IEpisodeStore episodes, IFeedStore feedStore, IQueueService queue,
         CmdCases cases,
         GpodderSyncService? sync = null)
     {
         AudioPlayer = audioPlayer; Playback = playback; Ui = ui; Mem = mem;
-        Data = data; Persist = persist; Dlm = dlm; SwitchEngine = switchEngine; Sync = sync;
+        Data = data; Persist = persist; Dlm = dlm; Sync = sync;
         Episodes  = episodes  ?? throw new ArgumentNullException(nameof(episodes));
         FeedStore = feedStore ?? throw new ArgumentNullException(nameof(feedStore));
         Queue     = queue     ?? throw new ArgumentNullException(nameof(queue));

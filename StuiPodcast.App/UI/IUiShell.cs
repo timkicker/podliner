@@ -22,6 +22,18 @@ internal interface IUiShell
     event Action? ToggleThemeRequested;
     event Func<string, Task>? AddFeedRequested;
     event Func<Task>? RefreshRequested;
+
+    // Raw colon-command typed into the minibuffer, routed to CmdRouter.
+    event Action<string>? Command;
+    // Enter on the episode list.
+    event Action? PlaySelected;
+    // The `m` key.
+    event Action? TogglePlayedRequested;
+
+    // Caption on the episode list that reflects the unplayed-only filter.
+    void SetUnplayedHint(bool on);
+    // Restores the player bar to the episode the app opens on.
+    void ShowStartupEpisode(Episode ep, int? volume = null, double? speed = null);
     void SetChaptersLoading(string message);
     void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1);
     void SetChaptersEmpty(Guid episodeId, string message);

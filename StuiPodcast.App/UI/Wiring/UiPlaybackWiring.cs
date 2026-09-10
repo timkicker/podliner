@@ -89,7 +89,7 @@ internal static class UiPlaybackWiring
 
     // When playing from the virtual Queue feed, trim every queue entry up to
     // and including the played episode so the queue pane reflects progress.
-    static void TrimQueueIfViewingQueue(UiShell ui, IEpisodeStore episodeStore, IQueueService queue, Episode ep, Func<Task> save)
+    static void TrimQueueIfViewingQueue(IUiShell ui, IEpisodeStore episodeStore, IQueueService queue, Episode ep, Func<Task> save)
     {
         var curFeed = ui.GetSelectedFeedId();
         if (curFeed is not Guid fid || fid != VirtualFeedsCatalog.Queue) return;
@@ -106,7 +106,7 @@ internal static class UiPlaybackWiring
            && !string.IsNullOrWhiteSpace(ep.AudioUrl)
            && ep.AudioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase);
 
-    static void ShowLoading(UiShell ui, IAudioPlayer audioPlayer, bool isRemote)
+    static void ShowLoading(IUiShell ui, IAudioPlayer audioPlayer, bool isRemote)
     {
         var baseline = TimeSpan.Zero;
         try { baseline = audioPlayer.State.Position; } catch { }
@@ -116,7 +116,7 @@ internal static class UiPlaybackWiring
     // Swap AudioUrl to the resolved source for the duration of Play() and
     // restore it afterwards so persisted episode metadata isn't tainted with
     // a file:// URI.
-    static void StartPlayback(PlaybackCoordinator playback, Episode ep, string source, UiShell ui, AppData data)
+    static void StartPlayback(PlaybackCoordinator playback, Episode ep, string source, IUiShell ui, AppData data)
     {
         var oldUrl = ep.AudioUrl;
         try
@@ -140,7 +140,7 @@ internal static class UiPlaybackWiring
 
     // Some engines fail silently when handed a raw file path. If 600 ms after
     // Play() the engine is still idle we retry with an explicit file:// URI.
-    static void ArmLocalFileFallbackIfNeeded(IAudioPlayer audioPlayer, PlaybackCoordinator playback, Episode ep, string? localPath, UiShell ui)
+    static void ArmLocalFileFallbackIfNeeded(IAudioPlayer audioPlayer, PlaybackCoordinator playback, Episode ep, string? localPath, IUiShell ui)
     {
         if (localPath == null) return;
 

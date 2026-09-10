@@ -1,4 +1,5 @@
 ﻿using Serilog;
+using StuiPodcast.Infra.Player;
 using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI.Wiring;
@@ -191,14 +192,13 @@ static class UiComposer
     public static void WireUi(
         AppServices ctx,
         Func<Task> save,
-        Func<AudioEngine, Task> engineSwitch,
         Action updateTitle,
         Func<string, bool> hasFeedWithUrl)
     {
         UiFeedWiring.Wire(ctx, save, hasFeedWithUrl);
         UiSelectionWiring.Wire(ctx, save);
         UiPlaybackWiring.Wire(ctx, save);
-        UiCommandWiring.Wire(ctx, save, engineSwitch);
+        UiCommandWiring.Wire(ctx, save);
     }
 
     public static void ShowInitialLists(AppServices ctx)
@@ -211,7 +211,7 @@ static class UiComposer
 
     #region shutdown
 
-    public static void QuitApp(UiShell ui, SwappableAudioPlayer audioPlayer, IFeedService feeds, Func<Task> save)
+    public static void QuitApp(IUiShell ui, IAudioPlayer audioPlayer, IFeedService feeds, Func<Task> save)
     {
         if (Program.MarkExiting()) return;
 

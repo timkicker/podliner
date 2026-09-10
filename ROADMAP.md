@@ -49,7 +49,9 @@
 - [X] `UiCommandWiring` search half and `UiInitialRender`'s startup-episode pick (both narrowed to the deps they use)
 - [X] `IFeedService` extracted; `UiFeedWiring` remove and refresh covered, including the failure aggregation
 - [X] `IDownloadManager` extracted; `UiDownloaderBridge` covered including the two-second badge throttle
-- [ ] `UiCommandWiring` command routing (needs `AppServices` constructible in a test)
+- [X] `AppServices` takes interfaces; `AppServicesBuilder` assembles a complete one from fakes
+- [X] `UiComposer.WireUi` covered end to end, including command routing
+- [X] Removed the dead `switchEngine` chain: it was threaded from `Program.Main` through `WireUi`, `UiCommandWiring`, `CmdRouter` into `CmdContext.SwitchEngine` and never read; `:engine` has always gone through the delegate `CmdCases` was built with
 
 ### Refactor
 - [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)

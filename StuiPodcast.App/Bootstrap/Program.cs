@@ -339,7 +339,6 @@ internal class Program
         UiComposer.WireUi(
             ctx: services,
             save: _saver.RequestSaveAsync,
-            engineSwitch: engineSwitch,
             updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data, services.Episodes),
             hasFeedWithUrl: HasFeedWithUrl
         );
@@ -381,7 +380,6 @@ internal class Program
         // apply cli flags (post-ui)
         CmdApplier.ApplyPostUiFlags(
             cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader,
-            engineSwitch,
             _episodes, _feedStore, _queue, cases, _gpodder);
 
         // initial lists

@@ -11,14 +11,13 @@ internal static class UiCommandWiring
 {
     public static void Wire(
         AppServices ctx,
-        Func<Task> save,
-        Func<AudioEngine, Task> engineSwitch)
+        Func<Task> save)
     {
-        WireCommand(ctx, save, engineSwitch);
+        WireCommand(ctx, save);
         WireSearch(ctx);
     }
 
-    static void WireCommand(AppServices ctx, Func<Task> save, Func<AudioEngine, Task> engineSwitch)
+    static void WireCommand(AppServices ctx, Func<Task> save)
     {
         var ui = ctx.Ui;
         var data = ctx.Data;
@@ -45,7 +44,7 @@ internal static class UiCommandWiring
                 return;
 
             CmdRouter.Handle(cmd, audioPlayer, playback, ui, ctx.MemLog, data, save, ctx.Downloader,
-                episodeStore, feedStore, queueService, cases, engineSwitch, syncService);
+                episodeStore, feedStore, queueService, cases, syncService);
         };
     }
 

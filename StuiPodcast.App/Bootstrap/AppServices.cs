@@ -5,6 +5,7 @@ using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra;
 using StuiPodcast.Infra.Download;
+using StuiPodcast.Infra.Player;
 using StuiPodcast.Infra.Storage;
 using StuiPodcast.Infra.Sync;
 
@@ -22,7 +23,7 @@ namespace StuiPodcast.App.Bootstrap;
 // Rather than pepper WireUi with null checks, we assert here and rely on the
 // ordering in Program.Main (all services built before UiComposer is called).
 internal sealed record AppServices(
-    UiShell               Ui,
+    IUiShell              Ui,
     AppData               Data,
     AppFacade             App,
     ConfigStore           ConfigStore,
@@ -31,10 +32,10 @@ internal sealed record AppServices(
     IFeedStore            FeedStore,
     IQueueService         Queue,
     IFeedService          Feeds,
-    SwappableAudioPlayer  Player,
+    IAudioPlayer          Player,
     PlaybackCoordinator   Playback,
     IDownloadManager      Downloader,
-    DownloadLookupAdapter DownloadLookup,
+    AppFacade.ILocalDownloadLookup DownloadLookup,
     MemoryLogSink         MemLog,
     GpodderStore          GpodderStore,
     GpodderSyncService?   Gpodder,

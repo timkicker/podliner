@@ -116,6 +116,21 @@ sealed class FakeUiShell : IUiShell
     public readonly List<string?> DownloadBadges = new();
     public void SetDownloadBadge(string? text) => DownloadBadges.Add(text);
 
+    public event Action<string>? Command;
+    public event Action? PlaySelected;
+    public event Action? TogglePlayedRequested;
+
+    public void RaiseCommand(string cmd)        => Command?.Invoke(cmd);
+    public void RaisePlaySelected()             => PlaySelected?.Invoke();
+    public void RaiseTogglePlayedRequested()    => TogglePlayedRequested?.Invoke();
+
+    public Episode? StartupEpisode { get; private set; }
+    public void ShowStartupEpisode(Episode ep, int? volume = null, double? speed = null)
+        => StartupEpisode = ep;
+
+    public readonly List<bool> UnplayedHints = new();
+    public void SetUnplayedHint(bool on) => UnplayedHints.Add(on);
+
     public event Action? QuitRequested;
     public event Action? RemoveFeedRequested;
     public event Action? ToggleThemeRequested;

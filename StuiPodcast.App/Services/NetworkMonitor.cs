@@ -10,7 +10,7 @@ namespace StuiPodcast.App.Services;
 sealed class NetworkMonitor
 {
     readonly AppData _data;
-    readonly UiShell _ui;
+    readonly IUiShell _ui;
     readonly Func<Task> _saveAsync;
     readonly IEpisodeStore _episodes;
     readonly ViewUseCase _view;
@@ -26,7 +26,7 @@ sealed class NetworkMonitor
     DateTimeOffset _lastHeartbeat = DateTimeOffset.MinValue;
     static readonly TimeSpan _heartbeatEvery = TimeSpan.FromMinutes(2);
 
-    public NetworkMonitor(AppData data, UiShell ui, Func<Task> saveAsync, IEpisodeStore episodes, ViewUseCase view)
+    public NetworkMonitor(AppData data, IUiShell ui, Func<Task> saveAsync, IEpisodeStore episodes, ViewUseCase view)
     {
         _data = data;
         _ui = ui;

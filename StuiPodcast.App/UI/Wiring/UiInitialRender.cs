@@ -40,7 +40,7 @@ internal static class UiInitialRender
             .FirstOrDefault()
            ?? ui.GetSelectedEpisode();
 
-    static void ShowLastPlayed(UiShell ui, AppData data, Services.IEpisodeStore episodeStore, Episode last)
+    static void ShowLastPlayed(IUiShell ui, AppData data, Services.IEpisodeStore episodeStore, Episode last)
     {
         ui.SelectFeed(last.FeedId);
         ui.SetEpisodesForFeed(last.FeedId, episodeStore.Snapshot());

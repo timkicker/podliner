@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
@@ -25,7 +25,6 @@ static class CmdApplier
         MemoryLogSink memLog,
         Func<Task> save,
         DownloadManager? downloader,
-        Func<AudioEngine, Task> engineSwitch,
         IEpisodeStore episodes,
         IFeedStore feedStore,
         IQueueService queue,
@@ -40,7 +39,7 @@ static class CmdApplier
 
                 void Dispatch(string raw) =>
                     CmdRouter.Handle(raw, audioPlayer, playback, ui, memLog, data, save, downloader,
-                        episodes, feedStore, queue, cases, engineSwitch, syncService);
+                        episodes, feedStore, queue, cases, syncService);
 
                 if (cli.Offline)
                     Dispatch(":net offline");
