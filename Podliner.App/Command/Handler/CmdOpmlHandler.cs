@@ -1,0 +1,7 @@
+namespace Podliner.App.Command.Handler;
+
+internal sealed class CmdOpmlHandler : ICmdHandler
+{
+    public bool CanHandle(TopCommand k) => k == TopCommand.Opml;
+    public void Handle(CmdParsed cmd, CmdContext ctx) => ctx.Cases.Opml.ExecOpml(cmd.Args);
+}

@@ -1,0 +1,595 @@
+﻿using System.Reflection;
+using System.Runtime.InteropServices;
+using Serilog;
+using Podliner.App.Command;
+using Podliner.App.Command.Handler;
+using Podliner.App.Debug;
+using Podliner.App.Mpris;
+using Podliner.App.Services;
+using Podliner.App.UI;
+using Podliner.Core;
+using Podliner.Infra;
+using Podliner.Infra.Download;
+using Podliner.Infra.Storage;
+using Podliner.Infra.Sync;
+using Terminal.Gui;
+
+namespace Podliner.App.Bootstrap;
+
+internal class Program
+{
+    #region runtime flags
+    // runtime flags
+    internal static bool SkipSaveOnExit = false;
+    #endregion
+
+    #region singletons and runtime state
+    // primary singletons / runtime state
+    private static AppFacade?        _app;
+    private static ConfigStore?      _configStore;
+    private static LibraryStore?     _libraryStore;
+    private static IEpisodeStore?    _episodes;
+    private static IFeedStore?       _feedStore;
+    private static IQueueService?    _queue;
+    private static AppData           _data = new();
+    private static FeedService?      _feeds;
+
+    private static SwappableAudioPlayer?  _player;
+    private static PlaybackCoordinator? _playback;
+    private static MemoryLogSink     _memLog = new();
+    private static DownloadManager?  _downloader;
+    private static DownloadLookupAdapter? _downloadLookup;
+
+    private static UiShell?            _ui;
+    private static MprisService?       _mpris;
+    private static GpodderStore?       _gpodderStore;
+    private static GpodderSyncService? _gpodder;
+    #endregion
+
+    #region services
+    // service objects
+    private static SaveScheduler?    _saver;
+    private static NetworkMonitor?   _net;
+    private static EngineService?    _engineSvc;
+    private static SleepTimer?       _sleepTimer;
+    private static Podliner.Infra.Feeds.ChaptersFetcher? _chaptersFetcher;
+    #endregion
+
+    #region timers and guards
+    // timers and exit guard
+    private static object? _uiTimer;
+    private static object? _netTimerToken;
+    private static int _exitOnce;
+    #endregion
+
+    #region entry point
+    // application entry
+    private static async Task Main(string[]? args)
+    {
+        var cli = CliEntrypoint.Parse(args);
+
+        if (cli.ShowVersion) { PrintVersion(); return; }
+        if (cli.ShowHelp)    { PrintHelp();    return; }
+
+        WinConsoleUtil.Enable();
+        if (cli.Ascii) { try { UIGlyphSet.Use(UIGlyphSet.Profile.Ascii); }
+            catch
+            {
+                // ignored
+            }
+        }
+
+       
+        LoggerSetup.Configure(cli.LogLevel, cli.LogDir, cli.NoFileLogs, _memLog);
+        CmdErrorHandlers.Install();
+
+        // bootstrap: paths, stores, facade, downloader
+        var appConfigDir = ResolveConfigDir();
+        _configStore     = new ConfigStore(appConfigDir);
+        _libraryStore    = new LibraryStore(appConfigDir, subFolder: "", fileName: "library.json");
+
+        Console.WriteLine($"Config:  {_configStore.FilePath}");
+        Console.WriteLine($"Library: {_libraryStore.FilePath}");
+
+        _downloader = new DownloadManager(_data, _libraryStore, appConfigDir);
+        _downloadLookup = new DownloadLookupAdapter(_downloader, _data);
+
+        _app = new AppFacade(_configStore, _libraryStore, _downloadLookup);
+
+        // load and bridge to appdata
+        var cfg = _app.LoadConfig();
+        var lib = _app.LoadLibrary();
+        Log.Information("loaded config theme={Theme} playerAtTop={PlayerTop} sort={SortBy}/{SortDir}",
+            cfg.Theme, cfg.Ui.PlayerAtTop, cfg.ViewDefaults.SortBy, cfg.ViewDefaults.SortDir);
+        Log.Information("loaded library feeds={FeedCount} episodes={EpCount} queue={QCount} history={HCount}",
+            lib.Feeds.Count, lib.Episodes.Count, lib.Queue?.Count ?? 0, lib.History?.Count ?? 0);
+
+        AppBridge.SyncFromFacadeToAppData(_app, _data);
+
+        // Runtime stores are the new single source of truth for feed /
+        // episode / queue reads. Built early so any later service can
+        // receive them. Writes on legacy paths continue to update
+        // LibraryStore directly, which the stores read through.
+        _episodes  = new EpisodeStore(_libraryStore);
+        _feedStore = new FeedStore(_libraryStore);
+        _queue     = new QueueService(_libraryStore);
+
+        // apply cli engine preference before creating audio player; unknown
+        // values are left at whatever the config stored and surfaced via
+        // stderr so the user isn't silently "corrected" to Auto.
+        if (!string.IsNullOrWhiteSpace(cli.Engine))
+        {
+            var parsed = AudioEngineExt.FromWire(cli.Engine);
+            if (parsed != AudioEngine.Auto || cli.Engine == "auto")
+                _data.PreferredEngine = parsed;
+            else
+            {
+                Console.Error.WriteLine($"podliner: unknown --engine '{cli.Engine}' (expected auto|vlc|mpv|ffplay|mediafoundation) — ignoring");
+                cli.Engine = null; // prevent CmdApplier from also dispatching an invalid ":engine" post-UI
+            }
+        }
+
+        // audio player / engine service
+        _engineSvc = new EngineService(_data, _memLog);
+        _player = _engineSvc.Create(out _);
+
+        // coordinator, feeds, saver
+        _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));
+        _playback = new PlaybackCoordinator(_data, _player, _saver.RequestSaveAsync, _memLog, _episodes, _queue, _feedStore);
+        _feeds    = new FeedService(_data, _app, uiDispatch: DispatchToUi);
+
+        // Auto-download: when a refresh adds new episodes on a feed with
+        // AutoDownload=true, enqueue the new ids. Enqueue dedups internally
+        // against already-running/queued items; failures per episode don't
+        // block the rest.
+        _feeds.NewEpisodesDetected += (feed, epIds) =>
+        {
+            if (!feed.AutoDownload || _downloader == null) return;
+            if (!_data.NetworkOnline) return;
+            foreach (var id in epIds)
+            {
+                try { _downloader.Enqueue(id); }
+                catch (Exception ex) { Log.Debug(ex, "auto-download enqueue failed feedId={Fid} epId={Eid}", feed.Id, id); }
+            }
+            Log.Information("auto-download: queued {Count} new episodes for feed {Feed}", epIds.Count, feed.Title);
+        };
+
+        // gpodder sync (opt-in; no-op if not configured)
+        _gpodderStore = new GpodderStore(appConfigDir);
+        _gpodderStore.Load();
+        _gpodder = new GpodderSyncService(
+            _gpodderStore, new GpodderClientFactory(), _data, _playback, _episodes, _feedStore,
+            saveAsync: _saver.RequestSaveAsync, uiDispatch: DispatchToUi);
+
+        Log.Information("cfg at {Cfg}", _configStore.FilePath);
+        Log.Information("lib at {Lib}", _libraryStore.FilePath);
+
+        // apply audio player prefs
+        _engineSvc.ApplyPrefsTo(_player);
+
+        // mpris2 d-bus service (linux only)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            _mpris = new MprisService(_data, _player, _playback, _episodes, _feedStore);
+            _ = Task.Run(async () =>
+            {
+                try { await _mpris.StartAsync(); }
+                catch (Exception ex) { Log.Warning(ex, "MPRIS D-Bus unavailable"); }
+            });
+        }
+
+        // ui init
+        Application.Init();
+        _ui = new UiShell(_memLog);
+        try { _data.LastSelectedFeedId = _ui.AllFeedId; }
+        catch
+        {
+            // ignored
+        }
+
+        _ui.Build();
+        UiComposer.UpdateWindowTitleWithDownloads(_ui, _data, _episodes);
+
+        UiComposer.ScrollAllToTopOnIdle(_ui, _data, _episodes);
+
+        // theme resolve (default = user)
+        var themeChoice = UiThemeResolver.Resolve(cli.Theme, _data.ThemePref);
+        try
+        {
+            _ui.SetTheme(themeChoice.Mode);
+            if (themeChoice.ShouldPersistPref != null)
+            {
+                _data.ThemePref = themeChoice.ShouldPersistPref;
+                await _saver.RequestSaveAsync();
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        // Build the CmdCases container once every store, service and player
+        // exists. Downstream UI wiring + NetworkMonitor hold references to
+        // individual UseCases (e.g. ViewUseCase) so we construct it here
+        // before NetworkMonitor starts.
+        // Engine hot-swap: capture live playback state, perform the swap,
+        // resume the same episode + position on the new engine, and OSD
+        // the result (success or failure) so the user gets feedback.
+        Func<AudioEngine, Task> engineSwitch = async pref =>
+        {
+            var resume = _playback?.CaptureResumeState();
+            var ok = await _engineSvc!.SwitchAsync(_player!, pref, _saver!.RequestSaveAsync);
+            if (ok && resume is not null)
+            {
+                try { Application.MainLoop?.Invoke(() => _playback!.ResumeAfterSwap(resume.Value)); }
+                catch (Exception ex) { Log.Warning(ex, "engine resume-after-swap failed"); }
+            }
+            try
+            {
+                Application.MainLoop?.Invoke(() =>
+                {
+                    if (ok) _ui?.ShowOsd($"engine: switched to {pref.ToWire()}", 1200);
+                    else    _ui?.ShowOsd($"engine: switch to {pref.ToWire()} failed — check logs", 2500);
+                });
+            }
+            catch (Exception ex) { Log.Debug(ex, "engine-switch osd dispatch failed"); }
+        };
+
+        // Sleep timer: single-shot, fires stop+OSD on the UI thread.
+        _sleepTimer = new SleepTimer(onFire: () =>
+        {
+            try { _player?.TogglePause(); } catch { }
+            try { _player?.Stop(); }        catch { }
+            try { _ui?.ShowOsd("💤 sleep timer: playback stopped", 3500); } catch { }
+            Log.Information("sleep-timer fired — playback stopped");
+        });
+
+        _chaptersFetcher = new Podliner.Infra.Feeds.ChaptersFetcher();
+
+        var cases = new Podliner.App.Command.UseCases.CmdCases(
+            ui: _ui, data: _data, persist: _saver.RequestSaveAsync,
+            episodes: _episodes!, feedStore: _feedStore!, queue: _queue!,
+            audioPlayer: _player!, playback: _playback!, dlm: _downloader!,
+            switchEngine: engineSwitch, sync: _gpodder, sleepTimer: _sleepTimer,
+            chaptersFetcher: _chaptersFetcher);
+
+        // Wire the Chapters tab lazy-load: UI fires ChaptersLoadRequested,
+        // we dispatch LoadForUiAsync off the main loop and marshal the
+        // result back via SetChapters{Result,Empty}. Stale-guard lives in
+        // UiShell (compares against _chaptersActiveEpisodeId).
+        cases.Chapters.IsOnlineLookup = () => _data.NetworkOnline;
+        _ui.ChaptersLoadRequested += ep =>
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var r = await cases.Chapters.LoadForUiAsync(ep);
+                    switch (r.Outcome)
+                    {
+                        case Podliner.App.Command.UseCases.ChaptersUseCase.LoadOutcome.Loaded:
+                            // Initial active-chapter index for currently-playing episode.
+                            int active = -1;
+                            if (_ui?.GetNowPlayingId() == ep.Id)
+                            {
+                                var pos = _player?.State?.Position.TotalSeconds ?? 0;
+                                active = Podliner.App.UI.Controls.UiChaptersList.IndexForPosition(r.Chapters, pos);
+                            }
+                            _ui?.SetChaptersResult(ep.Id, r.Chapters, active);
+                            break;
+                        case Podliner.App.Command.UseCases.ChaptersUseCase.LoadOutcome.Offline:
+                            _ui?.SetChaptersEmpty(ep.Id, "Offline — chapters unavailable");
+                            break;
+                        case Podliner.App.Command.UseCases.ChaptersUseCase.LoadOutcome.NoChapters:
+                        default:
+                            _ui?.SetChaptersEmpty(ep.Id, "No chapters for this episode");
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "chapters/ui-load failed epId={Id}", ep.Id);
+                    _ui?.SetChaptersEmpty(ep.Id, "Failed to load chapters — see logs");
+                }
+            });
+        };
+
+        // network monitor
+        _net = new NetworkMonitor(_data, _ui, _saver.RequestSaveAsync, _episodes, cases.View);
+        _net.Start(out _netTimerToken);
+
+        // wire ui behaviors (sorter, lookups, events)
+        _ui.EpisodeSorter = eps => UiComposer.ApplySort(eps, _data, _feedStore);
+        _ui.SetUnplayedHint(_data.UnplayedOnly);
+        _ui.SetPlayerPlacement(_data.PlayerAtTop);
+
+        // reflect initial engine capabilities in the UI (e.g. disable speed buttons on MediaFoundation)
+        _ui.UpdateSpeedEnabled((_player.Capabilities & PlayerCapabilities.Speed) != 0);
+
+        // lookups
+        _ui.SetQueueLookup(id => _queue!.Contains(id));
+        _ui.SetDownloadStateLookup(id => _app!.IsDownloaded(id) ? DownloadState.Done : DownloadState.None);
+        _ui.SetOfflineLookup(() => !_data.NetworkOnline);
+
+        // theme change handler
+        _ui.ThemeChanged += mode =>
+        {
+            _data.ThemePref = mode.ToString();
+            _ = _saver!.RequestSaveAsync();
+        };
+
+        // downloader -> ui
+        UiComposer.AttachDownloaderUi(_downloader, _ui, _data, _episodes);
+
+        // Build the composition-root record now that every service exists.
+        // UiComposer + CmdApplier pull dependencies from this record instead
+        // of reaching into Program's private statics via reflection.
+        var services = new AppServices(
+            Ui: _ui, Data: _data, App: _app!,
+            ConfigStore: _configStore!, LibraryStore: _libraryStore!,
+            Episodes: _episodes!, FeedStore: _feedStore!, Queue: _queue!,
+            Feeds: _feeds!, Player: _player!, Playback: _playback!,
+            Downloader: _downloader!, DownloadLookup: _downloadLookup!,
+            MemLog: _memLog, GpodderStore: _gpodderStore!, Gpodder: _gpodder,
+            Saver: _saver!, Net: _net!, EngineSvc: _engineSvc!,
+            Cases: cases
+        );
+
+        // build remaining ui behaviors
+        UiComposer.WireUi(
+            ctx: services,
+            save: _saver.RequestSaveAsync,
+            updateTitle: () => UiComposer.UpdateWindowTitleWithDownloads(_ui!, _data, services.Episodes),
+            hasFeedWithUrl: HasFeedWithUrl
+        );
+
+        // progress persistence tick (ui timer)
+        _uiTimer = Application.MainLoop.AddTimeout(TimeSpan.FromMilliseconds(250), _ =>
+        {
+            try
+            {
+                // Terminal.Gui only notices a terminal resize when its poll
+                // happens to run (CursesDriver.ProcessWinChange). A missed
+                // poll leaves the layout at the old geometry and the UI looks
+                // crooked until restart. Catch that here and re-sync.
+                if (_ui != null && UiShell.NeedsRelayout())
+                {
+                    Log.Debug("ui-tick: terminal size drifted from layout — forcing relayout");
+                    _ui.ForceRedraw();
+                }
+
+                if (_ui != null && _player != null && _playback != null)
+                {
+                    _playback.PersistProgressTick(
+                        _player.State,
+                        eps => {
+                            var fid = _ui.GetSelectedFeedId();
+                            if (fid != null) _ui.SetEpisodesForFeed(fid.Value, eps);
+                        });
+                }
+            }
+            catch (Exception ex)
+            {
+                // Fires 4×/sec. Log.Debug so running with --log-level info
+                // doesn't flood, but keep the stack when debug is on.
+                Log.Debug(ex, "ui-tick/persist-progress threw");
+            }
+            return true;
+        });
+
+        // apply cli flags (post-ui)
+        CmdApplier.ApplyPostUiFlags(
+            cli, _ui, _data, _player!, _playback!, _memLog, _saver.RequestSaveAsync, _downloader,
+            _episodes, _feedStore, _queue, cases, _gpodder);
+
+        // initial lists
+        UiComposer.ShowInitialLists(services);
+
+        // gpodder auto-sync on startup
+        if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
+            _ = Task.Run(async () =>
+            {
+                try { await _gpodder.SyncAsync(); }
+                catch (Exception ex) { Log.Warning(ex, "gPodder auto-sync startup failed"); }
+            });
+
+        try { Application.Run(); }
+        finally
+        {
+            Log.Information("shutdown begin");
+            try { Application.MainLoop?.RemoveTimeout(_uiTimer); }
+            catch
+            {
+                // ignored
+            }
+
+            try { if (_netTimerToken is not null) Application.MainLoop?.RemoveTimeout(_netTimerToken); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _player?.Stop(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _player?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _downloadLookup?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _downloader?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            if (_mpris != null)
+                try { await _mpris.DisposeAsync(); } catch { }
+
+            // gpodder push-on-exit
+            if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
+                try { await _gpodder.PushAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+            _gpodder?.Dispose();
+
+            if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
+
+            try { _feeds?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _chaptersFetcher?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _playback?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { _app?.Dispose(); }
+            catch
+            {
+                // ignored
+            }
+
+            try { Application.Shutdown(); }
+            catch
+            {
+                // ignored
+            }
+
+            ResetHard();
+            try { Log.CloseAndFlush(); }
+            catch
+            {
+                // ignored
+            }
+
+            Log.Information("shutdown end");
+        }
+    }
+    #endregion
+
+    #region public api / compatibility
+    // helpers exposed for other modules
+    internal static bool MarkExiting() => Interlocked.Exchange(ref _exitOnce, 1) == 1;
+
+    internal static object? NetTimerToken => _netTimerToken;
+    internal static object? UiTimerToken  => _uiTimer;
+    internal static DownloadManager? DownloaderInstance => _downloader;
+    internal static MemoryLogSink MemLogSinkInstance => _memLog;
+
+    public static bool IsDownloaded(Guid episodeId) => _app?.IsDownloaded(episodeId) ?? false;
+    public static bool TryGetLocalPath(Guid episodeId, out string? path)
+    {
+        if (_app != null && _app.TryGetLocalPath(episodeId, out path)) return true;
+        path = null;
+        return false;
+    }
+    #endregion
+
+    #region helpers
+    // Run the given action on the Terminal.Gui main loop and await its completion.
+    // Falls back to synchronous execution if no loop is running (tests, CLI-only flows).
+    private static Task DispatchToUi(Action action)
+    {
+        var loop = Application.MainLoop;
+        if (loop == null) { action(); return Task.CompletedTask; }
+
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        loop.Invoke(() =>
+        {
+            try { action(); tcs.TrySetResult(true); }
+            catch (Exception ex) { tcs.TrySetException(ex); }
+        });
+        return tcs.Task;
+    }
+
+    // resolve configuration directory
+    private static string ResolveConfigDir()
+    {
+        var baseConfigDir =
+            RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
+                : (Environment.GetEnvironmentVariable("XDG_CONFIG_HOME")
+                   ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config"));
+        return Path.Combine(baseConfigDir, "podliner");
+    }
+
+    // check if feed with url already exists (O(1) via FeedStore URL index)
+    private static bool HasFeedWithUrl(string url)
+        => _feedStore?.ContainsUrl(url) ?? false;
+
+    // print version to stdout
+    private static void PrintVersion()
+    {
+        var asm  = typeof(Program).Assembly;
+        var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var ver  = string.IsNullOrWhiteSpace(info) ? asm.GetName().Version?.ToString() ?? "0.0.0" : info;
+
+        string rid;
+        try { rid = RuntimeInformation.RuntimeIdentifier; }
+        catch { rid = $"{Environment.OSVersion.Platform}-{RuntimeInformation.OSArchitecture}".ToLowerInvariant(); }
+
+        Console.WriteLine($"podliner {ver} ({rid})");
+    }
+
+    // print simple help
+    private static void PrintHelp()
+    {
+        // keep help short and readable
+        PrintVersion();
+        Console.WriteLine();
+        Console.WriteLine("Usage: podliner [options]");
+        Console.WriteLine("Options:");
+        Console.WriteLine("  --version, -v            Show version and exit");
+        Console.WriteLine("  --help, -h               Show this help and exit");
+        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay|mediafoundation>");
+        Console.WriteLine("  --theme <base|accent|native|auto|user>");
+        Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
+        Console.WriteLine("  --search \"<term>\"");
+        Console.WriteLine("  --opml-import <FILE> [--import-mode merge|replace|dry-run]");
+        Console.WriteLine("  --opml-export <FILE>");
+        Console.WriteLine("  --offline");
+        Console.WriteLine("  --ascii");
+        Console.WriteLine("  --log-level <debug|info|warn|error>");
+        Console.WriteLine("  --log-dir <DIR>          write logs to DIR");
+        Console.WriteLine("  --no-file-logs           disable file logging (stdout only)");
+    }
+ 
+
+    // try to restore terminal state on exit
+    private static void ResetHard()
+    {
+        try
+        {
+            Console.Write(
+                "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse off
+                "\x1b[?2004l" +                                           // bracketed paste off
+                "\x1b[?25h"   +                                           // cursor on
+                "\x1b[0m"     +                                           // sgr reset
+                "\x1b[?1049l"                                            // leave alt screen
+            );
+            Console.Out.Flush();
+            Console.Write("\x1bc"); // RIS
+            Console.Out.Flush();
+        }
+        catch { }
+    }
+    #endregion
+}

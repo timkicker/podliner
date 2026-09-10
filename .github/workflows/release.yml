@@ -43,7 +43,7 @@ jobs:
       - name: Publish (self-contained)
         shell: bash
         run: |
-          dotnet publish ./StuiPodcast.App/StuiPodcast.App.csproj \
+          dotnet publish ./Podliner.App/Podliner.App.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             -p:SelfContained=true \
@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist package/podliner
-          cp publish/${{ matrix.rid }}/StuiPodcast.App package/podliner/podliner
+          cp publish/${{ matrix.rid }}/Podliner.App package/podliner/podliner
           chmod +x package/podliner/podliner
           { cp LICENSE package/podliner/ 2>/dev/null || true; }
           { cp README.md package/podliner/ 2>/dev/null || true; }
@@ -94,7 +94,7 @@ jobs:
       - name: Publish (self-contained)
         shell: pwsh
         run: >
-          dotnet publish .\StuiPodcast.App\StuiPodcast.App.csproj
+          dotnet publish .\Podliner.App\Podliner.App.csproj
           -c Release -r win-x64
           -p:SelfContained=true
           -p:PublishSingleFile=true
@@ -111,10 +111,10 @@ jobs:
           New-Item -Type Directory -Path package\podliner -Force | Out-Null
 
           # Raw exe for winget + Release-Asset
-          Copy-Item publish\win-x64\StuiPodcast.App.exe dist\podliner-win-x64.exe
+          Copy-Item publish\win-x64\Podliner.App.exe dist\podliner-win-x64.exe
 
           # Optionales Zip (exe + Lizenz/Readme)
-          Copy-Item publish\win-x64\StuiPodcast.App.exe package\podliner\podliner.exe
+          Copy-Item publish\win-x64\Podliner.App.exe package\podliner\podliner.exe
           if (Test-Path LICENSE) { Copy-Item LICENSE package\podliner\ }
           if (Test-Path README.md) { Copy-Item README.md package\podliner\ }
           Compress-Archive -Path package\podliner\* -DestinationPath dist\podliner-win-x64.zip -Force
@@ -156,7 +156,7 @@ jobs:
       - name: Publish (self-contained)
         shell: bash
         run: |
-          dotnet publish ./StuiPodcast.App/StuiPodcast.App.csproj \
+          dotnet publish ./Podliner.App/Podliner.App.csproj \
             -c Release \
             -r ${{ matrix.rid }} \
             -p:SelfContained=true \
@@ -171,7 +171,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist package/podliner
-          cp publish/${{ matrix.rid }}/StuiPodcast.App package/podliner/podliner
+          cp publish/${{ matrix.rid }}/Podliner.App package/podliner/podliner
           chmod +x package/podliner/podliner
           { cp LICENSE package/podliner/ 2>/dev/null || true; }
           { cp README.md package/podliner/ 2>/dev/null || true; }

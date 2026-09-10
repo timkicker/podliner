@@ -1,0 +1,18 @@
+using Podliner.Core.Sync;
+
+namespace Podliner.Infra.Sync;
+
+public interface IGpodderClient : IDisposable
+{
+    void Configure(string server, string username, string password);
+    Task<bool> LoginAsync(string server, string username, string password);
+    Task RegisterDeviceAsync(string username, string deviceId);
+    Task<SubscriptionDelta> GetSubscriptionDeltaAsync(string username, string deviceId, long since);
+    Task<long> PushSubscriptionChangesAsync(string username, string deviceId, string[] add, string[] remove);
+    Task<EpisodeActionsResult> GetEpisodeActionsAsync(string username, long since);
+    Task<long> PushEpisodeActionsAsync(string username, IEnumerable<PendingGpodderAction> actions);
+
+    // Diagnostics from the most recent login attempt (null if never called or exception).
+    int?    LastLoginStatus { get; }
+    string? LastLoginReason { get; }
+}

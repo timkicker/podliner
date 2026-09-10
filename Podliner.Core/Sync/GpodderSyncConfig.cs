@@ -1,0 +1,23 @@
+namespace Podliner.Core.Sync;
+
+public sealed class GpodderSyncConfig
+{
+    public string?  ServerUrl  { get; set; }
+    public string?  Username   { get; set; }
+    public string?  Password   { get; set; }    // plain-text fallback when keyring is unavailable
+    public bool     PasswordStoredInKeyring { get; set; } = false;
+    public string   DeviceId   { get; set; } = "";
+    public bool     AutoSync   { get; set; } = false;
+    public long     SubsTimestamp    { get; set; } = 0;   // use server's timestamp, not local clock
+    public long     ActionsTimestamp { get; set; } = 0;
+    public List<string>               LastKnownServerFeeds { get; set; } = new();
+    public List<PendingGpodderAction> PendingActions       { get; set; } = new();
+    public DateTimeOffset?            LastSyncAt           { get; set; }
+
+    // Wire-format flavor of the configured server. Persisted as a string
+    // ("gpoddernet" / "nextcloud") so later enum renames don't break
+    // existing configs; Auto means "not yet detected / upgrade from pre-flavor config".
+    public string? Flavor { get; set; }
+
+    public bool IsConfigured => ServerUrl != null && Username != null && (Password != null || PasswordStoredInKeyring);
+}

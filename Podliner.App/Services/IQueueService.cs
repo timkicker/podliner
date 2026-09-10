@@ -1,0 +1,34 @@
+using Podliner.Core;
+
+namespace Podliner.App.Services;
+
+// Owner of the playback queue. Replaces the scattered queue mutations
+// across CmdQueueModule, PlaybackCoordinator, UiComposer and the UI's
+// SetQueueLookup. Backed by LibraryStore.Current.Queue so persistence
+// stays aligned with every mutation.
+//
+// The queue holds Episode IDs (not Episode references) to stay small and
+// not keep removed episodes alive. Resolving IDs back to Episodes is the
+// caller's job (via IEpisodeStore).
+public interface IQueueService
+{
+    int Count { get; }
+    IReadOnlyList<Guid> Snapshot();
+    bool Contains(Guid id);
+    int IndexOf(Guid id);
+
+    // Mutations. Return `true` if the queue actually changed.
+    bool Append(Guid id);          // adds if not already present
+    bool Toggle(Guid id);          // adds if absent, removes if present
+    bool Remove(Guid id);
+    bool MoveToFront(Guid id);     // used by play-next semantics
+    bool Move(Guid id, int toIndex);
+    int Clear();
+    int Dedup();                   // keep first of each id
+    int Shuffle();
+    // Remove the target and every entry before it (used when a queued
+    // episode starts playing and trims predecessors).
+    bool TrimUpToInclusive(Guid targetId);
+
+    event Action? Changed;
+}

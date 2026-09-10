@@ -25,7 +25,7 @@ Thumbs.db
 
 # Logs & local files
 *.log
-stui-podcast.log
+podliner.log
 
 # Misc
 *.swp

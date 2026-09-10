@@ -272,7 +272,7 @@ Please take a look at [ROADMAP.md](./ROADMAP.md)
 **Local dev:**
 ```bash
 dotnet build
-dotnet run --project StuiPodcast.App
+dotnet run --project Podliner.App
 ```
 
 **Guidelines (short):**
