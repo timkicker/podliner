@@ -17,6 +17,11 @@ internal static class UiInitialRender
 
         cases.View.ApplyFeedList();
         ui.SetUnplayedHint(data.UnplayedOnly);
+
+        // The Queue view renders in queue order, and that order was only ever
+        // pushed after a queue command. Without this the queue looks empty
+        // after every restart even though it was persisted.
+        ui.SetQueueOrder(ctx.Queue.Snapshot());
         cases.View.ApplyList();
 
         var initialFeed = ui.GetSelectedFeedId();

@@ -72,6 +72,7 @@
 - [X] `q` now only quits; the bare-`q` alias for `:queue add` is gone from `QueueUseCase` and the help catalog
 
 ### Bugs
+- [X] The Queue view was empty after every restart: it renders in queue order, and that order was only pushed after a queue command, never at startup. The queue itself was persisted correctly the whole time
 - [X] Menu separators rendered as a literal `-` row: Terminal.Gui draws a `null` child as a rule, the code passed `new MenuItem("-", "", null)`
 - [X] `:speed +0.1` / `-0.1` accumulated floating-point error and wrote `0.9999999999999997` into appsettings.json; values now snap to two decimals
 - [X] The player bar showed 0% volume after launch: `ShowStartupEpisode` took `volume` and `speed` and used neither, so the persisted values were never painted. Found by driving the real app under tmux, not by the test suite

@@ -178,6 +178,34 @@ public sealed class UiComposerWireUiTests
         f.Ui.ThemeToggled.Should().BeTrue();
     }
 
+    // ── initial render ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void The_initial_render_seeds_the_queue_order()
+    {
+        // The Queue view lists episodes in _queueOrder, which only ever got
+        // filled by a queue command. After a restart the queue was persisted
+        // but the view showed nothing until the user ran one.
+        using var f = new Fixture();
+        var ep = f.Seed("Queued");
+        f.B.Queue.Seed(ep.Id);
+
+        UiComposer.ShowInitialLists(f.B.Build());
+
+        f.Ui.QueueOrder.Should().Equal(ep.Id);
+    }
+
+    [Fact]
+    public void The_initial_render_with_an_empty_queue_is_harmless()
+    {
+        using var f = new Fixture();
+
+        var act = () => UiComposer.ShowInitialLists(f.B.Build());
+
+        act.Should().NotThrow();
+        f.Ui.QueueOrder.Should().BeEmpty();
+    }
+
     // ── playing an episode ──────────────────────────────────────────────────
 
     // Play() is dispatched off the main loop, so give it a moment to land.
