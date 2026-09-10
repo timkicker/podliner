@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.Tests.Fakes;
@@ -152,18 +152,48 @@ public sealed class CmdQueueModuleTests
     }
 
     [Fact]
-    public void Q_shortcut_acts_as_queue_add()
-    {
-        var ep = MakeEpisode();
-        _sut.Handle("q").Should().BeTrue();
-        _queue.Snapshot().Should().Contain(ep.Id);
-    }
-
-    [Fact]
     public void No_selected_episode_is_noop()
     {
         _ui.SelectedEpisode = null;
         _sut.Handle(":queue add").Should().BeTrue();
         _queue.Snapshot().Should().BeEmpty();
+    }
+
+    // ── the bare "q" shortcut is gone ────────────────────────────────────────
+
+    [Theory]
+    [InlineData("q")]
+    [InlineData("Q")]
+    [InlineData("  q  ")]
+    public void A_bare_q_is_not_a_queue_command(string cmd)
+    {
+        // "q" is the quit key. It used to double as ":queue add" here, which
+        // meant the help browser documented a shortcut that quits the app
+        // when pressed and queues an episode when typed.
+        _sut.Handle(cmd).Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_bare_q_does_not_touch_the_queue()
+    {
+        var ep = MakeEpisode();
+        _episodes.Seed(ep);
+        _ui.SelectedEpisode = ep;
+
+        _sut.Handle("q");
+
+        _queue.Snapshot().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Queue_add_still_works()
+    {
+        var ep = MakeEpisode();
+        _episodes.Seed(ep);
+        _ui.SelectedEpisode = ep;
+
+        _sut.Handle(":queue add").Should().BeTrue();
+
+        _queue.Snapshot().Should().Contain(ep.Id);
     }
 }

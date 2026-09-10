@@ -225,10 +225,8 @@ namespace StuiPodcast.App
             // queue
             new(":queue", "Queue operations (selection-based).",
                 "add|toggle|rm|remove|clear|move <up|down|top|bottom>|shuffle|uniq",
-                Aliases: new[]{ "q" },
                 Examples: new[]{
                     ":queue add",
-                    "q",
                     ":queue move up",
                     ":queue shuffle",
                     ":queue uniq",

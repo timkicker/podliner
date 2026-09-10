@@ -67,8 +67,7 @@ public sealed class HelpCatalogTests
         => CmdParser.Parse(raw).Kind != TopCommand.Unknown
            || raw.StartsWith(":dl", StringComparison.OrdinalIgnoreCase)
            || raw.StartsWith(":download", StringComparison.OrdinalIgnoreCase)
-           || raw.StartsWith(":queue", StringComparison.OrdinalIgnoreCase)
-           || raw.Equals("q", StringComparison.OrdinalIgnoreCase);
+           || raw.StartsWith(":queue", StringComparison.OrdinalIgnoreCase);
 
     // A few entries deliberately document several commands at once
     // (":zt / :zz / :zb"), so their aliases cannot all map to one TopCommand.

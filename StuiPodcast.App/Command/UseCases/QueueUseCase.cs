@@ -1,4 +1,4 @@
-using StuiPodcast.App.Services;
+﻿using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 
 namespace StuiPodcast.App.Command.UseCases;
@@ -29,10 +29,10 @@ internal sealed class QueueUseCase
         if (string.IsNullOrWhiteSpace(cmd)) return false;
         var t = cmd.Trim();
 
-        if (!t.StartsWith(":queue", StringComparison.OrdinalIgnoreCase) &&
-            !t.Equals("q", StringComparison.OrdinalIgnoreCase)) return false;
-
-        if (t.Equals("q", StringComparison.OrdinalIgnoreCase)) t = ":queue add";
+        // A bare "q" used to be accepted here as a shortcut for ":queue add",
+        // but "q" is the quit key everywhere else in the app and in every
+        // other terminal program. The shortcut is gone; ":queue add" stays.
+        if (!t.StartsWith(":queue", StringComparison.OrdinalIgnoreCase)) return false;
 
         string[] parts = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         string sub = parts.Length >= 2 ? parts[1].ToLowerInvariant() : "add";
