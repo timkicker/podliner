@@ -48,7 +48,8 @@
 - [X] `UiSelectionWiring` and `UiPlaybackEventBridge` (narrowed to the deps they use instead of the whole `AppServices`)
 - [X] `UiCommandWiring` search half and `UiInitialRender`'s startup-episode pick (both narrowed to the deps they use)
 - [X] `IFeedService` extracted; `UiFeedWiring` remove and refresh covered, including the failure aggregation
-- [ ] `UiCommandWiring` command routing, `UiDownloaderBridge` (still need `CmdCases` / `DownloadManager` behind interfaces)
+- [X] `IDownloadManager` extracted; `UiDownloaderBridge` covered including the two-second badge throttle
+- [ ] `UiCommandWiring` command routing (needs `AppServices` constructible in a test)
 
 ### Refactor
 - [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)

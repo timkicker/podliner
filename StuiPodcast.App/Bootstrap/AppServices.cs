@@ -33,7 +33,7 @@ internal sealed record AppServices(
     IFeedService          Feeds,
     SwappableAudioPlayer  Player,
     PlaybackCoordinator   Playback,
-    DownloadManager       Downloader,
+    IDownloadManager      Downloader,
     DownloadLookupAdapter DownloadLookup,
     MemoryLogSink         MemLog,
     GpodderStore          GpodderStore,

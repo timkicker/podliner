@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -23,7 +23,7 @@ namespace StuiPodcast.Infra.Download
     }
 
     // download manager with queue, retries and atomic writes
-    public sealed class DownloadManager : IDisposable
+    public sealed class DownloadManager : IDownloadManager
     {
         #region fields
 

@@ -50,7 +50,7 @@ static class UiComposer
     // Renders the window title using the now-playing episode (if any) and
     // prefixes "[OFFLINE]" when the network is flagged as offline. Shared by
     // NetworkMonitor, UiDownloaderBridge, and Program startup.
-    public static void UpdateWindowTitleWithDownloads(UiShell ui, AppData data, IEpisodeStore episodes)
+    public static void UpdateWindowTitleWithDownloads(IUiShell ui, AppData data, IEpisodeStore episodes)
     {
         var offlinePrefix = !data.NetworkOnline ? "[OFFLINE] " : "";
         string baseTitle = "Podliner";
@@ -181,7 +181,7 @@ static class UiComposer
 
     // Delegates to UiDownloaderBridge. Kept here as a stable entry point so
     // Program.cs doesn't need to reach into the Wiring namespace directly.
-    public static void AttachDownloaderUi(DownloadManager downloader, UiShell? ui, AppData data, IEpisodeStore episodes)
+    public static void AttachDownloaderUi(IDownloadManager downloader, UiShell? ui, AppData data, IEpisodeStore episodes)
         => UiDownloaderBridge.Attach(downloader, ui, data, episodes);
 
     #endregion

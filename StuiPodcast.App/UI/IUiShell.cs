@@ -36,6 +36,8 @@ internal interface IUiShell
     void SelectFeed(Guid id);
     void SetEpisodesForFeed(Guid feedId, IEnumerable<Episode> episodes);
     void RefreshEpisodesForSelectedFeed(IEnumerable<Episode> episodes);
+    // Download counter in the window title. Null clears it.
+    void SetDownloadBadge(string? text);
     void SetQueueOrder(IReadOnlyList<Guid> ids);
     void SelectEpisodeIndex(int index);
     void SetWindowTitle(string? s);

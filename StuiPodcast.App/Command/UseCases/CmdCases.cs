@@ -42,7 +42,7 @@ internal sealed class CmdCases
         IQueueService queue,
         IAudioPlayer audioPlayer,
         PlaybackCoordinator playback,
-        DownloadManager dlm,
+        IDownloadManager dlm,
         Func<AudioEngine, Task>? switchEngine,
         GpodderSyncService? sync,
         SleepTimer sleepTimer,

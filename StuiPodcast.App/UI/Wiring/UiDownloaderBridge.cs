@@ -10,7 +10,7 @@ namespace StuiPodcast.App.UI.Wiring;
 // while downloads are running.
 internal static class UiDownloaderBridge
 {
-    public static void Attach(DownloadManager downloader, UiShell? ui, AppData data, IEpisodeStore episodes)
+    public static void Attach(IDownloadManager downloader, IUiShell? ui, AppData data, IEpisodeStore episodes)
     {
         // per-download state cache
         var byId = new Dictionary<Guid, DownloadState>();

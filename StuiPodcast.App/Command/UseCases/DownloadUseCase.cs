@@ -1,4 +1,4 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
@@ -15,11 +15,11 @@ internal sealed class DownloadUseCase
     readonly IUiShell _ui;
     readonly Func<Task> _persist;
     readonly IEpisodeStore _episodes;
-    readonly DownloadManager _dlm;
+    readonly IDownloadManager _dlm;
     readonly ViewUseCase _view;
     readonly AppData? _data;
 
-    public DownloadUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, DownloadManager dlm, ViewUseCase view, AppData? data = null)
+    public DownloadUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, IDownloadManager dlm, ViewUseCase view, AppData? data = null)
     {
         _ui = ui;
         _persist = persist;
@@ -194,7 +194,7 @@ internal sealed class DownloadUseCase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    static string? GuessDownloadDir(DownloadManager dlm)
+    static string? GuessDownloadDir(IDownloadManager dlm)
     {
         try
         {

@@ -26,7 +26,7 @@ static class CmdRouter
         MemoryLogSink mem,
         AppData data,
         Func<Task> persist,
-        DownloadManager dlm,
+        IDownloadManager dlm,
         IEpisodeStore episodes,
         IFeedStore feedStore,
         IQueueService queue,

@@ -1,4 +1,4 @@
-using StuiPodcast.Core;
+﻿using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
 using StuiPodcast.Infra.Storage;
 
@@ -11,14 +11,14 @@ namespace StuiPodcast.App.Services;
 // to catch external file deletions.
 sealed class DownloadLookupAdapter : AppFacade.ILocalDownloadLookup, IDisposable
 {
-    private readonly DownloadManager _mgr;
+    private readonly IDownloadManager _mgr;
     private readonly object _gate = new();
     private readonly Dictionary<Guid, CacheEntry> _verified = new();
     private static readonly TimeSpan VerifyTtl = TimeSpan.FromMinutes(1);
 
     private readonly record struct CacheEntry(string Path, DateTimeOffset CheckedAt);
 
-    public DownloadLookupAdapter(DownloadManager mgr, AppData data)
+    public DownloadLookupAdapter(IDownloadManager mgr, AppData data)
     {
         _mgr = mgr;
         _mgr.StatusChanged += OnStatusChanged;

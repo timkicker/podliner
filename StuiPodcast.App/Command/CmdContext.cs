@@ -1,4 +1,4 @@
-using StuiPodcast.App.Command.UseCases;
+﻿using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.Debug;
 using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
@@ -16,7 +16,7 @@ internal sealed class CmdContext
     public MemoryLogSink Mem { get; }
     public AppData Data { get; }
     public Func<Task> Persist { get; }
-    public DownloadManager Dlm { get; }
+    public IDownloadManager Dlm { get; }
     public Func<AudioEngine, Task>? SwitchEngine { get; }
     public GpodderSyncService? Sync { get; }
     public IEpisodeStore Episodes { get; }
@@ -25,7 +25,7 @@ internal sealed class CmdContext
     public CmdCases Cases { get; }
 
     public CmdContext(IAudioPlayer audioPlayer, PlaybackCoordinator playback, IUiShell ui, MemoryLogSink mem,
-        AppData data, Func<Task> persist, DownloadManager dlm, Func<AudioEngine, Task>? switchEngine,
+        AppData data, Func<Task> persist, IDownloadManager dlm, Func<AudioEngine, Task>? switchEngine,
         IEpisodeStore episodes, IFeedStore feedStore, IQueueService queue,
         CmdCases cases,
         GpodderSyncService? sync = null)

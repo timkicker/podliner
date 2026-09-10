@@ -113,6 +113,9 @@ sealed class FakeUiShell : IUiShell
     public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
         => LoadingCalls.Add((on, text));
 
+    public readonly List<string?> DownloadBadges = new();
+    public void SetDownloadBadge(string? text) => DownloadBadges.Add(text);
+
     public event Action? QuitRequested;
     public event Action? RemoveFeedRequested;
     public event Action? ToggleThemeRequested;
