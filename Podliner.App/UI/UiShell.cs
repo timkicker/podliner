@@ -105,7 +105,7 @@ public sealed partial class UiShell : IUiShell
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
-    public void ToggleTheme()
+    public ThemeMode ToggleTheme()
     {
         _theme = _theme switch
         {
@@ -117,6 +117,7 @@ public sealed partial class UiShell : IUiShell
 
         ApplyTheme();
         ThemeChanged?.Invoke(_theme);
+        return _theme;
     }
 
     public void SetTheme(ThemeMode mode)

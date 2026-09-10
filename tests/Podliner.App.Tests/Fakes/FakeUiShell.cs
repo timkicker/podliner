@@ -87,7 +87,8 @@ sealed class FakeUiShell : IUiShell
     public void RequestRefresh() => RequestedRefresh = true;
     public void RequestQuit() => RequestedQuit = true;
     public void SetUnplayedFilterVisual(bool on) => LastUnplayedFilterVisual = on;
-    public void ToggleTheme() => ThemeToggled = true;
+    public ThemeMode NextToggleTheme { get; set; } = ThemeMode.MenuAccent;
+    public ThemeMode ToggleTheme() { ThemeToggled = true; return NextToggleTheme; }
     public void SetTheme(ThemeMode mode) => LastSetTheme = mode;
     public void TogglePlayerPlacement() => PlayerPlacementToggled = true;
     public void SetPlayerPlacement(bool atTop) => LastPlayerPlacement = atTop;

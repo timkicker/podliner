@@ -1,4 +1,4 @@
-using Podliner.App.Services;
+﻿using Podliner.App.Services;
 using Podliner.App.UI;
 using Podliner.Core;
 
@@ -110,20 +110,31 @@ internal sealed class ViewUseCase
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
         if (string.IsNullOrEmpty(arg) || arg == "toggle")
         {
-            _ui.ToggleTheme();
-            _data.ThemePref = null;
+            // The toggle lands on a concrete mode like every named argument
+            // does, so it gets persisted and reported the same way. Clearing
+            // ThemePref here used to throw the choice away on the next start.
+            var toggled = _ui.ToggleTheme();
+            _data.ThemePref = toggled.ToString();
             _ = _persist();
+            _ui.ShowOsd($"theme: {toggled}");
             return;
         }
 
-        ThemeMode mode = arg switch
+        ThemeMode? picked = arg switch
         {
             "base"   => ThemeMode.Base,
             "accent" => ThemeMode.MenuAccent,
             "native" => ThemeMode.Native,
+            "user"   => ThemeMode.User,
             "auto"   => OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent,
-            _        => OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent
+            _        => null
         };
+
+        if (picked is not { } mode)
+        {
+            _ui.ShowOsd($"theme: unknown '{arg}', try base, accent, native, user, auto", 2000);
+            return;
+        }
 
         try { _ui.SetTheme(mode); _data.ThemePref = mode.ToString(); _ = _persist(); _ui.ShowOsd($"theme: {mode}"); }
         catch { _ui.ShowOsd("theme: failed"); }

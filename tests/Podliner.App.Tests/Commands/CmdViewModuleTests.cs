@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Command.UseCases;
 using Podliner.App.Tests.Fakes;
 using Podliner.Core;
@@ -158,5 +158,51 @@ public sealed class CmdViewModuleTests
 
         _sut.ExecSearch(new[] { "clear" });
         _ui.OsdMessages.Should().Contain(m => m.Text.Contains("cleared"));
+    }
+
+    // ── :theme ───────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Theme_toggle_keeps_the_new_mode_as_the_saved_preference()
+    {
+        _ui.NextToggleTheme = Podliner.App.UI.ThemeMode.Native;
+
+        _sut.ExecTheme(Array.Empty<string>());
+
+        _ui.ThemeToggled.Should().BeTrue();
+        _data.ThemePref.Should().Be("Native", "a toggled theme has to survive a restart, same as :theme native");
+        _saved.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Theme_toggle_names_the_new_mode()
+    {
+        _ui.NextToggleTheme = Podliner.App.UI.ThemeMode.Base;
+
+        _sut.ExecTheme(new[] { "toggle" });
+
+        _ui.OsdMessages.Should().ContainSingle().Which.Text.Should().Be("theme: Base");
+    }
+
+    [Fact]
+    public void Theme_user_selects_the_user_theme()
+    {
+        _sut.ExecTheme(new[] { "user" });
+
+        _ui.LastSetTheme.Should().Be(Podliner.App.UI.ThemeMode.User);
+        _data.ThemePref.Should().Be("User");
+    }
+
+    [Fact]
+    public void Theme_with_an_unknown_name_changes_nothing_and_says_so()
+    {
+        _data.ThemePref = "Native";
+
+        _sut.ExecTheme(new[] { "banana" });
+
+        _ui.LastSetTheme.Should().BeNull("an unknown name must not silently apply some other theme");
+        _data.ThemePref.Should().Be("Native");
+        _ui.OsdMessages.Should().ContainSingle()
+            .Which.Text.Should().Contain("banana").And.Contain("native");
     }
 }

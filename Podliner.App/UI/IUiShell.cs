@@ -66,7 +66,8 @@ internal interface IUiShell
     void RequestRefresh();
     void RequestQuit();
     void SetUnplayedFilterVisual(bool on);
-    void ToggleTheme();
+    // Returns the mode it landed on so callers can report and persist it.
+    ThemeMode ToggleTheme();
     void SetTheme(ThemeMode mode);
     void TogglePlayerPlacement();
     void SetPlayerPlacement(bool atTop);

@@ -173,6 +173,6 @@ internal static class UiFeedWiring
     static void WireThemeToggle(AppServices ctx)
     {
         var ui = ctx.Ui;
-        ui.ToggleThemeRequested += () => ui.ToggleTheme();
+        ui.ToggleThemeRequested += () => ui.ShowOsd($"theme: {ui.ToggleTheme()}");
     }
 }
