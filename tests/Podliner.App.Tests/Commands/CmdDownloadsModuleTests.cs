@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Command.UseCases;
 using Podliner.App.Tests.Fakes;
 using Podliner.Core;
@@ -273,5 +273,84 @@ public sealed class CmdDownloadsModuleTests : IDisposable
     {
         _sut.Handle(":downloads set-dir relative-folder").Should().BeTrue();
         Path.IsPathRooted(_data.DownloadDir).Should().BeTrue();
+    }
+
+    // ── :download rm ─────────────────────────────────────────────────────────
+    //
+    // ":download" on a finished download reported "Download unqueued" and left
+    // the file on disk, and nothing else could delete it either. A podcast
+    // client has to be able to give the space back.
+
+    private Episode DownloadedEpisode(int bytes = 4096)
+    {
+        var ep = MakeEpisode();
+        var path = Path.Combine(_dir, ep.Id + ".mp3");
+        File.WriteAllBytes(path, new byte[bytes]);
+        _data.DownloadMap[ep.Id] = new DownloadStatus
+        {
+            State = DownloadState.Done,
+            LocalPath = path,
+            BytesReceived = bytes,
+            TotalBytes = bytes
+        };
+        return ep;
+    }
+
+    [Fact]
+    public void Download_rm_deletes_the_file_and_says_how_much_it_freed()
+    {
+        var ep = DownloadedEpisode(4096);
+        var path = _data.DownloadMap[ep.Id].LocalPath!;
+
+        _sut.Handle(":download rm").Should().BeTrue();
+
+        File.Exists(path).Should().BeFalse();
+        _data.DownloadMap.Should().NotContainKey(ep.Id);
+        _ui.OsdMessages.Last().Text.Should().Contain("freed");
+    }
+
+    [Fact]
+    public void Dl_rm_is_the_same_command()
+    {
+        var ep = DownloadedEpisode();
+        var path = _data.DownloadMap[ep.Id].LocalPath!;
+
+        _sut.Handle(":dl rm").Should().BeTrue();
+
+        File.Exists(path).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Download_rm_on_an_episode_that_is_not_downloaded_says_so()
+    {
+        MakeEpisode();
+
+        _sut.Handle(":download rm");
+
+        _ui.OsdMessages.Last().Text.Should().Be("download: nothing to delete");
+    }
+
+    [Fact]
+    public void A_bare_download_on_a_finished_one_does_not_claim_to_have_unqueued_it()
+    {
+        var ep = DownloadedEpisode();
+        var path = _data.DownloadMap[ep.Id].LocalPath!;
+
+        _sut.Handle(":download");
+
+        File.Exists(path).Should().BeTrue("a bare :download must never delete media");
+        _ui.OsdMessages.Last().Text.Should().Contain(":download rm",
+            "the message has to point at the command that actually removes it");
+    }
+
+    [Fact]
+    public void A_bare_download_still_unqueues_a_pending_one()
+    {
+        var ep = MakeEpisode(DownloadState.Queued);
+
+        _sut.Handle(":download");
+
+        _ui.OsdMessages.Last().Text.Should().Be("Download unqueued");
+        _data.DownloadMap.Should().NotContainKey(ep.Id);
     }
 }

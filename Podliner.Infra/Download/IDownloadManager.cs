@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 
 namespace Podliner.Infra.Download;
 
@@ -23,6 +23,10 @@ public interface IDownloadManager : IDisposable
     void ForceFront(Guid episodeId);
     void Cancel(Guid episodeId);
     void Forget(Guid episodeId);
+
+    // Deletes the downloaded file and clears the episode's download state.
+    // Returns the bytes freed, 0 when there was nothing on disk.
+    long DeleteLocalFile(Guid episodeId);
     int ClearQueue();
 
     int QueuedCount();
