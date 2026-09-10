@@ -1,4 +1,4 @@
-using System.Net.NetworkInformation;
+﻿using System.Net.NetworkInformation;
 using Serilog;
 using StuiPodcast.App.Command.UseCases;
 using StuiPodcast.App.UI;
@@ -18,12 +18,10 @@ sealed class NetworkMonitor
     static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
 
     volatile bool _probeRunning = false;
-    int _ok = 0, _fail = 0;
-    const int FAILS_FOR_OFFLINE = 4;
-    const int SUCC_FOR_ONLINE   = 3;
 
-    DateTimeOffset _lastFlip = DateTimeOffset.MinValue;
-    static readonly TimeSpan _minDwell = TimeSpan.FromSeconds(15);
+    // Hysteresis + dwell rules live in NetworkFlipPolicy so they can be
+    // tested without sockets.
+    readonly NetworkFlipPolicy _policy = new();
 
     DateTimeOffset _lastHeartbeat = DateTimeOffset.MinValue;
     static readonly TimeSpan _heartbeatEvery = TimeSpan.FromMinutes(2);
@@ -43,9 +41,7 @@ sealed class NetworkMonitor
         _ = Task.Run(async () =>
         {
             bool online = await QuickNetCheckAsync();
-            _ok   = online ? 1 : 0;
-            _fail = online ? 0 : 1;
-            _lastFlip = DateTimeOffset.UtcNow;
+            _policy.Seed(online, DateTimeOffset.UtcNow);
             OnNetworkChanged(online);
         });
 
@@ -74,27 +70,20 @@ sealed class NetworkMonitor
             {
                 var probeOnline = await QuickNetCheckAsync().ConfigureAwait(false);
 
-                if (probeOnline) { _ok++;  _fail = 0; }
-                else             { _fail++; _ok   = 0; }
+                bool state = _data.NetworkOnline;
+                var flip = _policy.Observe(state, probeOnline, DateTimeOffset.UtcNow);
 
-                bool state   = _data.NetworkOnline;
-                bool dwellOk = DateTimeOffset.UtcNow - _lastFlip >= _minDwell;
-
-                bool flipToOn  = !state && probeOnline && _ok   >= SUCC_FOR_ONLINE && dwellOk;
-                bool flipToOff =  state && !probeOnline && _fail >= FAILS_FOR_OFFLINE && dwellOk;
-
-                Log.Information("net/decision prev={Prev} probe={Probe} ok={Ok} fail={Fail} dwellOk={DwellOk} flipOn={FlipOn} flipOff={FlipOff}",
+                Log.Information("net/decision prev={Prev} probe={Probe} ok={Ok} fail={Fail} flip={Flip}",
                     state ? "online" : "offline",
                     probeOnline ? "online" : "offline",
-                    _ok, _fail, dwellOk,
-                    flipToOn, flipToOff);
+                    _policy.Successes, _policy.Failures,
+                    flip?.ToString() ?? "none");
 
-                if (flipToOn || flipToOff)
+                if (flip is bool next)
                 {
-                    _lastFlip = DateTimeOffset.UtcNow;
                     LogNicsSnapshot();
-                    Log.Information("net/state change → {State}", flipToOn ? "online" : "offline");
-                    OnNetworkChanged(flipToOn);
+                    Log.Information("net/state change → {State}", next ? "online" : "offline");
+                    OnNetworkChanged(next);
                 }
                 else
                 {
@@ -103,7 +92,7 @@ sealed class NetworkMonitor
                     {
                         _lastHeartbeat = now;
                         Log.Debug("net/steady state={State} ok={Ok} fail={Fail}",
-                            _data.NetworkOnline ? "online" : "offline", _ok, _fail);
+                            _data.NetworkOnline ? "online" : "offline", _policy.Successes, _policy.Failures);
                     }
                 }
             }

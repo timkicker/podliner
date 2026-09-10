@@ -29,17 +29,18 @@
 - [X] `CliEntrypoint` (87 lines, pure arg parsing)
 - [X] `DownloadRetryPolicy` (78 lines, pure)
 - [X] `RssParser` (215 lines, pure, feeds every episode field)
-- [ ] `VlcPathResolver` (244 lines)
+- [X] `VlcPathResolver` (244 lines)
 - [ ] `AudioPlayerFactory` engine selection chain (255 lines, needs the probes behind an interface first)
-- [ ] `NetworkMonitor` (222 lines)
-- [ ] `DownloadIndexStore`, `OpmlIo`, `FeedHttpFetcher`
+- [X] `NetworkMonitor` hysteresis, extracted into `NetworkFlipPolicy`
+- [X] `DownloadIndexStore` and `OpmlIo`
+- [X] `FeedHttpFetcher`
 - [ ] `UiEpisodesPane`, `UiPlayerPanel`, `UiFeedsPane`, `UiOsdOverlay` via the harness above
 - [ ] `UI/Wiring/*` (7 classes, ~750 lines, no tests)
 
 ### Refactor
 - [ ] Refactor Shell: split into subclasses
-- [ ] Drop the duplicate `QueueUseCase` construction in `CmdCases` (first instance is overwritten immediately)
-- [ ] Add a `VerySlowNetwork` status, the second stage in `PlaybackCoordinator` fires `SlowNetwork` twice
+- [X] Drop the duplicate `QueueUseCase` construction in `CmdCases` (first instance is overwritten immediately)
+- [X] Add a `VerySlowNetwork` status, the second stage in `PlaybackCoordinator` fires `SlowNetwork` twice
 - [ ] Update CLAUDE.md (describes `CmdQueueModule`/`CmdSyncModule` and "12 handler modules"; actual layout is `Command/Handler/` plus `Command/UseCases/`, and the stores, `AppServices`, `SleepTimer`, `UndoStack`, `ChaptersFetcher` and the gPodder flavors are missing)
 
 ## Later

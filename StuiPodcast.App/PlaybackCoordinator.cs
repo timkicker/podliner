@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.App.Debug;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
@@ -125,8 +125,7 @@ public sealed class PlaybackCoordinator : IDisposable
                 if (sid != _sid) return;
                 if (_progressSeenForSession) return;
 
-
-                FireStatus(PlaybackStatus.SlowNetwork);
+                FireStatus(PlaybackStatus.VerySlowNetwork);
             }
             catch {  }
         });
@@ -568,7 +567,10 @@ public enum PlaybackStatus
     Loading = 1,
     SlowNetwork = 2,
     Playing = 3,
-    Ended = 4
+    Ended = 4,
+    // Second stage of the stall watch. Same "still buffering" meaning as
+    // SlowNetwork, but late enough that the UI can say so more plainly.
+    VerySlowNetwork = 5
 }
 
 #endregion

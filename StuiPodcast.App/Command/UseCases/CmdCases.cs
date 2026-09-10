@@ -1,4 +1,4 @@
-using StuiPodcast.App.Services;
+﻿using StuiPodcast.App.Services;
 using StuiPodcast.App.UI;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
@@ -57,7 +57,6 @@ internal sealed class CmdCases
         Io         = new IoUseCase(ui, feedStore);
         Feed       = new FeedUseCase(ui, data, persist, episodes, feedStore);
         Navigation = new NavigationUseCase(ui, data, episodes, playback);
-        Queue      = new QueueUseCase(ui, persist, episodes, queue);
         Download   = new DownloadUseCase(ui, persist, episodes, dlm, View, data);
         Opml       = new OpmlUseCase(ui, persist, feedStore);
         Transport  = new TransportUseCase(audioPlayer, ui, data, persist, episodes);
@@ -65,6 +64,8 @@ internal sealed class CmdCases
         Sync       = new SyncUseCase(ui, sync);
         System     = new SystemUseCase(ui, persist);
         Sleep      = new SleepUseCase(ui, sleepTimer);
+        // Queue needs the UndoStack, so it is built after it rather than
+        // alongside the other list UseCases.
         UndoStack  = new UndoStack();
         Undo       = new UndoUseCase(ui, UndoStack);
         Queue      = new QueueUseCase(ui, persist, episodes, queue, UndoStack);

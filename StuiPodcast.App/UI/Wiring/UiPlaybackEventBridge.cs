@@ -1,4 +1,4 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
 using Terminal.Gui;
@@ -83,6 +83,9 @@ internal static class UiPlaybackEventBridge
                         break;
                     case PlaybackStatus.SlowNetwork:
                         ui.SetPlayerLoading(true, "connecting… (slow)", null);
+                        break;
+                    case PlaybackStatus.VerySlowNetwork:
+                        ui.SetPlayerLoading(true, "still connecting… check your network", null);
                         break;
                     case PlaybackStatus.Playing:
                     case PlaybackStatus.Ended:
