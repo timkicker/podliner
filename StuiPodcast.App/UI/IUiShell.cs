@@ -8,6 +8,13 @@ internal interface IUiShell
     // ChaptersUseCase.LoadForUiAsync). UI pushes a Loading state, fires the
     // event, listener resolves + pushes result back via SetChaptersResult.
     event Action<Episode>? ChaptersLoadRequested;
+
+    // Selection events. On the interface so the wiring that reacts to them
+    // can be built against IUiShell and tested with FakeUiShell.
+    event Action? SelectedFeedChanged;
+    event Action? EpisodeSelectionChanged;
+    // Live-typed search from the `/` minibuffer.
+    event Action<string>? SearchApplied;
     void SetChaptersLoading(string message);
     void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1);
     void SetChaptersEmpty(Guid episodeId, string message);
@@ -28,6 +35,11 @@ internal interface IUiShell
     void ShowDetails(Episode e);
     void SetNowPlaying(Guid? episodeId);
     void RefreshActiveProgress(PlaybackSnapshot snap);
+
+    // Player-bar updates driven by the playback event bridge.
+    void UpdatePlayerSnapshot(PlaybackSnapshot snap, int volume0to100);
+    void UpdateSpeedEnabled(bool enabled);
+    void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null);
     void RequestAddFeed(string url);
     void RequestRemoveFeed();
     void RequestRefresh();

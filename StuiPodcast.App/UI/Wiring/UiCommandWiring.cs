@@ -1,4 +1,4 @@
-using Serilog;
+﻿using Serilog;
 using StuiPodcast.App.Bootstrap;
 using StuiPodcast.Core;
 
@@ -49,11 +49,12 @@ internal static class UiCommandWiring
         };
     }
 
-    static void WireSearch(AppServices ctx)
-    {
-        var ui = ctx.Ui;
-        var episodeStore = ctx.Episodes;
+    static void WireSearch(AppServices ctx) => WireSearch(ctx.Ui, ctx.Episodes);
 
+    // Narrow overload: search only needs the shell and the episode store, so
+    // it can be exercised without the rest of the composition root.
+    public static void WireSearch(IUiShell ui, Services.IEpisodeStore episodeStore)
+    {
         ui.SearchApplied += query =>
         {
             var fid = ui?.GetSelectedFeedId();

@@ -48,7 +48,9 @@ internal static class UiShellKeyBindings
         }
     }
 
-    static bool Handle(View.KeyEventEventArgs e, Bindings b)
+    // internal so the key map can be exercised directly in tests without
+    // routing a real KeyPress through a mounted view.
+    internal static bool Handle(View.KeyEventEventArgs e, Bindings b)
     {
         var key = e.KeyEvent.Key;
         var kv  = e.KeyEvent.KeyValue;

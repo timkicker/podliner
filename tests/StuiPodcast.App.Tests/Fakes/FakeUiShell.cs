@@ -76,7 +76,8 @@ sealed class FakeUiShell : IUiShell
     }
 
     public void SelectEpisodeIndex(int index) => LastSelectedIndex = index;
-    public void SetWindowTitle(string? s) => LastWindowTitle = s;
+    public int WindowTitleCalls { get; private set; }
+    public void SetWindowTitle(string? s) { LastWindowTitle = s; WindowTitleCalls++; }
     public void ShowDetails(Episode e) => LastShownDetails = e;
     public void SetNowPlaying(Guid? episodeId) => NowPlayingId = episodeId;
     public PlaybackSnapshot? LastActiveProgressSnap { get; private set; }
@@ -100,6 +101,26 @@ sealed class FakeUiShell : IUiShell
 
     public void ShowKeysHelp() => KeysHelpShown = true;
     public void ShowLogsOverlay(int tail = 500) => LastLogsOverlayTail = tail;
+
+    public readonly List<(PlaybackSnapshot Snap, int Volume)> PlayerSnapshots = new();
+    public void UpdatePlayerSnapshot(PlaybackSnapshot snap, int volume0to100)
+        => PlayerSnapshots.Add((snap, volume0to100));
+
+    public bool? SpeedEnabled { get; private set; }
+    public void UpdateSpeedEnabled(bool enabled) => SpeedEnabled = enabled;
+
+    public readonly List<(bool On, string? Text)> LoadingCalls = new();
+    public void SetPlayerLoading(bool on, string? text = null, TimeSpan? baseline = null)
+        => LoadingCalls.Add((on, text));
+
+    public event Action<string>? SearchApplied;
+    public void RaiseSearchApplied(string q) => SearchApplied?.Invoke(q);
+
+    public event Action? SelectedFeedChanged;
+    public event Action? EpisodeSelectionChanged;
+
+    public void RaiseSelectedFeedChanged()    => SelectedFeedChanged?.Invoke();
+    public void RaiseEpisodeSelectionChanged() => EpisodeSelectionChanged?.Invoke();
 
     public int ForceRedrawCount { get; private set; }
     public void ForceRedraw() => ForceRedrawCount++;

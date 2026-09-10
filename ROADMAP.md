@@ -39,7 +39,9 @@
 - [X] `UiFeedsPane` and `UiOsdOverlay` via the harness above
 - [X] `UiEpisodesPane` via the harness above
 - [X] `UI/Wiring/*` decision logic, extracted into `PlaySourceResolver` and `DownloadProgressSummary`
-- [ ] `UI/Wiring/*` event subscription itself (needs `AppServices` to be constructible in a test)
+- [X] `UiSelectionWiring` and `UiPlaybackEventBridge` (narrowed to the deps they use instead of the whole `AppServices`)
+- [X] `UiCommandWiring` search half and `UiInitialRender`'s startup-episode pick (both narrowed to the deps they use)
+- [ ] `UiCommandWiring` command routing, `UiFeedWiring`, `UiDownloaderBridge` (still need `CmdCases` / `DownloadManager` / `FeedService` behind interfaces)
 
 ### Refactor
 - [X] Refactor Shell: split into partial files (UiShell.cs 1027 → 485 lines, plus Feeds/Theme/Chapters/Navigation)
@@ -55,8 +57,10 @@
 
 ### UX
 - [ ] Rethink first-letter-highlighting
+- [ ] `q` means two different things: the `q` key quits, but bare `q` typed into the command box is a documented alias for `:queue add` (`QueueUseCase.Handle`). The help browser lists both. Pick one and drop the other.
 
 ### Bugs
+- [X] Removed `:feed remove` from the help catalog: it was documented as an alias of `:remove-feed` but `FeedUseCase` has no such subcommand, so it only ever printed a usage line
 - [X] Refresh/Redraw ui on mac/linux after moving window (issue #4). Terminal.Gui detects resizes by polling, not by SIGWINCH: `CursesDriver.ProcessWinChange` → `Curses.CheckWinChange` compares ncurses' `LINES`/`COLS` globals against a cached copy, and only runs from `CursesDriver.Refresh` and the input loop. A missed poll leaves every Toplevel at the old frame. Fixed with `UiShell.ForceRedraw` (public Terminal.Gui API only), wired to `:redraw`, Ctrl+L, and a self-heal check in the 250ms UI tick.
 
 ### Packaging

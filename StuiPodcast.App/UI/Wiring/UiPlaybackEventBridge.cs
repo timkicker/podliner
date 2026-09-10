@@ -12,19 +12,19 @@ namespace StuiPodcast.App.UI.Wiring;
 internal static class UiPlaybackEventBridge
 {
     public static void Wire(AppServices ctx)
-    {
-        var ui = ctx.Ui;
-        var data = ctx.Data;
-        var player = ctx.Player;
-        var playback = ctx.Playback;
-        var episodeStore = ctx.Episodes;
+        => Wire(ctx.Ui, ctx.Data, ctx.Player, ctx.Playback, ctx.Episodes);
 
+    // Takes only what it uses rather than the whole composition root, so the
+    // playback-to-UI translation can be exercised with the fakes.
+    public static void Wire(IUiShell ui, AppData data, IAudioPlayer player,
+                            PlaybackCoordinator playback, Services.IEpisodeStore episodeStore)
+    {
         WireSnapshot(ui, data, player, playback, episodeStore);
         WireStatus(ui, playback);
         WireStateChanged(ui, player, playback);
     }
 
-    static void WireSnapshot(UiShell ui, AppData data, IAudioPlayer player, PlaybackCoordinator playback, Services.IEpisodeStore episodeStore)
+    static void WireSnapshot(IUiShell ui, AppData data, IAudioPlayer player, PlaybackCoordinator playback, Services.IEpisodeStore episodeStore)
     {
         // Track the last episode whose title we pushed to the window label so
         // we don't re-resolve and re-set the same string 4×/sec. Network
@@ -69,7 +69,7 @@ internal static class UiPlaybackEventBridge
         });
     }
 
-    static void WireStatus(UiShell ui, PlaybackCoordinator playback)
+    static void WireStatus(IUiShell ui, PlaybackCoordinator playback)
     {
         playback.StatusChanged += st => Application.MainLoop?.Invoke(() =>
         {
@@ -102,7 +102,7 @@ internal static class UiPlaybackEventBridge
         });
     }
 
-    static void WireStateChanged(UiShell ui, IAudioPlayer player, PlaybackCoordinator playback)
+    static void WireStateChanged(IUiShell ui, IAudioPlayer player, PlaybackCoordinator playback)
     {
         player.StateChanged += s => Application.MainLoop?.Invoke(() =>
         {

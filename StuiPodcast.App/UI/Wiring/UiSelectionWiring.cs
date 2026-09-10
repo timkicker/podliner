@@ -1,4 +1,6 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
+using StuiPodcast.App.Services;
+using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI.Wiring;
 
@@ -8,11 +10,12 @@ namespace StuiPodcast.App.UI.Wiring;
 internal static class UiSelectionWiring
 {
     public static void Wire(AppServices ctx, Func<Task> save)
-    {
-        var ui = ctx.Ui;
-        var data = ctx.Data;
-        var episodeStore = ctx.Episodes;
+        => Wire(ctx.Ui, ctx.Data, ctx.Episodes, save);
 
+    // Takes only what it uses rather than the whole composition root, so the
+    // subscription can be exercised with FakeUiShell and FakeEpisodeStore.
+    public static void Wire(IUiShell ui, AppData data, IEpisodeStore episodeStore, Func<Task> save)
+    {
         ui.SelectedFeedChanged += () =>
         {
             var fid = ui.GetSelectedFeedId();

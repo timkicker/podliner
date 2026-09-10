@@ -1,4 +1,4 @@
-
+﻿
 namespace StuiPodcast.App
 {
     #region types
@@ -81,7 +81,7 @@ namespace StuiPodcast.App
                 Category: HelpCategory.Feeds, Rank: 30),
 
             new(":remove-feed", "Remove the currently selected feed.",
-                Aliases: new[]{ ":rm-feed", ":feed remove" },
+                Aliases: new[]{ ":rm-feed" },
                 Examples: new[]{ ":remove-feed", ":rm-feed" },
                 Category: HelpCategory.Feeds, Rank: 60),
 

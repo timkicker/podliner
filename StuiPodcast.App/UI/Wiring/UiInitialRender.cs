@@ -1,4 +1,4 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI.Wiring;
@@ -30,7 +30,10 @@ internal static class UiInitialRender
         if (last != null) ShowLastPlayed(ui, data, episodeStore, last);
     }
 
-    static Episode? PickLastPlayedEpisode(Services.IEpisodeStore episodeStore, UiShell ui)
+    // Decides which episode the app opens on: most recently played, then
+    // furthest-progressed, falling back to whatever row is already selected
+    // when nothing has ever been played.
+    internal static Episode? PickLastPlayedEpisode(Services.IEpisodeStore episodeStore, IUiShell ui)
         => episodeStore.Snapshot()
             .OrderByDescending(e => e.Progress.LastPlayedAt ?? DateTimeOffset.MinValue)
             .ThenByDescending(e => e.Progress.LastPosMs)
