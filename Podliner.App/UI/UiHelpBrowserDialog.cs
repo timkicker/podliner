@@ -8,8 +8,14 @@ namespace Podliner.App.UI
 {
     internal static class UiHelpBrowserDialog
     {
+        // Everything the dialog is made of. Show() runs it; tests render it
+        // through the headless harness, which Application.Run rules out.
+        internal sealed record Parts(Dialog Dialog, TabView Tabs, TabView.Tab KeysTab, TabView.Tab CommandsTab);
+
         #region public api
-        public static void Show()
+        public static void Show() => Application.Run(Build().Dialog);
+
+        internal static Parts Build()
         {
             #region create dialog + tabs
             var dlg = new Dialog("Help — Keys & Commands", 100, 32);
@@ -19,7 +25,7 @@ namespace Podliner.App.UI
 
             #region keys tab ui
             var keysHost   = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-            var keySearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+            var keySearch  = new TextField("") { X = 9, Y = 0, Width = Dim.Fill(2) };
             var keyList    = new ListView {
                 X = 1, Y = 2,
                 Width  = Dim.Percent(35),
@@ -37,7 +43,7 @@ namespace Podliner.App.UI
 
             #region commands tab ui 
             var cmdHost    = new View { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
-            var cmdSearch  = new TextField("") { X = 1, Y = 0, Width = Dim.Fill(2) };
+            var cmdSearch  = new TextField("") { X = 9, Y = 0, Width = Dim.Fill(2) };
 
             var catLabels = new List<string> { "All", "Most used" };
             try { catLabels.AddRange(Enum.GetNames(typeof(HelpCategory))); } catch { /* optional */ }
@@ -321,8 +327,9 @@ namespace Podliner.App.UI
             RefreshKeyList();
             catList.SelectedItem = 0;
             RefreshCmdList();
-            Application.Run(dlg);
             #endregion
+
+            return new Parts(dlg, tabs, keysTab, cmdsTab);
         }
         #endregion
 
