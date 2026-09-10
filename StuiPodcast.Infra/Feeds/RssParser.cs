@@ -199,6 +199,13 @@ internal static class RssParser
         {
             var parser = new HtmlParser();
             var doc = parser.ParseDocument(html ?? "");
+
+            // TextContent walks script/style bodies too, so a description
+            // carrying an embed or tracking snippet would render its source
+            // as shownotes. Drop those subtrees first.
+            foreach (var el in doc.QuerySelectorAll("script, style, noscript").ToArray())
+                el.Remove();
+
             return doc.Body?.TextContent?.Trim() ?? "";
         }
         catch
