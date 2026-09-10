@@ -19,11 +19,11 @@
 - [X] Align target frameworks (app/infra/core on net9.0, both test projects on net10.0, CI pins 9.0.x)
 
 ### UI test harness
-- [ ] Add a `FakeDriver` fixture so `Application.Init` runs headless in `dotnet test`
-- [ ] Add a screen-readback helper over `FakeDriver.Contents` (`int[,,]`, rune at index 0)
-- [ ] Snapshot tests for the three-pane layout at 80x25 and at a narrow width
-- [ ] Regression test for the play-button glyph (was broken twice, issue #1 and v1.1.0)
-- [ ] Regression test for redraw after a resize event (issue #4)
+- [X] Add a `FakeDriver` fixture so `Application.Init` runs headless in `dotnet test`
+- [X] Add a screen-readback helper over `FakeDriver.Contents` (`int[,,]`, rune at index 0)
+- [X] Snapshot tests for the three-pane layout at 80x25 and at a narrow width
+- [X] Regression test for the play-button glyph (was broken twice, issue #1 and v1.1.0)
+- [X] Regression test for redraw after a resize event (issue #4)
 
 ### Coverage gaps, cheapest first
 - [X] `CliEntrypoint` (87 lines, pure arg parsing)
