@@ -196,7 +196,7 @@ Full in-app help: `:h`
   `:opml import ~/feeds.opml`  
   `:opml import feeds.opml --update-titles`  
   `:opml export`  
-  `:opml export ~/stui-feeds.opml`
+  `:opml export ~/podliner-feeds.opml`
 
 ### Sync (gPodder)
 - `:sync login <server> <user> <pass>`
@@ -308,7 +308,7 @@ FFplay (limited)
 :opml import ~/feeds.opml
 :opml import feeds.opml --update-titles
 :opml export
-:opml export ~/stui-feeds.opml
+:opml export ~/podliner-feeds.opml
 ```
 
 ---

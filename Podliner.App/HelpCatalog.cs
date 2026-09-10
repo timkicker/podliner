@@ -275,7 +275,7 @@ namespace Podliner.App
                     ":opml import ~/feeds.opml",
                     ":opml import feeds.opml --update-titles",
                     ":opml export",
-                    ":opml export ~/stui-feeds.opml"
+                    ":opml export ~/podliner-feeds.opml"
                 },
                 Category: HelpCategory.OPML, Rank: 72),
 
@@ -387,13 +387,13 @@ Import
 Export
   :opml export [<path>]
     - Writes a flat OPML (UTF-8) with all current feeds.
-    - If <path> is omitted, a sensible default is used (Documents/stui-feeds.opml).
+    - If <path> is omitted, a sensible default is used (Documents/podliner-feeds.opml).
 
 Examples
   :opml import ~/feeds.opml
   :opml import feeds.opml --update-titles
   :opml export
-  :opml export ~/stui-feeds.opml";
+  :opml export ~/podliner-feeds.opml";
 
         public static readonly string SyncDoc =
 @"gPodder sync (API v2)

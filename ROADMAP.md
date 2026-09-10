@@ -18,6 +18,7 @@
 - [X] `:chapter` dispatched its work from a bare `Task.Run` with no catch, so a failure there produced no message at all (the pattern CLAUDE.md forbids)
 - [X] `:queue add` was a second name for `toggle`, so running it on a queued episode dropped it back out. `add` now appends, `toggle` toggles, both say which way it went
 - [X] `:queue rm` was not undoable although `:undo` advertises reverting the last destructive action. It now restores the episode at the index it held
+- [X] The help browser and COMMANDS.md still named the default OPML export `stui-feeds.opml` after the rename, while the code writes `podliner-feeds.opml`. A test now fails if the old name reappears in any help text
 
 ### Dependencies
 - [X] Drop unused `Microsoft.Data.Sqlite` from Infra (removes the only high-severity advisory in the build)

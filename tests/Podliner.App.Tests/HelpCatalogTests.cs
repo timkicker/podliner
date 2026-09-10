@@ -184,4 +184,48 @@ public sealed class HelpCatalogTests
         HelpCatalog.OpmlDoc.Should().NotBeNullOrWhiteSpace();
         HelpCatalog.SyncDoc.Should().NotBeNullOrWhiteSpace();
     }
+
+    // The project was renamed from StuiPodcast to Podliner. The help text kept
+    // telling people to export to stui-feeds.opml while the code writes
+    // podliner-feeds.opml, so the documented default pointed at a file that is
+    // never created.
+    [Fact]
+    public void No_help_text_still_carries_the_old_project_name()
+    {
+        var offenders = new List<string>();
+
+        foreach (var c in HelpCatalog.Commands)
+        {
+            void Check(string? text, string where)
+            {
+                if (text != null && text.Contains("stui", StringComparison.OrdinalIgnoreCase))
+                    offenders.Add($"{c.Command} {where}: {text}");
+            }
+
+            Check(c.Command, "command");
+            Check(c.Description, "description");
+            Check(c.Args, "args");
+            foreach (var e in c.Examples ?? Array.Empty<string>()) Check(e, "example");
+            foreach (var a in c.Aliases ?? Array.Empty<string>()) Check(a, "alias");
+        }
+
+        foreach (var k in HelpCatalog.Keys)
+        {
+            if ((k.Description ?? "").Contains("stui", StringComparison.OrdinalIgnoreCase))
+                offenders.Add($"key {k.Key}: {k.Description}");
+            if ((k.Notes ?? "").Contains("stui", StringComparison.OrdinalIgnoreCase))
+                offenders.Add($"key {k.Key} notes: {k.Notes}");
+        }
+
+        offenders.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void The_documented_default_export_name_is_the_one_the_code_writes()
+    {
+        var opml = HelpCatalog.Commands.Single(c => c.Command == ":opml");
+        var text = string.Join("\n", (opml.Examples ?? Array.Empty<string>()));
+
+        text.Should().NotContain("stui-feeds.opml");
+    }
 }
