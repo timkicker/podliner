@@ -1,4 +1,5 @@
-using Terminal.Gui;
+using StuiPodcast.App.Services;
+﻿using Terminal.Gui;
 using StuiPodcast.Core;
 
 namespace StuiPodcast.App.UI.Controls;
@@ -65,12 +66,21 @@ internal sealed class UiFeedsPane
     {
         if (_feeds.Count == 0 || List.Source is null) return null;
         int i = Math.Clamp(List.SelectedItem, 0, _feeds.Count - 1);
-        return _feeds.ElementAtOrDefault(i)?.Id;
+        var id = _feeds.ElementAtOrDefault(i)?.Id;
+
+        // The barrier row between virtual and real feeds is decoration, not
+        // a feed. Reporting it as a selection would send callers off to load
+        // episodes for it; UiShell's selection handler already expects null
+        // here and steps over the row.
+        if (id == VirtualFeedsCatalog.Seperator) return null;
+        return id;
     }
 
     public void SelectFeed(Guid id)
     {
         if (_feeds.Count == 0) return;
+        if (id == VirtualFeedsCatalog.Seperator) return;
+
         var idx = _feeds.FindIndex(f => f.Id == id);
         if (idx >= 0)
         {

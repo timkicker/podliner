@@ -70,10 +70,18 @@ public sealed class TuiHarness : IDisposable
         }
     }
 
+    private readonly HashSet<Toplevel> _begun = new();
+
     // Lays out and paints `top`, then leaves the frame in Driver.Contents.
+    //
+    // Application.Begin pushes onto the Toplevel stack, so calling it again
+    // for the same Toplevel layers a second copy on top. Anything parented to
+    // the original — the OSD overlay, for one — then renders underneath and
+    // looks like it never appeared. Begin once per Toplevel; later renders
+    // just repaint.
     public void Render(Toplevel top)
     {
-        Application.Begin(top);
+        if (_begun.Add(top)) Application.Begin(top);
 
         // Application.Init sizes Top from the driver, but a size applied
         // afterwards only reaches the Toplevel once TerminalResized runs and

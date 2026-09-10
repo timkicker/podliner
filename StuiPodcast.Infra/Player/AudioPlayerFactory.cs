@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Serilog;
@@ -27,47 +27,40 @@ public static class AudioPlayerFactory
         IAudioPlayer? chosen = null;
         string why = "";
 
-        // honour explicit preference; fall through to auto chain on failure
-        switch (pref)
+        // Ordering lives in EngineSelectionPolicy; this loop only probes.
+        var candidates = EngineSelectionPolicy.CandidateOrder(pref, isWin);
+        Log.Information("[engine-detect] candidate order: {Order}",
+            string.Join(" → ", candidates.Select(c => c.ToWire())));
+
+        foreach (var candidate in candidates)
         {
-            case AudioEngine.Vlc:             TryVlc(out chosen!, out why); break;
-            case AudioEngine.Mpv:             TryMpv(out chosen!, out why); break;
-            case AudioEngine.Ffplay:          TryFfp(out chosen!, out why); break;
-            case AudioEngine.MediaFoundation: TryMf(out chosen!,  out why); break;
+            var ok = candidate switch
+            {
+                AudioEngine.Vlc             => TryVlc(out chosen!, out why),
+                AudioEngine.Mpv             => TryMpv(out chosen!, out why),
+                AudioEngine.Ffplay          => TryFfp(out chosen!, out why),
+                AudioEngine.MediaFoundation => TryMf(out chosen!,  out why),
+                _                           => false,
+            };
+
+            if (ok)
+            {
+                why = $"{candidate.ToWire()}: {why}";
+                Log.Information("[engine-detect] pick: {Engine} ({Why})", candidate.ToWire(), why);
+                break;
+            }
+
+            chosen = null;
         }
 
         if (chosen == null)
         {
-            Log.Information("[engine-detect] auto chain start (os policy)");
-            if (TryVlc(out chosen!, out var wVlc))
-            {
-                why = $"vlc: {wVlc}";
-                Log.Information("[engine-detect] pick: vlc ({Why})", why);
-            }
-            else if (isWin && TryMf(out chosen!, out var wMf))
-            {
-                why = $"mediafoundation: {wMf}";
-                Log.Information("[engine-detect] pick: mediafoundation ({Why})", why);
-            }
-            else if (TryMpv(out chosen!, out var wMpv))
-            {
-                why = $"mpv: {wMpv}";
-                Log.Information("[engine-detect] pick: mpv ({Why})", why);
-            }
-            else if (TryFfp(out chosen!, out var wFfp))
-            {
-                why = $"ffplay: {wFfp}";
-                Log.Information("[engine-detect] pick: ffplay ({Why})", why);
-            }
-            else
-            {
-                Log.Error("[engine-detect] no engine available (libVLC/mpv/ffplay) after auto chain");
-                throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
-            }
+            Log.Error("[engine-detect] no engine available (libVLC/mpv/ffplay) after auto chain");
+            throw new InvalidOperationException("No audio engine available (libVLC/mpv/ffplay).");
         }
 
         var usedEngine = AudioEngineExt.FromWire(chosen.Name);
-        bool degraded = usedEngine == AudioEngine.Ffplay;
+        bool degraded = EngineSelectionPolicy.IsDegraded(usedEngine);
         infoOsd = degraded ? $"Engine: {chosen.Name} (fallback)" : $"Engine: {chosen.Name}";
         if (data.NetProfile == NetworkProfile.BadNetwork) infoOsd += " • Net: bad";
 

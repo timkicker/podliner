@@ -31,13 +31,15 @@
 - [X] `DownloadRetryPolicy` (78 lines, pure)
 - [X] `RssParser` (215 lines, pure, feeds every episode field)
 - [X] `VlcPathResolver` (244 lines)
-- [ ] `AudioPlayerFactory` engine selection chain (255 lines, needs the probes behind an interface first)
+- [X] `AudioPlayerFactory` engine selection chain, extracted into `EngineSelectionPolicy`
 - [X] `NetworkMonitor` hysteresis, extracted into `NetworkFlipPolicy`
 - [X] `DownloadIndexStore` and `OpmlIo`
 - [X] `FeedHttpFetcher`
 - [X] `UiPlayerPanel` via the harness above
-- [ ] `UiEpisodesPane`, `UiFeedsPane`, `UiOsdOverlay` via the harness above
-- [ ] `UI/Wiring/*` (7 classes, ~750 lines, no tests)
+- [X] `UiFeedsPane` and `UiOsdOverlay` via the harness above
+- [X] `UiEpisodesPane` via the harness above
+- [X] `UI/Wiring/*` decision logic, extracted into `PlaySourceResolver` and `DownloadProgressSummary`
+- [ ] `UI/Wiring/*` event subscription itself (needs `AppServices` to be constructible in a test)
 
 ### Refactor
 - [ ] Refactor Shell: split into subclasses

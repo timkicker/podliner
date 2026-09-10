@@ -1,4 +1,4 @@
-using StuiPodcast.App.Bootstrap;
+﻿using StuiPodcast.App.Bootstrap;
 using StuiPodcast.App.Services;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Player;
@@ -42,7 +42,7 @@ internal static class UiPlaybackWiring
 
             ShowLoading(ui, audioPlayer, isRemote);
 
-            var source = ResolvePlaySource(data, localPath, ep);
+            var source = Services.PlaySourceResolver.Resolve(data, localPath, ep);
             if (source == null)
             {
                 ui.SetPlayerLoading(false);
@@ -111,21 +111,6 @@ internal static class UiPlaybackWiring
         var baseline = TimeSpan.Zero;
         try { baseline = audioPlayer.State.Position; } catch { }
         ui.SetPlayerLoading(true, isRemote ? "loading…" : "opening…", baseline);
-    }
-
-    // Picks the audio source based on user preference + availability. Returns
-    // null when nothing is playable (e.g. offline with no local copy).
-    static string? ResolvePlaySource(AppData data, string? localPath, Episode ep)
-    {
-        var mode = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
-        var online = data.NetworkOnline;
-
-        return mode switch
-        {
-            "local"  => localPath,
-            "remote" => ep.AudioUrl,
-            _        => localPath ?? (online ? ep.AudioUrl : null)
-        };
     }
 
     // Swap AudioUrl to the resolved source for the duration of Play() and

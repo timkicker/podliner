@@ -1,4 +1,4 @@
-using StuiPodcast.App.Services;
+﻿using StuiPodcast.App.Services;
 using StuiPodcast.Core;
 using StuiPodcast.Infra.Download;
 using Terminal.Gui;
@@ -32,31 +32,9 @@ internal static class UiDownloaderBridge
                 return;
             }
 
-            // bytes-weighted percent across items with known totals
-            long sumBytes = 0;
-            long sumTotal = 0;
-
-            foreach (var (_, (bytes, totalBytes, st)) in progress.ToArray())
-            {
-                if (totalBytes is { } T && T > 0)
-                {
-                    if (st == DownloadState.Done)
-                    {
-                        sumBytes += T;
-                        sumTotal += T;
-                    }
-                    else if (st == DownloadState.Running || st == DownloadState.Verifying)
-                    {
-                        var b = Math.Clamp(bytes, 0, T);
-                        sumBytes += b;
-                        sumTotal += T;
-                    }
-                }
-            }
-
-            int pct = sumTotal > 0
-                ? (int)Math.Round(100.0 * sumBytes / sumTotal)
-                : (int)Math.Round(100.0 * done / Math.Max(1, total));
+            int pct = Services.DownloadProgressSummary.Percent(
+                progress.ToArray().Select(kv => new Services.DownloadProgressSummary.Item(
+                    kv.Value.Item1, kv.Value.Item2, kv.Value.Item3)));
 
             ui?.SetDownloadBadge($"{done}/{total} • {pct}%");
 
