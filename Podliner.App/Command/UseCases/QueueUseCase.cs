@@ -42,16 +42,38 @@ internal sealed class QueueUseCase
         switch (sub)
         {
             case "add":
-            case "toggle":
+            {
+                // `add` used to be a second name for `toggle`, so running it
+                // on an already-queued episode silently dropped it back out.
                 if (ep == null) return true;
-                _queue.Toggle(ep.Id);
-                Refresh(); _ = PersistLocal(); return true;
+                if (_queue.Contains(ep.Id)) { _ui.ShowOsd("queue: already queued", 900); return true; }
+                _queue.Append(ep.Id);
+                Refresh(); _ = PersistLocal();
+                _ui.ShowOsd("queue: added", 900);
+                return true;
+            }
+
+            case "toggle":
+            {
+                if (ep == null) return true;
+                var wasQueued = _queue.Contains(ep.Id);
+                if (wasQueued) RemoveWithUndo(ep.Id);
+                else
+                {
+                    _queue.Append(ep.Id);
+                    Refresh(); _ = PersistLocal();
+                }
+                _ui.ShowOsd(wasQueued ? "queue: removed" : "queue: added", 900);
+                return true;
+            }
 
             case "rm":
             case "remove":
                 if (ep == null) return true;
-                _queue.Remove(ep.Id);
-                Refresh(); _ = PersistLocal(); return true;
+                if (!_queue.Contains(ep.Id)) { _ui.ShowOsd("queue: not queued", 900); return true; }
+                RemoveWithUndo(ep.Id);
+                _ui.ShowOsd("queue: removed", 900);
+                return true;
 
             case "clear":
             {
@@ -109,6 +131,24 @@ internal sealed class QueueUseCase
             default:
                 return true;
         }
+    }
+
+    // Dropping an episode out of the queue is a destructive action, and
+    // :undo promises to revert those. Restores it at the index it held.
+    void RemoveWithUndo(Guid id)
+    {
+        var index = _queue.IndexOf(id);
+        _queue.Remove(id);
+        Refresh(); _ = PersistLocal();
+
+        if (index < 0 || _undo == null) return;
+        _undo.Push("restore queued episode", () =>
+        {
+            if (_queue.Contains(id)) return;
+            _queue.Append(id);
+            _queue.Move(id, index);
+            Refresh(); _ = PersistLocal();
+        });
     }
 
     void Refresh()

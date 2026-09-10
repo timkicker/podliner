@@ -196,4 +196,108 @@ public sealed class CmdQueueModuleTests
 
         _queue.Snapshot().Should().Contain(ep.Id);
     }
+
+    // ── feedback and undo ───────────────────────────────────────────────────
+    //
+    // :queue shuffle, uniq, move and clear all report what they did; add and
+    // rm said nothing, so after :queue toggle there was no way to tell which
+    // way it went. And :undo promises to revert the last destructive action,
+    // which a removal is.
+
+    [Fact]
+    public void Add_says_it_queued_the_episode()
+    {
+        MakeEpisode();
+
+        _sut.Handle(":queue add");
+
+        _ui.OsdMessages.Should().ContainSingle().Which.Text.Should().Be("queue: added");
+    }
+
+    [Fact]
+    public void Add_on_a_queued_episode_leaves_it_queued()
+    {
+        var ep = MakeEpisode();
+        _queue.Seed(ep.Id);
+
+        _sut.Handle(":queue add");
+
+        _queue.Snapshot().Should().Contain(ep.Id, "a command called add must never remove");
+        _ui.OsdMessages.Should().ContainSingle().Which.Text.Should().Be("queue: already queued");
+    }
+
+    [Fact]
+    public void Toggle_says_which_way_it_went()
+    {
+        MakeEpisode();
+
+        _sut.Handle(":queue toggle");
+        _sut.Handle(":queue toggle");
+
+        _ui.OsdMessages.Select(m => m.Text).Should().Equal("queue: added", "queue: removed");
+    }
+
+    [Fact]
+    public void Rm_says_it_removed_the_episode()
+    {
+        var ep = MakeEpisode();
+        _queue.Append(ep.Id);
+
+        _sut.Handle(":queue rm");
+
+        _ui.OsdMessages.Should().ContainSingle().Which.Text.Should().Be("queue: removed");
+    }
+
+    [Fact]
+    public void Rm_on_an_episode_that_is_not_queued_says_so()
+    {
+        MakeEpisode();
+
+        _sut.Handle(":queue rm");
+
+        _ui.OsdMessages.Should().ContainSingle().Which.Text.Should().Be("queue: not queued");
+    }
+
+    [Fact]
+    public void Rm_can_be_undone()
+    {
+        var ep = MakeEpisode();
+        var other = new Episode { Id = Guid.NewGuid(), Title = "Other", AudioUrl = "https://x.com/o.mp3" };
+        _episodes.Seed(other);
+        _queue.Append(other.Id);
+        _queue.Append(ep.Id);
+
+        _sut.Handle(":queue rm");
+        _queue.Snapshot().Should().NotContain(ep.Id);
+
+        _undo.Pop().Should().NotBeNull("a removal is a destructive action and :undo promises to revert those");
+        _queue.Snapshot().Should().Equal(new[] { other.Id, ep.Id }, "the episode belongs back where it was");
+    }
+
+    [Fact]
+    public void Undoing_a_removal_puts_it_back_at_its_old_position()
+    {
+        var first = new Episode { Id = Guid.NewGuid(), Title = "First", AudioUrl = "https://x.com/1.mp3" };
+        var last  = new Episode { Id = Guid.NewGuid(), Title = "Last",  AudioUrl = "https://x.com/2.mp3" };
+        _episodes.Seed(first, last);
+        var ep = MakeEpisode();
+        _queue.Append(first.Id);
+        _queue.Append(ep.Id);
+        _queue.Append(last.Id);
+
+        _sut.Handle(":queue rm");
+        _undo.Pop();
+
+        _queue.Snapshot().Should().Equal(first.Id, ep.Id, last.Id);
+    }
+
+    [Fact]
+    public void Add_is_not_undoable()
+    {
+        MakeEpisode();
+
+        _sut.Handle(":queue add");
+
+        _undo.Pop().Should().BeNull("adding is not destructive, the stack is for losing things");
+    }
 }
