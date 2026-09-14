@@ -1,0 +1,56 @@
+name: win-smoke
+
+# podliner shipped for a year with an unhandled exception on any headless
+# start: Terminal.Gui's WindowsDriver cannot get a console output window when
+# stdout is redirected, and Application.Init was not guarded. Nothing noticed
+# until the winget validator refused the 2.0.0 submission. This runs the
+# published exe the way that validator does, so it cannot come back quietly.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish
+        run: >
+          dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r win-x64
+          -p:SelfContained=true -p:PublishSingleFile=true -o publish
+
+      - name: --version exits cleanly
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\publish\Podliner.App.exe -ArgumentList '--version' `
+               -NoNewWindow -Wait -PassThru -RedirectStandardOutput ver.txt -RedirectStandardError ver.err
+          Get-Content ver.txt -EA SilentlyContinue
+          if ($p.ExitCode -ne 0) { Get-Content ver.err -EA SilentlyContinue; throw "--version exited $($p.ExitCode)" }
+
+      - name: A headless start says so instead of crashing
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\publish\Podliner.App.exe `
+               -NoNewWindow -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          if (-not $p.WaitForExit(30000)) {
+            $p.Kill(); $p.WaitForExit()
+            throw "hung for 30s with no console instead of exiting"
+          }
+
+          $code = $p.ExitCode
+          $err  = (Get-Content err.txt -Raw -EA SilentlyContinue)
+          "exit code: $code"
+          "stderr: $err"
+
+          # -532462766 is 0xE0434352, EXCEPTION_COMPLUS: an unhandled .NET
+          # exception. That is the signature the winget validator rejects.
+          if ($code -eq -532462766) { throw "crashed with an unhandled .NET exception" }
+          if ($code -ne 0)          { throw "expected a clean exit, got $code" }
+          if ($err -notmatch 'needs a console') { throw "no explanation on stderr" }

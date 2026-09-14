@@ -73,4 +73,52 @@ public sealed class CmdParserTests
     public void Redraw_parses(string raw)
         => CmdParser.Parse(raw).Kind.Should().Be(TopCommand.Redraw);
 
+    // ── windows paths ───────────────────────────────────────────────────────
+    //
+    // The tokenizer treated every backslash as an escape and dropped it, so
+    // `:opml import C:\Users\tim\feeds.opml` arrived as
+    // `C:Userstimfeeds.opml` and the file was never found. Every command that
+    // takes a path was broken on Windows, including the `--opml-import` and
+    // `--opml-export` CLI flags and `:downloads set-dir`.
+
+    [Fact]
+    public void A_windows_path_keeps_its_backslashes()
+    {
+        var parsed = CmdParser.Parse(@":opml import C:\Users\tim\feeds.opml");
+
+        parsed.Kind.Should().Be(TopCommand.Opml);
+        parsed.Args.Should().Equal("import", @"C:\Users\tim\feeds.opml");
+    }
+
+    [Fact]
+    public void A_quoted_windows_path_with_spaces_survives_too()
+    {
+        var parsed = CmdParser.Parse(":downloads set-dir \"C:\\Users\\tim\\My Podcasts\"");
+
+        parsed.Args.Should().Equal("set-dir", @"C:\Users\tim\My Podcasts");
+    }
+
+    [Fact]
+    public void A_unc_path_keeps_both_leading_slashes()
+    {
+        var parsed = CmdParser.Parse(@":opml export \\nas\share\feeds.opml");
+
+        parsed.Args.Should().Equal("export", @"\\nas\share\feeds.opml");
+    }
+
+    [Fact]
+    public void An_escaped_quote_still_works()
+    {
+        var parsed = CmdParser.Parse(":osd \"a \\\"quote\\\" b\"");
+
+        parsed.Args.Should().Equal("a \"quote\" b");
+    }
+
+    [Fact]
+    public void An_escaped_space_still_joins_one_token()
+    {
+        var parsed = CmdParser.Parse(@":search two\ words");
+
+        parsed.Args.Should().Equal("two words");
+    }
 }

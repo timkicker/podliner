@@ -1,0 +1,89 @@
+name: win-look
+
+# Runs podliner in a real console on windows and photographs the screen, so
+# the windows rendering can be looked at instead of guessed at from an exit
+# code. Manual only; a viewing tool, not a gate.
+on:
+  workflow_dispatch:
+
+jobs:
+  look:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish
+        run: >
+          dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r win-x64
+          -p:SelfContained=true -p:PublishSingleFile=true -o publish
+
+      - name: Seed a feed so there is something to draw
+        shell: pwsh
+        run: |
+          $lines = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            '<opml version="2.0"><head><title>t</title></head><body>',
+            '<outline title="Darknet Diaries" text="Darknet Diaries" type="rss" xmlUrl="https://feeds.megaphone.fm/darknetdiaries" />',
+            '</body></opml>'
+          )
+          Set-Content -Path seed.opml -Value $lines -Encoding UTF8
+          Get-Content seed.opml
+
+      - name: Start it in a console and photograph the screen
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+
+          $exe = Join-Path $PWD 'publish\Podliner.App.exe'
+          $opml = Join-Path $PWD 'seed.opml'
+          function Shoot($name) {
+            $sc = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $sc.Width, $sc.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($sc.X, $sc.Y, 0, 0, $bmp.Size)
+            $out = Join-Path $PWD $name
+            $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+            Write-Host "saved $name"
+          }
+
+          $p = Start-Process -FilePath $exe -ArgumentList '--opml-import', $opml -PassThru
+
+          # Early, while an osd is still up: they last one to three seconds.
+          Start-Sleep -Seconds 8
+          Shoot 'windows-early.png'
+
+          Start-Sleep -Seconds 35
+          Shoot 'windows-tui.png'
+
+          if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() } else { Write-Host "already exited: $($p.ExitCode)" }
+
+      - name: What landed in the library
+        if: always()
+        shell: pwsh
+        run: |
+          $cfg = Join-Path $env:APPDATA 'podliner'
+          if (Test-Path $cfg) {
+            Get-ChildItem $cfg | ForEach-Object { Write-Host "== $($_.Name)  $($_.Length) bytes ==" }
+            $lib = Join-Path $cfg 'library.json'
+            if (Test-Path $lib) { (Get-Content $lib -Raw).Substring(0, [Math]::Min(600, (Get-Content $lib -Raw).Length)) }
+          } else { Write-Host "no config dir" }
+
+      - name: Logs
+        if: always()
+        shell: pwsh
+        run: |
+          $d = Join-Path $env:LOCALAPPDATA 'podliner\logs'
+          if (Test-Path $d) { Get-ChildItem $d | ForEach-Object { Get-Content $_.FullName | Select-Object -Last 30 } } else { Write-Host 'no logs' }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-tui
+          path: |
+            windows-tui.png
+            windows-early.png

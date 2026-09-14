@@ -128,7 +128,13 @@ namespace Podliner.App.Command
             {
                 char ch = raw[i];
 
-                if (ch == '\\' && i + 1 < raw.Length) { i++; cur.Append(raw[i]); continue; }
+                // A backslash only escapes something that needs escaping.
+                // Treating every one of them as an escape ate the separators
+                // out of Windows paths: `C:\Users\tim\feeds.opml` arrived as
+                // `C:Usersstimfeeds.opml` and no file was ever found, which
+                // broke every path-taking command on Windows.
+                if (ch == '\\' && i + 1 < raw.Length && IsEscapable(raw[i + 1]))
+                { i++; cur.Append(raw[i]); continue; }
 
                 if (!inQuotes && (ch == '"' || ch == '\''))
                 { inQuotes = true; quoteChar = ch; continue; }
@@ -144,6 +150,12 @@ namespace Podliner.App.Command
             if (cur.Length > 0) list.Add(cur.ToString());
             return list.ToArray();
         }
+
+        // Only a quote or whitespace ever needs escaping here. A backslash
+        // before anything else, another backslash included, stays literal, so
+        // `\\nas\share` reaches the command as the UNC path the user typed.
+        private static bool IsEscapable(char c)
+            => c == '"' || c == '\'' || char.IsWhiteSpace(c);
 
         private static (string cmd, string[] args) SplitCmd(string[] tokens)
         {

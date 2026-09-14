@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Tests.Fakes;
 using Podliner.App.UI.Wiring;
 using Podliner.Core;
@@ -95,5 +95,22 @@ public sealed class UiInitialRenderTests
 
         Pick(forward, new FakeUiShell())!.Title.Should().Be("B");
         Pick(reversed, new FakeUiShell())!.Title.Should().Be("B");
+    }
+
+    // The player bar comes up at 0% and was only corrected by
+    // ShowStartupEpisode, which needs a last-played episode to resume. A fresh
+    // install has none, so the bar claimed 0% while the real volume was 50.
+    [Fact]
+    public void The_persisted_volume_is_painted_even_with_no_episode_to_resume()
+    {
+        var b = new AppServicesBuilder();
+        b.Data.Volume0_100 = 50;
+        b.Data.Speed = 1.25;
+
+        UiInitialRender.Render(b.Build());
+
+        b.Ui.ShownVolumeAndSpeed.Should().NotBeNull();
+        b.Ui.ShownVolumeAndSpeed!.Value.Volume.Should().Be(50);
+        b.Ui.ShownVolumeAndSpeed!.Value.Speed.Should().Be(1.25);
     }
 }
