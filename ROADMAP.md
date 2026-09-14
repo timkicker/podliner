@@ -3,6 +3,7 @@
 ## Next release
 
 ### Bugs
+- [X] Headless start crashed with an unhandled .NET exception (`0xE0434352`, EXCEPTION_COMPLUS). Terminal.Gui's WindowsDriver cannot get a console output window when stdout is redirected and `Application.Init` was never guarded. Present since at least v1.3.1, verified by running that tag the same way; it only surfaced when the winget validator rejected the 2.0.0 submission (microsoft/winget-pkgs#432756). A `win-smoke` workflow now runs the published exe headless on every push and pull request
 - [X] Fix engine preference reset on restart (`ConfigStore` validates `libvlc`, `AudioEngineExt.ToWire` writes `vlc`/`mediafoundation`, so both fall back to `auto`)
 - [X] Fix the same wrong engine list in `ConfigStoreValidationTests`
 - [X] Fix `CS8602` in `DownloadManager.cs:732` and `EngineUseCase.cs:31`
