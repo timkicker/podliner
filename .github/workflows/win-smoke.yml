@@ -1,0 +1,54 @@
+name: win-smoke
+
+# Reproduces what the winget validator does: run the published exe on a
+# headless Windows box with no interactive console and see what it returns.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "fix/windows-startup-crash" ]
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish
+        run: >
+          dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r win-x64
+          -p:SelfContained=true -p:PublishSingleFile=true -o publish
+
+      - name: Run --version
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\publish\Podliner.App.exe -ArgumentList '--version' `
+               -NoNewWindow -Wait -PassThru -RedirectStandardOutput ver.txt -RedirectStandardError ver.err
+          "exit code: $($p.ExitCode)"
+          Get-Content ver.txt -EA SilentlyContinue
+          Get-Content ver.err -EA SilentlyContinue
+
+      - name: Run bare, no console, like the winget validator
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath .\publish\Podliner.App.exe `
+               -NoNewWindow -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          if (-not $p.WaitForExit(20000)) {
+            "still running after 20s, killing it (that would be a pass)"
+            $p.Kill(); $p.WaitForExit()
+            "killed"
+          } else {
+            "exited on its own with code: $($p.ExitCode)"
+          }
+          "--- stdout ---"; Get-Content out.txt -EA SilentlyContinue
+          "--- stderr ---"; Get-Content err.txt -EA SilentlyContinue
+
+      - name: Logs the app wrote
+        if: always()
+        shell: pwsh
+        run: |
+          $d = "$env:LOCALAPPDATA\podliner\logs"
+          if (Test-Path $d) { Get-ChildItem $d | % { "== $($_.Name) =="; Get-Content $_.FullName } }
+          else { "no log dir at $d" }
