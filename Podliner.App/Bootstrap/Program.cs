@@ -179,7 +179,30 @@ internal class Program
         }
 
         // ui init
-        Application.Init();
+        //
+        // Application.Init throws when there is no console to draw on, and it
+        // was never guarded: podliner died with an unhandled .NET exception
+        // (0xE0434352) whenever anything started it headless. Refuse politely
+        // instead, both up front and as a backstop for whatever else the
+        // driver may object to.
+        if (!TerminalGate.CanHostTui())
+        {
+            Log.Information("no console available, refusing to start the tui");
+            Console.Error.WriteLine(TerminalGate.NoTerminalMessage);
+            return;
+        }
+
+        try
+        {
+            Application.Init();
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "could not initialise the terminal");
+            Console.Error.WriteLine(TerminalGate.NoTerminalMessage);
+            return;
+        }
+
         _ui = new UiShell(_memLog);
         try { _data.LastSelectedFeedId = _ui.AllFeedId; }
         catch
