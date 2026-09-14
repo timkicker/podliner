@@ -224,6 +224,14 @@ Engine selection & fallback:
 
 - Install one of: **mpv**, **ffplay** (ffmpeg), or **VLC**. See [Audio engines](#audio-engines).
 
+### Boxes instead of symbols (Windows console)
+
+The Windows console does not carry every glyph podliner uses, so the clock, queue and pause symbols can come out as boxes. Start it with `--ascii` to switch the whole UI to plain characters.
+
+### "podliner needs a console to draw on"
+
+podliner draws a full-screen interface and cannot do that when its output is piped or redirected. Run it from a terminal. `--version` and `--help` work without one.
+
 ### System-wide install?  
 - Linux/macOS: add `--system` to the install command.  
 - Windows (PowerShell): run `Install-Podliner -System` after the bootstrap line.
