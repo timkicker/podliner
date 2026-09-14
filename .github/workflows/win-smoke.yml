@@ -1,11 +1,16 @@
 name: win-smoke
 
-# Reproduces what the winget validator does: run the published exe on a
-# headless Windows box with no interactive console and see what it returns.
+# podliner shipped for a year with an unhandled exception on any headless
+# start: Terminal.Gui's WindowsDriver cannot get a console output window when
+# stdout is redirected, and Application.Init was not guarded. Nothing noticed
+# until the winget validator refused the 2.0.0 submission. This runs the
+# published exe the way that validator does, so it cannot come back quietly.
 on:
   workflow_dispatch:
   push:
-    branches: [ "fix/windows-startup-crash" ]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   smoke:
@@ -21,35 +26,31 @@ jobs:
           dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r win-x64
           -p:SelfContained=true -p:PublishSingleFile=true -o publish
 
-      - name: Run --version
+      - name: --version exits cleanly
         shell: pwsh
         run: |
           $p = Start-Process -FilePath .\publish\Podliner.App.exe -ArgumentList '--version' `
                -NoNewWindow -Wait -PassThru -RedirectStandardOutput ver.txt -RedirectStandardError ver.err
-          "exit code: $($p.ExitCode)"
           Get-Content ver.txt -EA SilentlyContinue
-          Get-Content ver.err -EA SilentlyContinue
+          if ($p.ExitCode -ne 0) { Get-Content ver.err -EA SilentlyContinue; throw "--version exited $($p.ExitCode)" }
 
-      - name: Run bare, no console, like the winget validator
+      - name: A headless start says so instead of crashing
         shell: pwsh
         run: |
           $p = Start-Process -FilePath .\publish\Podliner.App.exe `
                -NoNewWindow -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
-          if (-not $p.WaitForExit(20000)) {
-            "still running after 20s, killing it (that would be a pass)"
+          if (-not $p.WaitForExit(30000)) {
             $p.Kill(); $p.WaitForExit()
-            "killed"
-          } else {
-            "exited on its own with code: $($p.ExitCode)"
+            throw "hung for 30s with no console instead of exiting"
           }
-          "--- stdout ---"; Get-Content out.txt -EA SilentlyContinue
-          "--- stderr ---"; Get-Content err.txt -EA SilentlyContinue
 
-      - name: Logs the app wrote
-        if: always()
-        shell: pwsh
-        run: |
-          $d = "$env:LOCALAPPDATA\podliner\logs"
-          if (Test-Path $d) { Get-ChildItem $d | % { "== $($_.Name) =="; Get-Content $_.FullName } }
-          else { "no log dir at $d" }
+          $code = $p.ExitCode
+          $err  = (Get-Content err.txt -Raw -EA SilentlyContinue)
+          "exit code: $code"
+          "stderr: $err"
 
+          # -532462766 is 0xE0434352, EXCEPTION_COMPLUS: an unhandled .NET
+          # exception. That is the signature the winget validator rejects.
+          if ($code -eq -532462766) { throw "crashed with an unhandled .NET exception" }
+          if ($code -ne 0)          { throw "expected a clean exit, got $code" }
+          if ($err -notmatch 'needs a console') { throw "no explanation on stderr" }
