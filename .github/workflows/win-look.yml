@@ -42,21 +42,38 @@ jobs:
 
           $exe = Join-Path $PWD 'publish\Podliner.App.exe'
           $opml = Join-Path $PWD 'seed.opml'
-          $p = Start-Process -FilePath $exe -ArgumentList '--opml-import', $opml -PassThru
-          Start-Sleep -Seconds 40
+          function Shoot($name) {
+            $sc = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $sc.Width, $sc.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($sc.X, $sc.Y, 0, 0, $bmp.Size)
+            $out = Join-Path $PWD $name
+            $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+            Write-Host "saved $name"
+          }
 
-          $sc = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          Write-Host "screen: $($sc.Width)x$($sc.Height)"
-          $bmp = New-Object System.Drawing.Bitmap $sc.Width, $sc.Height
-          $g = [System.Drawing.Graphics]::FromImage($bmp)
-          $g.CopyFromScreen($sc.X, $sc.Y, 0, 0, $bmp.Size)
-          $out = Join-Path $PWD 'windows-tui.png'
-          $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
-          $g.Dispose()
-          $bmp.Dispose()
-          Write-Host "saved $out"
+          $p = Start-Process -FilePath $exe -ArgumentList '--opml-import', $opml -PassThru
+
+          # Early, while an osd is still up: they last one to three seconds.
+          Start-Sleep -Seconds 8
+          Shoot 'windows-early.png'
+
+          Start-Sleep -Seconds 35
+          Shoot 'windows-tui.png'
 
           if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() } else { Write-Host "already exited: $($p.ExitCode)" }
+
+      - name: What landed in the library
+        if: always()
+        shell: pwsh
+        run: |
+          $cfg = Join-Path $env:APPDATA 'podliner'
+          if (Test-Path $cfg) {
+            Get-ChildItem $cfg | ForEach-Object { Write-Host "== $($_.Name)  $($_.Length) bytes ==" }
+            $lib = Join-Path $cfg 'library.json'
+            if (Test-Path $lib) { (Get-Content $lib -Raw).Substring(0, [Math]::Min(600, (Get-Content $lib -Raw).Length)) }
+          } else { Write-Host "no config dir" }
 
       - name: Logs
         if: always()
@@ -69,4 +86,6 @@ jobs:
         if: always()
         with:
           name: windows-tui
-          path: windows-tui.png
+          path: |
+            windows-tui.png
+            windows-early.png
