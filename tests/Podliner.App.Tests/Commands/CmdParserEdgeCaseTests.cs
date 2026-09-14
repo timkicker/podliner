@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Command;
 using Xunit;
 
@@ -64,13 +64,15 @@ public sealed class CmdParserEdgeCaseTests
     }
 
     [Fact]
-    public void Backslash_escape_outside_quotes_includes_next_char_literally()
+    public void Backslash_before_an_ordinary_character_stays_literal()
     {
-        // \: inside a token should produce a literal ':'
+        // This used to swallow the backslash and yield "hello:world". Eating
+        // every backslash is what destroyed Windows paths, and nothing needs
+        // an escaped colon: ":osd hello:world" already parses fine.
         var parsed = CmdParser.Parse(@":osd hello\:world");
 
         parsed.Cmd.Should().Be(":osd");
-        parsed.Args.Should().Equal("hello:world");
+        parsed.Args.Should().Equal(@"hello\:world");
     }
 
     [Fact]
