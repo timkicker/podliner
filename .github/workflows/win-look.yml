@@ -1,8 +1,8 @@
 name: win-look
 
 # Runs podliner in a real console on windows and photographs the screen, so
-# the windows rendering can actually be looked at instead of guessed at from
-# an exit code. Manual only; it is a viewing tool, not a gate.
+# the windows rendering can be looked at instead of guessed at from an exit
+# code. Manual only; a viewing tool, not a gate.
 on:
   workflow_dispatch:
   push:
@@ -22,48 +22,48 @@ jobs:
           dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r win-x64
           -p:SelfContained=true -p:PublishSingleFile=true -o publish
 
-      - name: Seed a library so there is something to draw
+      - name: Seed a feed so there is something to draw
         shell: pwsh
         run: |
-          $cfg = "$env:APPDATA\podliner"
-          New-Item -ItemType Directory -Force -Path $cfg | Out-Null
-          @'
-<?xml version="1.0" encoding="utf-8"?>
-<opml version="2.0"><head><title>t</title></head><body>
-<outline title="Darknet Diaries" text="Darknet Diaries" type="rss" xmlUrl="https://feeds.megaphone.fm/darknetdiaries" />
-<outline title="ATP" text="ATP" type="rss" xmlUrl="https://atp.fm/rss" />
-</body></opml>
-'@ | Set-Content -Encoding UTF8 seed.opml
+          $lines = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            '<opml version="2.0"><head><title>t</title></head><body>',
+            '<outline title="Darknet Diaries" text="Darknet Diaries" type="rss" xmlUrl="https://feeds.megaphone.fm/darknetdiaries" />',
+            '</body></opml>'
+          )
+          Set-Content -Path seed.opml -Value $lines -Encoding UTF8
+          Get-Content seed.opml
 
-      - name: Start it in a real console and photograph the screen
+      - name: Start it in a console and photograph the screen
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
 
-          # A new console window is what gives Terminal.Gui a screen buffer.
-          $p = Start-Process -FilePath .\publish\Podliner.App.exe `
-                 -ArgumentList '--opml-import', "$PWD\seed.opml" -PassThru
-          Start-Sleep -Seconds 35
+          $exe = Join-Path $PWD 'publish\Podliner.App.exe'
+          $opml = Join-Path $PWD 'seed.opml'
+          $p = Start-Process -FilePath $exe -ArgumentList '--opml-import', $opml -PassThru
+          Start-Sleep -Seconds 40
 
           $sc = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          "screen: $($sc.Width)x$($sc.Height)"
+          Write-Host "screen: $($sc.Width)x$($sc.Height)"
           $bmp = New-Object System.Drawing.Bitmap $sc.Width, $sc.Height
-          $g   = [System.Drawing.Graphics]::FromImage($bmp)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($sc.X, $sc.Y, 0, 0, $bmp.Size)
-          $bmp.Save("$PWD\windows-tui.png", [System.Drawing.Imaging.ImageFormat]::Png)
-          $g.Dispose(); $bmp.Dispose()
-          "saved windows-tui.png"
+          $out = Join-Path $PWD 'windows-tui.png'
+          $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose()
+          $bmp.Dispose()
+          Write-Host "saved $out"
 
-          if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
-          else { "process had already exited with $($p.ExitCode)" }
+          if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() } else { Write-Host "already exited: $($p.ExitCode)" }
 
       - name: Logs
         if: always()
         shell: pwsh
         run: |
-          $d = "$env:LOCALAPPDATA\podliner\logs"
-          if (Test-Path $d) { Get-ChildItem $d | % { Get-Content $_.FullName | Select-Object -Last 40 } }
-          else { "no logs" }
+          $d = Join-Path $env:LOCALAPPDATA 'podliner\logs'
+          if (Test-Path $d) { Get-ChildItem $d | ForEach-Object { Get-Content $_.FullName | Select-Object -Last 30 } } else { Write-Host 'no logs' }
 
       - uses: actions/upload-artifact@v4
         if: always()
