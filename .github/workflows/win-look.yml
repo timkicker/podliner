@@ -5,6 +5,8 @@ name: win-look
 # an exit code. Manual only; it is a viewing tool, not a gate.
 on:
   workflow_dispatch:
+  push:
+    branches: [ "fix/windows-startup-crash" ]
 
 jobs:
   look:
