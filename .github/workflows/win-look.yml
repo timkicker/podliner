@@ -5,8 +5,6 @@ name: win-look
 # code. Manual only; a viewing tool, not a gate.
 on:
   workflow_dispatch:
-  push:
-    branches: [ "fix/windows-startup-crash" ]
 
 jobs:
   look:
