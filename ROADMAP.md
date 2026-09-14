@@ -3,6 +3,9 @@
 ## Next release
 
 ### Bugs
+- [X] Every backslash was eaten by `CmdParser.Tokenize`, which treated all of them as escapes. `:opml import C:\Users\tim\feeds.opml` arrived as `C:Userstimfeeds.opml`, so every path-taking command was broken on Windows, `--opml-import`/`--opml-export` included. A backslash now only escapes a quote or whitespace. Found by photographing the running app on a Windows runner
+- [X] The player bar reported 0% on a fresh install. `ShowStartupEpisode` paints the persisted volume and only runs when there is an episode to resume; with an empty library nothing painted it and the real value was 65
+- [ ] Unicode glyphs render wrong in the Windows console: the clock, the queue and the pause symbol come out as boxes or filled blobs. `UIGlyphSet` and `--ascii` exist for this; the open question is whether Windows should pick ASCII automatically. Visible in `win-look` artifacts
 - [X] Headless start crashed with an unhandled .NET exception (`0xE0434352`, EXCEPTION_COMPLUS). Terminal.Gui's WindowsDriver cannot get a console output window when stdout is redirected and `Application.Init` was never guarded. Present since at least v1.3.1, verified by running that tag the same way; it only surfaced when the winget validator rejected the 2.0.0 submission (microsoft/winget-pkgs#432756). A `win-smoke` workflow now runs the published exe headless on every push and pull request
 - [X] Fix engine preference reset on restart (`ConfigStore` validates `libvlc`, `AudioEngineExt.ToWire` writes `vlc`/`mediafoundation`, so both fall back to `auto`)
 - [X] Fix the same wrong engine list in `ConfigStoreValidationTests`

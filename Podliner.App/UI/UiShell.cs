@@ -105,6 +105,9 @@ public sealed partial class UiShell : IUiShell
     public Guid? GetNowPlayingId() => _nowPlayingId;
     public void SetWindowTitle(string? s) => _player?.TitleLabel?.SetText(string.IsNullOrWhiteSpace(s) ? "—" : s!);
 
+    public void ShowVolumeAndSpeed(int? volume, double? speed)
+        => UI(() => _player?.SetVolumeAndSpeed(volume, speed));
+
     public void SetSearchFilter(string? query)
     {
         _lastSearch = string.IsNullOrWhiteSpace(query) ? null : query;

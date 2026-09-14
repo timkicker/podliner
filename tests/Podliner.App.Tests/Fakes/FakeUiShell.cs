@@ -87,6 +87,9 @@ sealed class FakeUiShell : IUiShell
     public void RequestRefresh() => RequestedRefresh = true;
     public void RequestQuit() => RequestedQuit = true;
     public void SetUnplayedFilterVisual(bool on) => LastUnplayedFilterVisual = on;
+    public (int? Volume, double? Speed)? ShownVolumeAndSpeed { get; private set; }
+    public void ShowVolumeAndSpeed(int? volume, double? speed) => ShownVolumeAndSpeed = (volume, speed);
+
     public string? SearchFilter { get; private set; }
     public void SetSearchFilter(string? query) => SearchFilter = string.IsNullOrWhiteSpace(query) ? null : query;
 

@@ -22,6 +22,12 @@ internal static class UiInitialRender
         // pushed after a queue command. Without this the queue looks empty
         // after every restart even though it was persisted.
         ui.SetQueueOrder(ctx.Queue.Snapshot());
+
+        // The player bar starts at 0% and was only ever corrected by
+        // ShowStartupEpisode, which needs an episode to resume. A fresh
+        // install therefore reported 0% while the real volume was 50.
+        ui.ShowVolumeAndSpeed(data.Volume0_100, data.Speed);
+
         cases.View.ApplyList();
 
         var initialFeed = ui.GetSelectedFeedId();

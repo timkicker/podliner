@@ -34,6 +34,11 @@ internal interface IUiShell
     void SetUnplayedHint(bool on);
     // Restores the player bar to the episode the app opens on.
     void ShowStartupEpisode(Episode ep, int? volume = null, double? speed = null);
+
+    // Paints the persisted volume and speed onto the player bar. Needed on
+    // its own because ShowStartupEpisode only runs when there is an episode
+    // to resume, and with an empty library the bar kept reading 0%.
+    void ShowVolumeAndSpeed(int? volume, double? speed);
     void SetChaptersLoading(string message);
     void SetChaptersResult(Guid episodeId, IReadOnlyList<Chapter> chapters, int activeIndex = -1);
     void SetChaptersEmpty(Guid episodeId, string message);
