@@ -52,3 +52,35 @@ jobs:
           $d = "$env:LOCALAPPDATA\podliner\logs"
           if (Test-Path $d) { Get-ChildItem $d | % { "== $($_.Name) =="; Get-Content $_.FullName } }
           else { "no log dir at $d" }
+
+  # Did we break this, or was it always like that? Same check against the
+  # last release that winget accepted.
+  smoke-v131:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1.3.1
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish v1.3.1
+        run: >
+          dotnet publish ./StuiPodcast.App/StuiPodcast.App.csproj -c Release -r win-x64
+          -p:SelfContained=true -p:PublishSingleFile=true -o publish
+
+      - name: Run bare, no console
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem .\publish -Filter *.exe | Select-Object -First 1).FullName
+          "running $exe"
+          $p = Start-Process -FilePath $exe `
+               -NoNewWindow -PassThru -RedirectStandardOutput out.txt -RedirectStandardError err.txt
+          if (-not $p.WaitForExit(20000)) {
+            "still running after 20s, killing it (that would be a pass)"
+            $p.Kill(); $p.WaitForExit()
+          } else {
+            "exited on its own with code: $($p.ExitCode)"
+          }
+          "--- stderr ---"; Get-Content err.txt -EA SilentlyContinue
