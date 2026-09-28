@@ -48,3 +48,30 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: "**/TestResults/*.trx"
           if-no-files-found: ignore
+
+  # Quits the published binary in a real pty and fails if it leaves mouse
+  # tracking or the alternate screen switched on (#34). Unit tests cannot see
+  # this: it only shows in the bytes a real exit writes to a terminal.
+  exit-teardown:
+    name: exit restores the terminal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Publish
+        run: >
+          dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r linux-x64
+          -p:SelfContained=true -p:PublishSingleFile=true -o publish
+
+      # podliner refuses to start with no audio engine at all; ffplay is the
+      # lightest one, and nothing here plays anything anyway
+      - name: Install an audio engine
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Quit every way there is and check the teardown
+        run: python3 tests/smoke/exit_teardown.py publish/Podliner.App

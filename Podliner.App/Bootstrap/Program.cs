@@ -60,6 +60,12 @@ internal class Program
     private static object? _uiTimer;
     private static object? _netTimerToken;
     private static int _exitOnce;
+
+    // Set once Application.Run has returned. The main loop object still
+    // exists after that but nothing pumps it, so anything queued onto it
+    // would wait for ever; DispatchToUi runs work inline instead.
+    private static volatile bool _uiLoopStopped;
+    internal static bool UiLoopStopped { get => _uiLoopStopped; set => _uiLoopStopped = value; }
     #endregion
 
     #region entry point
@@ -191,6 +197,10 @@ internal class Program
             Console.Error.WriteLine(TerminalGate.NoTerminalMessage);
             return;
         }
+
+        // Whatever ends the process from here on, a watchdog Environment.Exit
+        // or a SIGTERM, the terminal gets its modes back (#34).
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => TerminalRestore.Restore();
 
         try
         {
@@ -419,7 +429,22 @@ internal class Program
         try { Application.Run(); }
         finally
         {
+            UiLoopStopped = true;
+
+            // Terminal.Gui installs a SynchronizationContext that posts every
+            // await continuation back onto its main loop. Nothing pumps that
+            // loop once Run has returned, so any await below that really
+            // waits on I/O would never come back: the gPodder push hung on
+            // its first HTTP call until the 1.5s watchdog killed the process.
+            SynchronizationContext.SetSynchronizationContext(null);
+
             Log.Information("shutdown begin");
+
+            // Hand the terminal back before any cleanup that can take time.
+            // It used to happen last, and QuitApp's 1.5s watchdog killed the
+            // process first whenever the chain below ran long (#34).
+            TerminalRestore.Restore();
+
             try { Application.MainLoop?.RemoveTimeout(_uiTimer); }
             catch
             {
@@ -456,6 +481,12 @@ internal class Program
                 // ignored
             }
 
+            // Local data first. The steps below talk to D-Bus and the network
+            // and can outlast the watchdog. With the flush after them it was
+            // cut off every time; nothing was lost only because the 1s
+            // deferred save in SaveScheduler happened to beat the 1.5s kill.
+            if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
+
             if (_mpris != null)
                 try { await _mpris.DisposeAsync(); } catch { }
 
@@ -464,7 +495,6 @@ internal class Program
                 try { await _gpodder.PushAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
             _gpodder?.Dispose();
 
-            if (!SkipSaveOnExit) { await _saver!.RequestSaveAsync(flush:true); }
 
             try { _feeds?.Dispose(); }
             catch
@@ -529,10 +559,10 @@ internal class Program
     #region helpers
     // Run the given action on the Terminal.Gui main loop and await its completion.
     // Falls back to synchronous execution if no loop is running (tests, CLI-only flows).
-    private static Task DispatchToUi(Action action)
+    internal static Task DispatchToUi(Action action)
     {
         var loop = Application.MainLoop;
-        if (loop == null) { action(); return Task.CompletedTask; }
+        if (loop == null || UiLoopStopped) { action(); return Task.CompletedTask; }
 
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         loop.Invoke(() =>
@@ -601,14 +631,7 @@ internal class Program
     {
         try
         {
-            Console.Write(
-                "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l" + // mouse off
-                "\x1b[?2004l" +                                           // bracketed paste off
-                "\x1b[?25h"   +                                           // cursor on
-                "\x1b[0m"     +                                           // sgr reset
-                "\x1b[?1049l"                                            // leave alt screen
-            );
-            Console.Out.Flush();
+            TerminalRestore.Restore();
             Console.Write("\x1bc"); // RIS
             Console.Out.Flush();
         }

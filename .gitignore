@@ -31,3 +31,4 @@ podliner.log
 *.swp
 *.tmp
 CLAUDE.md
+__pycache__/
