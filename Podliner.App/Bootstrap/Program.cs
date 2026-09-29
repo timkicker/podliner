@@ -139,7 +139,22 @@ internal class Program
 
         // audio player / engine service
         _engineSvc = new EngineService(_data, _memLog);
-        _player = _engineSvc.Create(out _);
+        try
+        {
+            _player = _engineSvc.Create(out _);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // No VLC, mpv or ffplay. This used to escape as an unhandled
+            // exception: exit 134 and a stack trace in the terminal.
+            Log.Fatal(ex, "no audio engine available");
+            Console.Error.WriteLine(StartupMessages.NoAudioEngine);
+            try { _downloader?.Dispose(); } catch { }
+            try { _app?.Dispose(); } catch { }
+            Log.CloseAndFlush();
+            Environment.ExitCode = StartupMessages.NoAudioEngineExitCode;
+            return;
+        }
 
         // coordinator, feeds, saver
         _saver   = new SaveScheduler(_data, _app, () => AppBridge.SyncFromAppDataToFacade(_data, _app));

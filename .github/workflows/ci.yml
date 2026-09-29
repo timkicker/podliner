@@ -68,8 +68,13 @@ jobs:
           dotnet publish ./Podliner.App/Podliner.App.csproj -c Release -r linux-x64
           -p:SelfContained=true -p:PublishSingleFile=true -o publish
 
-      # podliner refuses to start with no audio engine at all; ffplay is the
-      # lightest one, and nothing here plays anything anyway
+      # Runs before an engine is installed: the runner has no vlc, and an
+      # empty PATH hides mpv and ffplay.
+      - name: With no audio engine it says what to install
+        run: python3 tests/smoke/no_engine.py publish/Podliner.App
+
+      # everything below needs an engine to start; ffplay is the lightest one,
+      # and nothing here plays anything anyway
       - name: Install an audio engine
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
