@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using Podliner.Core;
 
@@ -149,6 +149,9 @@ namespace Podliner.App.UI
         public static string SpeedLabel(double s) => (s <= 0) ? (Current == Profile.Unicode ? "—×" : "x") : $"{s:0.0}×";
 
         public static string Separator => Current == Profile.Unicode ? "  │  " : " | ";
+
+        // between the parts of a frame title, e.g. "Feeds · 12m ago"
+        public static string TitleSeparator => Current == Profile.Unicode ? "·" : "|";
 
         #endregion
 

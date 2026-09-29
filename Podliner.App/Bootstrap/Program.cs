@@ -58,6 +58,8 @@ internal class Program
     #region timers and guards
     // timers and exit guard
     private static object? _uiTimer;
+    private static object? _refreshTimer;
+    private static FeedRefresher? _refresher;
     private static object? _netTimerToken;
     private static int _exitOnce;
 
@@ -357,11 +359,15 @@ internal class Program
         // Build the composition-root record now that every service exists.
         // UiComposer + CmdApplier pull dependencies from this record instead
         // of reaching into Program's private statics via reflection.
+        // Fetches feeds on its own: shortly after start and then on the
+        // interval in appsettings.json (#32). :refresh goes through it too.
+        _refresher = new FeedRefresher(_feeds!, _feedStore!, _data, _saver.RequestSaveAsync);
+
         var services = new AppServices(
             Ui: _ui, Data: _data, App: _app!,
             ConfigStore: _configStore!, LibraryStore: _libraryStore!,
             Episodes: _episodes!, FeedStore: _feedStore!, Queue: _queue!,
-            Feeds: _feeds!, Player: _player!, Playback: _playback!,
+            Feeds: _feeds!, Refresher: _refresher, Player: _player!, Playback: _playback!,
             Downloader: _downloader!, DownloadLookup: _downloadLookup!,
             MemLog: _memLog, GpodderStore: _gpodderStore!, Gpodder: _gpodder,
             Saver: _saver!, Net: _net!, EngineSvc: _engineSvc!,
@@ -418,6 +424,20 @@ internal class Program
         // initial lists
         UiComposer.ShowInitialLists(services);
 
+        // Automatic feed refresh (#32). Scheduled through the main loop, never
+        // run from here directly: CLI flags such as --offline are applied by
+        // an Invoke that only runs once the loop starts, and a pass started
+        // before that would fetch regardless. The first check comes a few
+        // seconds in, the rest every 30s; each one is a no-op unless a pass
+        // is due.
+        static void RefreshTick()
+        {
+            try { _ = UI.Wiring.UiFeedWiring.TickRefresh(_ui!, _refresher!); }
+            catch (Exception ex) { Log.Debug(ex, "refresh/tick threw"); }
+        }
+        Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(3), _ => { RefreshTick(); return false; });
+        _refreshTimer = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(30), _ => { RefreshTick(); return true; });
+
         // gpodder auto-sync on startup
         if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
             _ = Task.Run(async () =>
@@ -446,6 +466,12 @@ internal class Program
             TerminalRestore.Restore();
 
             try { Application.MainLoop?.RemoveTimeout(_uiTimer); }
+            catch
+            {
+                // ignored
+            }
+
+            try { if (_refreshTimer is not null) Application.MainLoop?.RemoveTimeout(_refreshTimer); }
             catch
             {
                 // ignored

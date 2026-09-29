@@ -148,8 +148,9 @@ Full in-app help: `:h`
 - `:add <rss-url>` (alias `:a`)  
   Add a new podcast feed.  
   Examples: `:add https://example.com/feed.xml`, `:a https://…`
-- `:refresh` (aliases `:update` `:r`)  
-  Refresh all feeds.
+- `:refresh [auto [<minutes>|off]]` (aliases `:update` `:r`)  
+  Refresh all feeds now. Feeds are also fetched on their own shortly after start and then every 60 minutes; `:refresh auto <minutes>` changes that (5 minutes to a week), `:refresh auto off` stops it, `:refresh auto` shows the interval and when the last pass ran. The sidebar title shows how old the feeds are.  
+  Examples: `:refresh`, `:refresh auto 30`, `:refresh auto off`
 - `:remove-feed` (alias `:rm-feed`)
   Remove the currently selected feed.
 - `:feed all|saved|downloaded|history|queue`  

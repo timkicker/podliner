@@ -80,11 +80,14 @@ sealed class AppServicesBuilder : IDisposable
 
     public Task Save() { SaveCount++; return Task.CompletedTask; }
 
+    public FeedRefresher Refresher => _refresher ??= new FeedRefresher(Feeds, FeedStore, Data, Save);
+    private FeedRefresher? _refresher;
+
     public AppServices Build() => new(
         Ui: Ui, Data: Data, App: App,
         ConfigStore: ConfigStore, LibraryStore: LibraryStore,
         Episodes: Episodes, FeedStore: FeedStore, Queue: Queue,
-        Feeds: Feeds, Player: Player, Playback: Playback,
+        Feeds: Feeds, Refresher: Refresher, Player: Player, Playback: Playback,
         Downloader: Downloader, DownloadLookup: DownloadLookup,
         MemLog: MemLog, GpodderStore: GpodderStore, Gpodder: null,
         Saver: Saver, Net: Net, EngineSvc: EngineSvc, Cases: Cases);

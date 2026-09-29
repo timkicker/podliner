@@ -1,5 +1,6 @@
 ﻿using FluentAssertions;
 using Podliner.App.Command.UseCases;
+using Podliner.App.Services;
 using Podliner.App.Tests.Fakes;
 using Podliner.App.UI.Wiring;
 using Podliner.Core;
@@ -31,12 +32,14 @@ public sealed class UiFeedWiringTests
         public readonly FakeFeedStore FeedStore = new();
         public readonly FakeEpisodeStore Episodes = new();
         public readonly ViewUseCase View;
+        public readonly FeedRefresher Refresher;
 
         public Fixture()
         {
             View = new ViewUseCase(Ui, Data, () => Task.CompletedTask, Episodes, FeedStore);
+            Refresher = new FeedRefresher(Feeds, FeedStore, Data, () => Task.CompletedTask);
             UiFeedWiring.WireRemoveFeed(Ui, Feeds, FeedStore, Episodes);
-            UiFeedWiring.WireRefresh(Ui, Data, Feeds, FeedStore, Episodes, View);
+            UiFeedWiring.WireRefresh(Ui, Data, Refresher, FeedStore, Episodes, View);
         }
 
         public string? LastOsd => Ui.OsdMessages.LastOrDefault().Text;
@@ -187,5 +190,113 @@ public sealed class UiFeedWiringTests
 
         f.Ui.SetEpisodeCalls.Should().NotBeEmpty();
         f.Ui.SetEpisodeCalls.Last().Item1.Should().Be(FeedA);
+    }
+
+    // ── automatic refresh (#32) ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task A_manual_refresh_while_a_pass_is_running_says_so_instead_of_starting_another()
+    {
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+        f.Feeds.HoldRefreshAll = new TaskCompletionSource();
+        var timed = f.Refresher.RunAsync();
+
+        await f.Ui.RaiseRefreshRequested();
+
+        f.LastOsd.Should().Contain("already running");
+        f.Feeds.HoldRefreshAll.SetResult();
+        await timed;
+        f.Feeds.RefreshAllCalls.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Every_pass_updates_the_sidebar_title()
+    {
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+
+        await f.Ui.RaiseRefreshRequested();
+
+        f.Ui.FeedsTitles.Should().NotBeEmpty();
+        f.Ui.FeedsTitles.Last().Should().StartWith("Feeds").And.Contain("just now");
+    }
+
+    [Fact]
+    public async Task A_timed_pass_repaints_the_lists_too()
+    {
+        // New episodes from a pass nobody asked for still have to show up.
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+        f.Episodes.Seed(Ep(FeedA, "One"));
+        f.Ui.SelectedFeedId = FeedA;
+
+        await f.Refresher.RunAsync();
+
+        f.Ui.SetEpisodeCalls.Should().NotBeEmpty();
+        f.Ui.SetEpisodeCalls.Last().Item1.Should().Be(FeedA);
+    }
+
+    [Fact]
+    public async Task A_timed_pass_never_puts_up_a_message()
+    {
+        // Once an hour for a server that is down would be nagging.
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+        f.Feeds.FailuresToRaise.Add((Fd(FeedA, "A"), "HTTP 500"));
+
+        await f.Refresher.RunAsync();
+
+        f.Ui.OsdMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_tick_sets_the_title_and_starts_a_due_pass()
+    {
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+
+        await UiFeedWiring.TickRefresh(f.Ui, f.Refresher);
+
+        f.Feeds.RefreshAllCalls.Should().Be(1);
+        f.Ui.FeedsTitles.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task A_tick_that_is_not_due_only_updates_the_title()
+    {
+        // The age in the title moves on even when nothing is fetched.
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.Data.RefreshIntervalMinutes = 0;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+
+        await UiFeedWiring.TickRefresh(f.Ui, f.Refresher);
+
+        f.Feeds.RefreshAllCalls.Should().Be(0);
+        // the separator depends on the glyph profile, which is process-wide
+        f.Ui.FeedsTitles.Should().ContainSingle().Which.Should().StartWith("Feeds").And.EndWith("never");
+    }
+
+    [Fact]
+    public async Task The_sidebar_says_refreshing_while_a_pass_runs()
+    {
+        var f = new Fixture();
+        f.Data.NetworkOnline = true;
+        f.FeedStore.Seed(Fd(FeedA, "A"));
+        f.Feeds.HoldRefreshAll = new TaskCompletionSource();
+
+        var pass = f.Refresher.RunAsync();
+
+        f.Ui.FeedsTitles.Should().NotBeEmpty();
+        f.Ui.FeedsTitles.Last().Should().EndWith("refreshing");
+        f.Feeds.HoldRefreshAll.SetResult();
+        await pass;
+        f.Ui.FeedsTitles.Last().Should().EndWith("just now");
     }
 }

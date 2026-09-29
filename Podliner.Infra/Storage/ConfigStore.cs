@@ -28,6 +28,8 @@ namespace Podliner.Infra.Storage
             if (c.Volume0_100 < 0) c.Volume0_100 = 0;
             if (c.Volume0_100 > 100) c.Volume0_100 = 100;
 
+            c.RefreshIntervalMinutes = FeedRefreshInterval.Normalize(c.RefreshIntervalMinutes);
+
             if (double.IsNaN(c.Speed) || c.Speed <= 0) c.Speed = 1.0;
             if (c.Speed < 0.25) c.Speed = 0.25;
             if (c.Speed > 4.0) c.Speed = 4.0;

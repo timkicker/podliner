@@ -1,4 +1,4 @@
-namespace Podliner.Core
+﻿namespace Podliner.Core
 {
     public class AppData
     {
@@ -8,6 +8,10 @@ namespace Podliner.Core
         public string? ThemePref { get; set; } // "base", "menuaccent", "native" (enum name)
 
         public string? DownloadDir { get; set; }
+
+        // automatic feed refresh (#32)
+        public int RefreshIntervalMinutes { get; set; } = FeedRefreshInterval.DefaultMinutes;
+        public DateTimeOffset? LastRefreshAt { get; set; }
         public List<Guid> DownloadQueue { get; set; } = new();
         public Dictionary<Guid, Podliner.Core.DownloadStatus> DownloadMap { get; set; } = new();
 

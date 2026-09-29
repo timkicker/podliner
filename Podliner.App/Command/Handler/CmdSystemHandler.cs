@@ -27,10 +27,7 @@ internal sealed class CmdSystemHandler : ICmdHandler
             case TopCommand.WriteQuit:     system.ExecWriteQuit(bang: false); return;
             case TopCommand.WriteQuitBang: system.ExecWriteQuit(bang: true);  return;
 
-            case TopCommand.Refresh:
-                ctx.Ui.ShowOsd("Refreshing…", 600);
-                ctx.Ui.RequestRefresh();
-                return;
+            case TopCommand.Refresh: ctx.Cases.Refresh.Exec(cmd.Args); return;
 
             case TopCommand.Undo:   ctx.Cases.Undo.Exec(cmd.Args); return;
             case TopCommand.Redraw: system.ExecRedraw(); return;

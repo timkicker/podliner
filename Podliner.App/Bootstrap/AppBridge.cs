@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 using Podliner.Infra.Storage;
 
 namespace Podliner.App.Bootstrap;
@@ -21,6 +21,8 @@ static class AppBridge
         data.FeedSortBy      = app.FeedSortBy;
         data.FeedSortDir     = app.FeedSortDir;
         data.DownloadDir     = app.DownloadDir;
+        data.RefreshIntervalMinutes = app.RefreshIntervalMinutes;
+        data.LastRefreshAt   = app.LastRefreshAt;
     }
 
     public static void SyncFromAppDataToFacade(AppData data, AppFacade app)
@@ -36,5 +38,7 @@ static class AppBridge
         app.FeedSortBy       = data.FeedSortBy;
         app.FeedSortDir      = data.FeedSortDir;
         app.DownloadDir      = data.DownloadDir;
+        app.RefreshIntervalMinutes = data.RefreshIntervalMinutes;
+        app.LastRefreshAt    = data.LastRefreshAt;
     }
 }

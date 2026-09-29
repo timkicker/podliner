@@ -67,6 +67,16 @@ public sealed partial class UiShell
 
     public void SelectFeed(Guid id) => _feedsPane?.SelectFeed(id);
 
+    public void SetFeedsTitle(string title)
+    {
+        UI(() =>
+        {
+            if (_feedsPane?.Frame is not { } frame || frame.Title?.ToString() == title) return;
+            frame.Title = title;
+            frame.SetNeedsDisplay();
+        });
+    }
+
     public void RefreshEpisodesForSelectedFeed(IEnumerable<Episode> episodes)
     {
         var fid = GetSelectedFeedId();

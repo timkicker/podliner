@@ -84,11 +84,15 @@ sealed class FakeUiShell : IUiShell
     public void RefreshActiveProgress(PlaybackSnapshot snap) => LastActiveProgressSnap = snap;
     public void RequestAddFeed(string url) => LastRequestedAddFeedUrl = url;
     public void RequestRemoveFeed() => RequestedRemoveFeed = true;
-    public void RequestRefresh() => RequestedRefresh = true;
+    public int RefreshRequests { get; private set; }
+    public void RequestRefresh() { RequestedRefresh = true; RefreshRequests++; }
     public void RequestQuit() => RequestedQuit = true;
     public void SetUnplayedFilterVisual(bool on) => LastUnplayedFilterVisual = on;
     public (int? Volume, double? Speed)? ShownVolumeAndSpeed { get; private set; }
     public void ShowVolumeAndSpeed(int? volume, double? speed) => ShownVolumeAndSpeed = (volume, speed);
+
+    public List<string> FeedsTitles { get; } = new();
+    public void SetFeedsTitle(string title) => FeedsTitles.Add(title);
 
     public string? SearchFilter { get; private set; }
     public void SetSearchFilter(string? query) => SearchFilter = string.IsNullOrWhiteSpace(query) ? null : query;

@@ -29,6 +29,7 @@ internal sealed class CmdCases
     public SyncUseCase       Sync       { get; }
     public SystemUseCase     System     { get; }
     public SleepUseCase      Sleep      { get; }
+    public RefreshUseCase    Refresh    { get; }
     public UndoUseCase       Undo       { get; }
     public UndoStack         UndoStack  { get; }
     public ChaptersUseCase   Chapters   { get; }
@@ -64,6 +65,7 @@ internal sealed class CmdCases
         Sync       = new SyncUseCase(ui, sync);
         System     = new SystemUseCase(ui, persist);
         Sleep      = new SleepUseCase(ui, sleepTimer);
+        Refresh    = new RefreshUseCase(ui, data, persist);
         // Queue needs the UndoStack, so it is built after it rather than
         // alongside the other list UseCases.
         UndoStack  = new UndoStack();

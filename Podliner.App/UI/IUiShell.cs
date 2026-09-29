@@ -81,6 +81,9 @@ internal interface IUiShell
     void TogglePlayerPlacement();
     void SetPlayerPlacement(bool atTop);
     void SetFeeds(IReadOnlyList<Feed> feeds, Guid? selectId = null);
+
+    // Title of the feeds sidebar frame; carries how old the feeds are (#32).
+    void SetFeedsTitle(string title);
     void ShowKeysHelp();
     void ShowLogsOverlay(int tail = 500);
     // Re-syncs the layout with the terminal size and repaints. Recovery path
