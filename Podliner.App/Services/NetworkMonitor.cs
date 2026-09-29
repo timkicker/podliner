@@ -100,8 +100,17 @@ sealed class NetworkMonitor
         });
     }
 
-    void OnNetworkChanged(bool online)
+    internal void OnNetworkChanged(bool online)
     {
+        // --offline and :net offline used to last about a second: the first
+        // probe landed right after them and wrote "online" back. A lost
+        // network is always believed; a found one never outvotes the user.
+        if (online && _data.ForcedOffline)
+        {
+            Log.Debug("net/probe found the network, staying offline by choice");
+            return;
+        }
+
         _data.NetworkOnline = online;
 
         Application.MainLoop?.Invoke(() =>

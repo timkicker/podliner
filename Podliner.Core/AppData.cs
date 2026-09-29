@@ -5,6 +5,11 @@
         public string PlaySource { get; set; } = "auto";
         public bool NetworkOnline { get; set; } = true;
 
+        // Set by --offline and :net offline, cleared by :net online. While it
+        // is set the network monitor may report the network lost but never
+        // found: the user's choice outlasts detection.
+        public bool ForcedOffline { get; set; }
+
         public string? ThemePref { get; set; } // "base", "menuaccent", "native" (enum name)
 
         public string? DownloadDir { get; set; }

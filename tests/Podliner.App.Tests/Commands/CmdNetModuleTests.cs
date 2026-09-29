@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Podliner.App.Command.UseCases;
 using Podliner.App.Tests.Fakes;
 using Podliner.Core;
@@ -119,5 +119,45 @@ public sealed class CmdNetModuleTests
         _sut.ExecNet(new[] { "offline" });
         _ui.LastWindowTitle.Should().Contain("[OFFLINE]");
         _ui.LastWindowTitle.Should().Contain("My Episode");
+    }
+
+    // ── an explicit choice outlasts detection ───────────────────────────────
+    //
+    // --offline and :net offline were undone within a second: the network
+    // monitor's first probe wrote "online" straight over them. With feeds now
+    // fetched on a timer (#32) that meant fetching on a connection the user
+    // had said to leave alone.
+
+    [Fact]
+    public void Going_offline_is_marked_as_the_users_choice()
+    {
+        _sut.ExecNet(new[] { "offline" });
+
+        _data.NetworkOnline.Should().BeFalse();
+        _data.ForcedOffline.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Going_online_lifts_the_choice()
+    {
+        _sut.ExecNet(new[] { "offline" });
+
+        _sut.ExecNet(new[] { "online" });
+
+        _data.NetworkOnline.Should().BeTrue();
+        _data.ForcedOffline.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Toggling_off_is_a_choice_and_toggling_back_lifts_it()
+    {
+        _data.NetworkOnline = true;
+
+        _sut.ExecNet(new[] { "toggle" });
+        _data.ForcedOffline.Should().BeTrue();
+
+        _sut.ExecNet(new[] { "toggle" });
+        _data.ForcedOffline.Should().BeFalse();
+        _data.NetworkOnline.Should().BeTrue();
     }
 }
