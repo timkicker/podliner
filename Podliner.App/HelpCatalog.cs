@@ -38,7 +38,7 @@ namespace Podliner.App
             new("Space", "Toggle play/pause"),
             new("← / →", "Seek -10s / +10s"),
             new("H / L", "Seek -60s / +60s"),
-            new("g / G", "Jump to start / end"),
+            new("g / G", "Seek to the start / end of the episode"),
             new("- / +", "Volume down / up"),
             new("[ / ]", "Slower / faster"),
             new("= or 1", "Reset speed to 1.0×"),
@@ -75,9 +75,10 @@ namespace Podliner.App
                 Examples: new[]{ ":add https://example.com/feed.xml", ":a https://example.com/feed.xml" },
                 Category: HelpCategory.Feeds, Rank: 25),
 
-            new(":refresh", "Refresh all feeds.",
+            new(":refresh", "Refresh all feeds now, or set how often that happens on its own (every 60 minutes unless changed).",
+                "[auto [<minutes>|off]]",
                 Aliases: new[]{ ":update", ":r" },
-                Examples: new[]{ ":refresh", ":r" },
+                Examples: new[]{ ":refresh", ":refresh auto", ":refresh auto 30", ":refresh auto off" },
                 Category: HelpCategory.Feeds, Rank: 30),
 
             new(":remove-feed", "Remove the currently selected feed.",

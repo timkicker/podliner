@@ -1,4 +1,4 @@
-using Podliner.App.Services;
+﻿using Podliner.App.Services;
 using Podliner.App.UI;
 using Podliner.Core;
 
@@ -24,12 +24,20 @@ internal sealed class NetUseCase
         _view = view;
     }
 
+    // Offline by hand is a choice the network monitor must not undo; online
+    // by hand hands the decision back to it.
+    void SetOnline(bool online)
+    {
+        _data.NetworkOnline = online;
+        _data.ForcedOffline = !online;
+    }
+
     public void ExecNet(string[] args)
     {
         var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
-        if (arg is "online" or "on") { _data.NetworkOnline = true; _ = _persist(); _ui.ShowOsd("Online", 600); }
-        else if (arg is "offline" or "off") { _data.NetworkOnline = false; _ = _persist(); _ui.ShowOsd("Offline", 600); }
-        else if (string.IsNullOrEmpty(arg) || arg == "toggle") { _data.NetworkOnline = !_data.NetworkOnline; _ = _persist(); _ui.ShowOsd(_data.NetworkOnline ? "Online" : "Offline", 600); }
+        if (arg is "online" or "on") { SetOnline(true); _ = _persist(); _ui.ShowOsd("Online", 600); }
+        else if (arg is "offline" or "off") { SetOnline(false); _ = _persist(); _ui.ShowOsd("Offline", 600); }
+        else if (string.IsNullOrEmpty(arg) || arg == "toggle") { SetOnline(!_data.NetworkOnline); _ = _persist(); _ui.ShowOsd(_data.NetworkOnline ? "Online" : "Offline", 600); }
         else { _ui.ShowOsd("usage: :net online|offline|toggle", 1200); }
 
         _view.ApplyList();

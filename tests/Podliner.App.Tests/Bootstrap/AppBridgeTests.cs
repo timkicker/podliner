@@ -183,6 +183,45 @@ public sealed class AppBridgeTests : IDisposable
         RoundTrip(new AppData { DownloadDir = dir }).DownloadDir.Should().BeNull();
     }
 
+    // ── automatic feed refresh (#32) ────────────────────────────────────────
+
+    [Theory]
+    [InlineData(60)]
+    [InlineData(15)]
+    [InlineData(0)]
+    public void The_refresh_interval_survives_a_restart(int minutes)
+        => RoundTripViaDisk(new AppData { RefreshIntervalMinutes = minutes })
+            .RefreshIntervalMinutes.Should().Be(minutes);
+
+    [Theory]
+    [InlineData(-10, 0)]
+    [InlineData(1, 5)]
+    [InlineData(999999, 10080)]
+    public void A_nonsense_interval_in_the_file_is_held_in_range(int written, int loaded)
+    {
+        // Otherwise a stray edit to appsettings.json means a request a second.
+        RoundTripViaDisk(new AppData { RefreshIntervalMinutes = written })
+            .RefreshIntervalMinutes.Should().Be(loaded);
+    }
+
+    [Fact]
+    public void A_fresh_install_refreshes_every_hour()
+        => RoundTripViaDisk(new AppData()).RefreshIntervalMinutes.Should().Be(60);
+
+    [Fact]
+    public void The_last_successful_refresh_survives_a_restart()
+    {
+        // Without it every start would refetch everything, however recently
+        // the last pass ran.
+        var at = new DateTimeOffset(2026, 9, 29, 10, 15, 0, TimeSpan.Zero);
+
+        RoundTripViaDisk(new AppData { LastRefreshAt = at }).LastRefreshAt.Should().Be(at);
+    }
+
+    [Fact]
+    public void Never_refreshed_stays_never()
+        => RoundTripViaDisk(new AppData { LastRefreshAt = null }).LastRefreshAt.Should().BeNull();
+
     // ── everything at once ──────────────────────────────────────────────────
 
     [Fact]
@@ -201,6 +240,8 @@ public sealed class AppBridgeTests : IDisposable
             FeedSortBy = "updated",
             FeedSortDir = "desc",
             DownloadDir = "/tmp/pods",
+            RefreshIntervalMinutes = 30,
+            LastRefreshAt = new DateTimeOffset(2026, 9, 29, 8, 0, 0, TimeSpan.Zero),
         };
 
         var restored = RoundTrip(original);
@@ -216,7 +257,9 @@ public sealed class AppBridgeTests : IDisposable
             .Including(x => x.SortDir)
             .Including(x => x.FeedSortBy)
             .Including(x => x.FeedSortDir)
-            .Including(x => x.DownloadDir));
+            .Including(x => x.DownloadDir)
+            .Including(x => x.RefreshIntervalMinutes)
+            .Including(x => x.LastRefreshAt));
     }
 
     [Fact]

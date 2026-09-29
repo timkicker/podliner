@@ -115,36 +115,20 @@ internal static class UiFeedWiring
     }
 
     static void WireRefresh(AppServices ctx, Func<Task> save)
-        => WireRefresh(ctx.Ui, ctx.Data, ctx.Feeds, ctx.FeedStore, ctx.Episodes, ctx.Cases.View);
+        => WireRefresh(ctx.Ui, ctx.Data, ctx.Refresher, ctx.FeedStore, ctx.Episodes, ctx.Cases.View);
 
     // Narrow overload. The failure aggregation below is the part worth
     // testing: one bad feed shows its reason, several show only a count.
-    public static void WireRefresh(IUiShell ui, AppData data, IFeedService feeds,
+    public static void WireRefresh(IUiShell ui, AppData data, FeedRefresher refresher,
                                    Services.IFeedStore feedStore, Services.IEpisodeStore episodeStore,
                                    Command.UseCases.ViewUseCase view)
     {
+        refresher.Started += () => ui.SetFeedsTitle(refresher.SidebarTitle(UIGlyphSet.TitleSeparator));
 
-        // Collect per-feed failures during each refresh pass and summarise
-        // at the end — OSDing every individual failure would flood the UI
-        // when the whole network is down.
-        var failures = new List<string>();
-        feeds!.FeedRefreshFailed += (feed, reason) =>
+        // After every pass, the timed ones included (#32): new episodes have
+        // to reach the screen whether or not anyone asked for them.
+        refresher.Finished += () =>
         {
-            lock (failures) { failures.Add($"{feed.Title}: {reason}"); }
-        };
-
-        ui.RefreshRequested += async () =>
-        {
-            lock (failures) failures.Clear();
-
-            if (!data.NetworkOnline)
-            {
-                ui.ShowOsd("refresh: offline — nothing fetched", 2000);
-                return;
-            }
-
-            await feeds.RefreshAllAsync();
-
             var selected = ui.GetSelectedFeedId() ?? data.LastSelectedFeedId;
             ui.SetFeeds(feedStore.Snapshot(), selected);
 
@@ -152,22 +136,43 @@ internal static class UiFeedWiring
                 ui.SetEpisodesForFeed(selected.Value, episodeStore.Snapshot());
 
             view.ApplyList();
-
-            List<string> snap;
-            lock (failures) snap = failures.ToList();
-            if (snap.Count == 0)
-            {
-                ui.ShowOsd("refreshed ✓", 1000);
-            }
-            else if (snap.Count == 1)
-            {
-                ui.ShowOsd($"refresh: {snap[0]}", 2800);
-            }
-            else
-            {
-                ui.ShowOsd($"refresh: {snap.Count} feeds failed — :logs for details", 2800);
-            }
+            ui.SetFeedsTitle(refresher.SidebarTitle(UIGlyphSet.TitleSeparator));
         };
+
+        // :refresh. Only this path talks back; a timed pass stays silent,
+        // since an hourly message about a server that is down would nag.
+        ui.RefreshRequested += async () =>
+        {
+            if (!data.NetworkOnline)
+            {
+                ui.ShowOsd("refresh: offline — nothing fetched", 2000);
+                return;
+            }
+
+            var outcome = await refresher.RunAsync();
+
+            if (outcome.Result == RefreshResult.Skipped)
+            {
+                ui.ShowOsd("refresh: already running", 1200);
+                return;
+            }
+
+            var failures = outcome.Failures;
+            if (failures.Count == 0)
+                ui.ShowOsd("refreshed ✓", 1000);
+            else if (failures.Count == 1)
+                ui.ShowOsd($"refresh: {failures[0]}", 2800);
+            else
+                ui.ShowOsd($"refresh: {failures.Count} feeds failed — :logs for details", 2800);
+        };
+    }
+
+    // Called by the refresh timer. The title is updated every time because
+    // the age in it moves on even when nothing is fetched.
+    public static Task TickRefresh(IUiShell ui, FeedRefresher refresher)
+    {
+        ui.SetFeedsTitle(refresher.SidebarTitle(UIGlyphSet.TitleSeparator));
+        return refresher.TickAsync();
     }
 
     static void WireThemeToggle(AppServices ctx)

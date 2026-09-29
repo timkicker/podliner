@@ -1,4 +1,4 @@
-using Podliner.Core;
+﻿using Podliner.Core;
 using Podliner.Infra;
 
 namespace Podliner.App.Tests.Fakes;
@@ -40,13 +40,17 @@ sealed class FakeFeedService : IFeedService
         return Task.CompletedTask;
     }
 
-    public Task RefreshAllAsync()
+    // Set to hold RefreshAllAsync open until the test completes it, to see
+    // what happens to a second pass started while the first is running.
+    public TaskCompletionSource? HoldRefreshAll { get; set; }
+
+    public async Task RefreshAllAsync()
     {
         RefreshAllCalls++;
         if (ThrowOnRefreshAll is { } ex) throw ex;
         foreach (var (feed, reason) in FailuresToRaise)
             FeedRefreshFailed?.Invoke(feed, reason);
-        return Task.CompletedTask;
+        if (HoldRefreshAll is { } hold) await hold.Task;
     }
 
     public Task RefreshFeedAsync(Feed feed)

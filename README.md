@@ -149,11 +149,10 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 **Navigation & filters**
 - j / k: move down / up
 - h / l: walk the panes left / right (feeds → episodes → shownotes → chapters)
-- gg / G: jump to top / bottom
+- g / G: jump to the start / end of the episode
 - / : search in current list • `Esc`: leave the search
 - u : toggle "unplayed only"
 - `i`: open Shownotes tab • `Esc`: back to episodes
-- q : quit
 
 **Chapters**
 - Dedicated **Chapters** tab next to Episodes/Details; shows `Chapters (N)` with a count. Reach it with `l` from the shownotes tab
@@ -172,6 +171,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 
 **Feeds**
 - `:add <url>` : add feed
+- `:refresh` : fetch every feed now. Feeds are also fetched on their own after start and every 60 minutes; `:refresh auto <minutes>` or `:refresh auto off` changes that, and the sidebar title shows how old they are
 - `:feed all|saved|downloaded|history|queue` : switch view
 - `:feed speed <n|off>` : per-feed playback speed override (e.g. `:feed speed 1.5`)
 - `:feed auto-download on|off` : auto-queue new episodes from this feed for download
@@ -193,6 +193,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
   - Windows: `%LOCALAPPDATA%\podliner\logs\`
   - File pattern: `podliner-.log` (daily)
   - Example: `…/podliner/logs/podliner-YYYYMMDD.log`
+- **Feed refresh**: every 60 minutes by default, set with `:refresh auto <minutes>` or `RefreshIntervalMinutes` in `appsettings.json` (`0` turns it off, otherwise 5 minutes to a week). `--offline` fetches nothing.
 - **Downloads**: `~/Podcasts/` by default (all platforms). Override at runtime with `:downloads set-dir <path>` (or `set-dir reset` to restore default), or by setting `DownloadDir` in `appsettings.json`.
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 

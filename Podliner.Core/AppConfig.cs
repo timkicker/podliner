@@ -1,4 +1,4 @@
-namespace Podliner.Core
+﻿namespace Podliner.Core
 {
     // persisted app and ui preferences (appsettings.json)
     // no content and no downloads here
@@ -18,6 +18,12 @@ namespace Podliner.Core
         // network profile and offline startup
         public NetworkProfile NetworkProfile { get; set; } = NetworkProfile.Standard;
         public bool StartOffline { get; set; } = false;
+
+        // automatic feed refresh: minutes between passes, 0 = off, and when
+        // the last pass got anything through. Kept across restarts so a start
+        // does not refetch everything the moment after a pass ran.
+        public int RefreshIntervalMinutes { get; set; } = FeedRefreshInterval.DefaultMinutes;
+        public DateTimeOffset? LastRefreshAt { get; set; }
 
         // Override for the directory where episodes get downloaded. Null
         // means "use the platform default" (~/Podcasts on Linux/macOS,

@@ -32,6 +32,7 @@ internal sealed record AppServices(
     IFeedStore            FeedStore,
     IQueueService         Queue,
     IFeedService          Feeds,
+    FeedRefresher         Refresher,
     IAudioPlayer          Player,
     PlaybackCoordinator   Playback,
     IDownloadManager      Downloader,

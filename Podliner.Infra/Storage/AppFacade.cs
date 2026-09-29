@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Podliner.Core;
 
 namespace Podliner.Infra.Storage
@@ -106,6 +106,18 @@ namespace Podliner.Infra.Storage
         // Override directory for episode downloads. Null means "use the
         // platform default". Whitespace-only values normalise to null so
         // a stray edit in appsettings.json doesn't try to mkdir " ".
+        public int RefreshIntervalMinutes
+        {
+            get => ConfigStore.Current.RefreshIntervalMinutes;
+            set { ConfigStore.Current.RefreshIntervalMinutes = FeedRefreshInterval.Normalize(value); ConfigStore.SaveAsync(); }
+        }
+
+        public DateTimeOffset? LastRefreshAt
+        {
+            get => ConfigStore.Current.LastRefreshAt;
+            set { ConfigStore.Current.LastRefreshAt = value; ConfigStore.SaveAsync(); }
+        }
+
         public string? DownloadDir
         {
             get => ConfigStore.Current.DownloadDir;
