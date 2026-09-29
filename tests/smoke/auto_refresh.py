@@ -12,7 +12,7 @@ requests, and never presses a key.
   offline   --offline: nothing is fetched, although a pass would be due
   off       RefreshIntervalMinutes 0: nothing is fetched
   timer     a pass that comes due while podliner runs is picked up by the
-            timer, with no restart
+            timer, with no restart, and not before it is due
 
 usage: auto_refresh.py <binary> [--only NAME...]
 """
@@ -176,14 +176,19 @@ def scenario(name, binary, feed):
 
     elif name == "timer":
         # due twelve seconds after start: the start check (3s) must not fetch,
-        # the 30s timer must
+        # the timer (every 10s) must
         due_in = 12
+        # measured right before the launch: preparing the library above runs
+        # podliner for up to 25s, and a clock taken before that put the due
+        # moment in the past
+        launch = datetime.datetime.now(datetime.timezone.utc)
         patch_settings(cfg, RefreshIntervalMinutes=60,
-                       LastRefreshAt=iso(now - datetime.timedelta(minutes=60) + datetime.timedelta(seconds=due_in)))
+                       LastRefreshAt=iso(launch - datetime.timedelta(minutes=60) + datetime.timedelta(seconds=due_in)))
+        started = time.time()
         run(binary, cfg, [], 50, stop_when=lambda: bool(feed.requests))
         first = feed.requests[0] - started if feed.requests else None
-        ok = first is not None and first >= due_in - 1
-        detail = f"first request after {first:.1f}s (want between {due_in}s and ~45s)" if first else "no request"
+        ok = first is not None and due_in - 1 <= first <= due_in + 15
+        detail = f"first request after {first:.1f}s (want between {due_in}s and {due_in + 15}s)" if first else "no request"
 
     else:
         raise ValueError(name)

@@ -428,15 +428,16 @@ internal class Program
         // run from here directly: CLI flags such as --offline are applied by
         // an Invoke that only runs once the loop starts, and a pass started
         // before that would fetch regardless. The first check comes a few
-        // seconds in, the rest every 30s; each one is a no-op unless a pass
-        // is due.
+        // seconds in, the rest every 10s. A check fetches nothing unless a
+        // pass is due; it is that often so the age in the sidebar title does
+        // not lag (at 30s, "2m ago" still read "1m").
         static void RefreshTick()
         {
             try { _ = UI.Wiring.UiFeedWiring.TickRefresh(_ui!, _refresher!); }
             catch (Exception ex) { Log.Debug(ex, "refresh/tick threw"); }
         }
         Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(3), _ => { RefreshTick(); return false; });
-        _refreshTimer = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(30), _ => { RefreshTick(); return true; });
+        _refreshTimer = Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(10), _ => { RefreshTick(); return true; });
 
         // gpodder auto-sync on startup
         if (_gpodder != null && _gpodder.ShouldAutoSync && _data.NetworkOnline)
