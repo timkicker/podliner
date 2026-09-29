@@ -30,23 +30,35 @@ def main():
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         os.kill(pid, signal.SIGWINCH)
 
+    out = bytearray()
+
     def pump(s):
         end = time.time() + s
         while time.time() < end:
             r, _, _ = select.select([fd], [], [], 0.1)
             if fd in r:
                 try:
-                    if not os.read(fd, 65536):
-                        return
+                    chunk = os.read(fd, 65536)
                 except OSError:
                     return
+                if not chunk:
+                    return
+                out.extend(chunk)
 
     def log():
         files = glob.glob(os.path.join(cfg, "logs", "*.log"))
         return open(files[0], errors="replace").read().splitlines() if files else []
 
     size(40, 140)
-    pump(6)
+    # wait for the ui to take over the screen, like the other smoke tests;
+    # a fixed sleep was not enough on a slow runner
+    deadline = time.time() + 60
+    while b"\x1b[?1049h" not in out and time.time() < deadline:
+        pump(0.5)
+    if b"\x1b[?1049h" not in out:
+        print("FAIL: podliner never switched to the alternate screen")
+        return 1
+    pump(3)
 
     failures = 0
     for i, (rows, cols) in enumerate([(30, 90), (40, 140), (24, 80), (45, 160)]):
@@ -64,6 +76,9 @@ def main():
         ok = cmds == [f":sleep {minutes}m"]
         failures += not ok
         print(f"after resize to {cols}x{rows}: {'ok  ' if ok else 'FAIL'} got {cmds or 'no command'}")
+        if not ok:
+            for line in log()[-12:]:
+                print("    log:", line[:140])
 
     os.write(fd, b"q")
     pump(2)
