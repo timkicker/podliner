@@ -10,7 +10,9 @@ namespace Podliner.App.Tests.Mpris;
 
 public sealed class MprisObjectEdgeCaseTests
 {
-    static (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject()
+    PlaybackCoordinator? _pc;
+
+    (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject()
     {
         var data     = new AppData();
         var player   = new FakeAudioPlayer();
@@ -18,6 +20,7 @@ public sealed class MprisObjectEdgeCaseTests
         var feeds    = new FakeFeedStore();
         var queue    = new FakeQueueService();
         var pc       = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        _pc = pc;
         return (new MprisObject(data, player, pc, episodes, feeds), player, data, episodes, feeds);
     }
 
@@ -30,7 +33,10 @@ public sealed class MprisObjectEdgeCaseTests
         // Episode exists but its feed is NOT in the feed store
         var ep = new Episode { Id = Guid.NewGuid(), FeedId = Guid.NewGuid(), Title = "Orphan", AudioUrl = "https://x.com/a.mp3", DurationMs = 10_000 };
         episodes.Seed(ep);
-        player.State.EpisodeId = ep.Id;
+        _pc!.Play(ep);
+        // the coordinator hands the url to the engine on the thread pool
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (player.PlayCalls.Count == 0 && DateTime.UtcNow < until) Thread.Sleep(5);
 
         var props    = await ((IMprisPlayer)obj).GetAllAsync();
         var metadata = (IDictionary<string, object>)props["Metadata"];

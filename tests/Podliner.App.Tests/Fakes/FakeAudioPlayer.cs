@@ -28,7 +28,7 @@ sealed class FakeAudioPlayer : IAudioPlayer
     public void SetVolume(int v)    { LastSetVolume = v; State.Volume0_100 = v; }
     public void SetSpeed(double s)  { LastSetSpeed  = s; State.Speed = s; }
     public void TogglePause()       { State.IsPlaying = !State.IsPlaying; }
-    public void Stop()              { State.IsPlaying = false; State.EpisodeId = null; }
+    public void Stop()              { State.IsPlaying = false; }
     // Records what the app asked to play, so tests can check the resolved
     // source (local file vs feed URL) without a real engine.
     public readonly List<(string Url, long? StartMs)> PlayCalls = new();
