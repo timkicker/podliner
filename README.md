@@ -149,7 +149,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 **Navigation & filters**
 - j / k: move down / up
 - h / l: walk the panes left / right (feeds → episodes → shownotes → chapters)
-- gg / G: jump to top / bottom
+- g / G: jump to the start / end of the episode
 - / : search in current list • `Esc`: leave the search
 - u : toggle "unplayed only"
 - `i`: open Shownotes tab • `Esc`: back to episodes

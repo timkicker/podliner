@@ -38,7 +38,7 @@ namespace Podliner.App
             new("Space", "Toggle play/pause"),
             new("← / →", "Seek -10s / +10s"),
             new("H / L", "Seek -60s / +60s"),
-            new("g / G", "Jump to start / end"),
+            new("g / G", "Seek to the start / end of the episode"),
             new("- / +", "Volume down / up"),
             new("[ / ]", "Slower / faster"),
             new("= or 1", "Reset speed to 1.0×"),
