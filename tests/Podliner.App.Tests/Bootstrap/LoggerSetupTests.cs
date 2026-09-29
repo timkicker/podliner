@@ -153,3 +153,40 @@ public sealed class LoggerLogDirTests : IDisposable
     public void Resolution_is_stable_across_calls()
         => LoggerSetup.ResolveLogDir(null).Should().Be(LoggerSetup.ResolveLogDir(null));
 }
+
+// Under systemd, JOURNAL_STREAM is set and podliner leaves file logging to
+// the journal. It also switched off an explicit --log-dir or
+// PODLINER_LOG_DIR, which #12 had promised would override that. The variable
+// leaks into terminals run as systemd services (GNOME Terminal among them),
+// so those users never got a log file to attach to a bug report. Found when
+// a CI runner, which runs as a service too, wrote no log at all.
+public sealed class LoggerJournalTests
+{
+    [Fact]
+    public void Under_the_journal_an_explicit_log_dir_still_wins()
+    {
+        LoggerSetup.ChooseLogDir(explicitDir: "/from/cli", noFileLogs: false, isJournal: true, fallback: () => "/default")
+            .Should().Be("/from/cli");
+    }
+
+    [Fact]
+    public void Under_the_journal_with_nothing_explicit_there_is_no_file_log()
+    {
+        LoggerSetup.ChooseLogDir(explicitDir: null, noFileLogs: false, isJournal: true, fallback: () => "/default")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void Outside_the_journal_the_default_applies()
+    {
+        LoggerSetup.ChooseLogDir(explicitDir: null, noFileLogs: false, isJournal: false, fallback: () => "/default")
+            .Should().Be("/default");
+    }
+
+    [Fact]
+    public void No_file_logs_beats_everything()
+    {
+        LoggerSetup.ChooseLogDir(explicitDir: "/from/cli", noFileLogs: true, isJournal: false, fallback: () => "/default")
+            .Should().BeNull();
+    }
+}

@@ -10,8 +10,9 @@ static class LoggerSetup
     public static void Configure(string? level, string? cliLogDir, bool noFileLogs, MemoryLogSink memLog)
     {
         var min = ParseLevel(level);
-        var isJournal = IsJournal();
-        var logDir = noFileLogs || isJournal ? null : ResolveLogDir(cliLogDir);
+        var explicitDir = !string.IsNullOrWhiteSpace(cliLogDir) ? cliLogDir
+                        : Environment.GetEnvironmentVariable("PODLINER_LOG_DIR");
+        var logDir = ChooseLogDir(explicitDir, noFileLogs, IsJournal(), () => ResolveLogDir(cliLogDir));
 
         var cfg = new LoggerConfiguration()
             .MinimumLevel.Is(min)
@@ -61,6 +62,18 @@ static class LoggerSetup
             case "error":   return LogEventLevel.Error;
             default:        return LogEventLevel.Debug;
         }
+    }
+
+    // Under systemd (JOURNAL_STREAM set) the default is to leave logging to
+    // the journal. That used to switch off an explicit --log-dir or
+    // PODLINER_LOG_DIR too, which #12 had promised would override it, and the
+    // variable leaks into terminals run as systemd services, so those users
+    // never got a log file. Asking for a directory now always gets one.
+    internal static string? ChooseLogDir(string? explicitDir, bool noFileLogs, bool isJournal, Func<string?> fallback)
+    {
+        if (noFileLogs) return null;
+        if (!string.IsNullOrWhiteSpace(explicitDir)) return explicitDir;
+        return isJournal ? null : fallback();
     }
 
     static bool IsJournal()
