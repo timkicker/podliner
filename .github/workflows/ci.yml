@@ -78,3 +78,6 @@ jobs:
 
       - name: Feeds are fetched on their own, and only when they should be
         run: python3 tests/smoke/auto_refresh.py publish/Podliner.App
+
+      - name: Typing after a resize still reaches the command box
+        run: python3 tests/smoke/resize_input.py publish/Podliner.App

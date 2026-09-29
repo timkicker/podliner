@@ -119,10 +119,17 @@ public sealed partial class UiShell
     // driver still holds the old one, so every view keeps rendering at the
     // stale geometry. That is issue #4.
     //
-    // ncurses exposes resizeterm() to be told the size explicitly; once told,
-    // the driver's next poll sees the change and the normal resize path runs.
-    // Guarded on the driver type and wrapped, because the call only exists on
-    // Unix. Anywhere else this is a no-op and behaviour is as before.
+    // ncurses can be told the size explicitly; once told, the driver's next
+    // poll sees the change and the normal resize path runs. Guarded on the
+    // driver type and wrapped, because the call only exists on Unix.
+    // Anywhere else this is a no-op and behaviour is as before.
+    //
+    // resize_term, not resizeterm. resizeterm also pushes KEY_RESIZE back
+    // into the input queue, and Terminal.Gui 1.19 drains that and then maps
+    // the next real character as if it were a function key: the first key
+    // after every resize arrived as "Unknown". Type ":" first and no command
+    // box opened, and the rest of the command ran as shortcuts. Shipped in
+    // 2.0.0 with this fix for #4; 1.3.1 was fine.
     private static bool TryTellCursesTheSize()
     {
         try
@@ -138,11 +145,11 @@ public sealed partial class UiShell
             if (cols == drv.Cols && rows == drv.Rows) return false;
 
             var curses = typeof(Application).Assembly.GetType("Unix.Terminal.Curses");
-            var resize = curses?.GetMethod("resizeterm",
+            var resize = curses?.GetMethod("resize_term",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
             if (resize == null)
             {
-                Serilog.Log.Debug("resize: Unix.Terminal.Curses.resizeterm not found");
+                Serilog.Log.Debug("resize: Unix.Terminal.Curses.resize_term not found");
                 return false;
             }
 
