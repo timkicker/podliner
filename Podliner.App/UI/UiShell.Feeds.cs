@@ -56,7 +56,12 @@ public sealed partial class UiShell
             _suppressFeedSelectionEvents = false;
         }
 
-        RefreshEpisodesForSelectedFeed(_episodes);
+        // Nothing is repainted here any more. This used to end with
+        // RefreshEpisodesForSelectedFeed(_episodes), and _episodes was a
+        // list nothing ever filled, so every SetFeeds blanked the episode
+        // pane and threw its selection away. With feeds refreshed on a timer
+        // (#32) that pulled the cursor back to the top every hour. Every
+        // caller that changes the selected feed repaints the episodes itself.
     }
 
     public Guid? GetSelectedFeedId()

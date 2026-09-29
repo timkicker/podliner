@@ -68,7 +68,6 @@ public sealed partial class UiShell : IUiShell
     private enum Pane { Feeds, Episodes }
     private Pane _activePane = Pane.Episodes;
 
-    private readonly List<Episode> _episodes = new();
     private readonly List<Feed> _feeds = new();
     #endregion
 
