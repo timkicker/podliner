@@ -12,7 +12,19 @@ public sealed class MprisObjectPropertyTests
 {
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    static (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject(
+    PlaybackCoordinator? _pc;
+
+    // Plays through the coordinator, as the app does; MPRIS takes the current
+    // episode from there (#33).
+    void PlayNow(FakeAudioPlayer player, Episode ep)
+    {
+        _pc!.Play(ep);
+        // the coordinator hands the url to the engine on the thread pool
+        var until = DateTime.UtcNow.AddSeconds(5);
+        while (player.PlayCalls.Count == 0 && DateTime.UtcNow < until) Thread.Sleep(5);
+    }
+
+    (MprisObject obj, FakeAudioPlayer player, AppData data, FakeEpisodeStore episodes, FakeFeedStore feeds) MakeObject(
         bool isPlaying = false,
         Guid? episodeId = null)
     {
@@ -21,11 +33,17 @@ public sealed class MprisObjectPropertyTests
         var episodes = new FakeEpisodeStore();
         var feeds    = new FakeFeedStore();
         var queue    = new FakeQueueService();
-        player.State.IsPlaying  = isPlaying;
-        player.State.EpisodeId  = episodeId;
-
         var pc  = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, queue);
+        _pc = pc;
         var obj = new MprisObject(data, player, pc, episodes, feeds);
+
+        if (episodeId is { } id)
+        {
+            var ep = new Episode { Id = id, FeedId = Guid.NewGuid(), Title = "T", AudioUrl = "https://x.com/a.mp3" };
+            episodes.Seed(ep);
+            PlayNow(player, ep);
+        }
+        player.State.IsPlaying = isPlaying;
         return (obj, player, data, episodes, feeds);
     }
 
@@ -89,7 +107,7 @@ public sealed class MprisObjectPropertyTests
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3", DurationMs = 60_000 };
         feeds.Seed(new Feed { Id = feedId, Title = "Feed" });
         episodes.Seed(ep);
-        player.State.EpisodeId = ep.Id;
+        PlayNow(player, ep);
 
         var props    = await GetAllPlayerProps(obj);
         var metadata = (IDictionary<string, object>)props["Metadata"];
@@ -106,7 +124,7 @@ public sealed class MprisObjectPropertyTests
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3" };
         feeds.Seed(new Feed { Id = feedId, Title = "My Podcast" });
         episodes.Seed(ep);
-        player.State.EpisodeId = ep.Id;
+        PlayNow(player, ep);
 
         var props    = await GetAllPlayerProps(obj);
         var metadata = (IDictionary<string, object>)props["Metadata"];
@@ -125,7 +143,7 @@ public sealed class MprisObjectPropertyTests
         var ep = new Episode { FeedId = feedId, Title = "T", AudioUrl = "https://x.com/a.mp3", DurationMs = 5_000 };
         feeds.Seed(new Feed { Id = feedId, Title = "F" });
         episodes.Seed(ep);
-        player.State.EpisodeId = ep.Id;
+        PlayNow(player, ep);
 
         var props    = await GetAllPlayerProps(obj);
         var metadata = (IDictionary<string, object>)props["Metadata"];

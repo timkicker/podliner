@@ -198,11 +198,12 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
         ["CanControl"]     = true
     };
 
+    // The coordinator knows which episode is on; the engine's state does not
+    // (#33: reading it there left Metadata at NoTrack while playing).
     private string GetPlaybackStatus()
     {
-        var s = _player.State;
-        if (s.IsPlaying)        return "Playing";
-        if (s.EpisodeId.HasValue) return "Paused";
+        if (_player.State.IsPlaying) return "Playing";
+        if (_playback.GetLastSnapshot().EpisodeId.HasValue) return "Paused";
         return "Stopped";
     }
 
@@ -211,16 +212,18 @@ public sealed class MprisObject : IMprisMediaPlayer2, IMprisPlayer
     private IDictionary<string, object> GetMetadata()
     {
         var meta = new Dictionary<string, object>();
-        var state = _player.State;
+        var snap = _playback.GetLastSnapshot();
 
-        if (state.EpisodeId.HasValue)
+        if (snap.EpisodeId.HasValue)
         {
-            var ep = _episodes.Find(state.EpisodeId.Value);
+            var ep = _episodes.Find(snap.EpisodeId.Value);
             if (ep != null)
             {
                 var feed = _feeds.Find(ep.FeedId);
                 meta["mpris:trackid"] = new ObjectPath($"/org/podliner/track/{ep.Id:N}");
-                meta["mpris:length"]  = ep.DurationMs * 1000L;
+                // feeds often leave the duration out; the engine knows it once loaded
+                var lengthMs = ep.DurationMs > 0 ? ep.DurationMs : (long)snap.Length.TotalMilliseconds;
+                meta["mpris:length"]  = lengthMs * 1000L;
                 meta["xesam:title"]   = ep.Title;
                 meta["xesam:url"]     = ep.AudioUrl;
                 if (feed != null)

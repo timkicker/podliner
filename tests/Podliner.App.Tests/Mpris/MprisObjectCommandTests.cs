@@ -98,16 +98,14 @@ public sealed class MprisObjectCommandTests
     // ── StopAsync ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task StopAsync_stops_playback_and_clears_episode()
+    public async Task StopAsync_stops_playback()
     {
         var (obj, player, _) = MakeObject();
         player.State.IsPlaying = true;
-        player.State.EpisodeId = Guid.NewGuid();
 
         await ((IMprisPlayer)obj).StopAsync();
 
         player.State.IsPlaying.Should().BeFalse();
-        player.State.EpisodeId.Should().BeNull();
     }
 
     // ── SeekAsync ─────────────────────────────────────────────────────────────

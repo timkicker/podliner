@@ -2,7 +2,6 @@
 {
     public class PlayerState
     {
-        public Guid? EpisodeId { get; set; }
         public bool IsPlaying { get; set; }
         public int Volume0_100 { get; set; } = 70;
         public double Speed { get; set; } = 1.0;
