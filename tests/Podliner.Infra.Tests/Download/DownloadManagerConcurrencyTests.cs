@@ -91,6 +91,11 @@ public sealed class DownloadManagerConcurrencyTests : IDisposable
         var act = async () => await Task.WhenAll(enqueuer, clearer);
         await act.Should().NotThrowAsync();
 
+        // The worker keeps taking items off the queue, and the second read
+        // below is not under the manager's lock: stop it first, or it can
+        // take one between the two reads (seen on windows, 14801 vs 14800).
+        _mgr.Dispose();
+
         // Final invariant: queue count must match the actual list length.
         // If ClearQueue/Enqueue raced unsafely, these could diverge.
         _mgr.QueuedCount().Should().Be(_data.DownloadQueue.Count);
