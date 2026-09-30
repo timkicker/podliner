@@ -168,6 +168,40 @@ public sealed class MpvAudioPlayer : IAudioPlayer
 
     #region helpers: process / start / stop
 
+    // Every episode is a new mpv process, so it has to start at the volume
+    // and speed podliner shows; they used to reach mpv only over IPC when
+    // they changed, and each episode began at 100% and 1.0x.
+    internal static List<string> BuildArguments(string url, string sockPath, long? startMs, int volume0to100, double speed)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var a = new List<string>();
+        // deterministic, terminal-safe start (no configs, no terminal, no window)
+        a.Add("--no-config");                 // ignore user configs & scripts
+        a.Add("--no-video");
+        a.Add("--no-terminal");               // don't touch TTY
+        a.Add("--input-terminal=no");         // never read from terminal
+        a.Add("--input-default-bindings=no"); // disable key bindings
+        a.Add("--input-conf=/dev/null");      // no input config
+        a.Add("--force-window=no");           // no GUI window
+        a.Add("--idle=no");
+        a.Add("--keep-open=no");
+        a.Add("--really-quiet");
+        a.Add("--msg-level=all=no");          // suppress logs to stdio completely
+        a.Add($"--user-agent={PlayerHttpDefaults.UserAgent}");
+        a.Add($"--input-ipc-server={sockPath}");
+
+        // optional start offset hint
+        if (startMs is long ms && ms > 0)
+            a.Add($"--start={(ms / 1000.0).ToString("0.###", inv)}");
+
+        a.Add($"--volume={Math.Clamp(volume0to100, 0, 100)}");
+        a.Add($"--speed={Math.Clamp(speed, 0.5, 2.5).ToString("0.###", inv)}");
+        a.Add(url);
+        return a;
+    }
+
+
+
     private Process StartMpvProcess(string url, string sockPath, long? startMs)
     {
         var psi = new ProcessStartInfo
@@ -180,26 +214,10 @@ public sealed class MpvAudioPlayer : IAudioPlayer
             CreateNoWindow = true
         };
 
-        // deterministic, terminal-safe start (no configs, no terminal, no window)
-        psi.ArgumentList.Add("--no-config");                 // ignore user configs & scripts
-        psi.ArgumentList.Add("--no-video");
-        psi.ArgumentList.Add("--no-terminal");               // don't touch TTY
-        psi.ArgumentList.Add("--input-terminal=no");         // never read from terminal
-        psi.ArgumentList.Add("--input-default-bindings=no"); // disable key bindings
-        psi.ArgumentList.Add("--input-conf=/dev/null");      // no input config
-        psi.ArgumentList.Add("--force-window=no");           // no GUI window
-        psi.ArgumentList.Add("--idle=no");
-        psi.ArgumentList.Add("--keep-open=no");
-        psi.ArgumentList.Add("--really-quiet");
-        psi.ArgumentList.Add("--msg-level=all=no");          // suppress logs to stdio completely
-        psi.ArgumentList.Add($"--user-agent={PlayerHttpDefaults.UserAgent}");
-        psi.ArgumentList.Add($"--input-ipc-server={sockPath}");
-
-        // optional start offset hint
-        if (startMs is long ms && ms > 0)
-            psi.ArgumentList.Add($"--start={(ms / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}");
-
-        psi.ArgumentList.Add(url);
+        int vol; double speed;
+        lock (_gate) { vol = State.Volume0_100; speed = State.Speed; }
+        foreach (var a in BuildArguments(url, sockPath, startMs, vol, speed))
+            psi.ArgumentList.Add(a);
 
         D($"start mpv: {string.Join(" ", psi.ArgumentList)}");
 
