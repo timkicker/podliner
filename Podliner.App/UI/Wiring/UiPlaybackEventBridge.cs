@@ -21,7 +21,21 @@ internal static class UiPlaybackEventBridge
     {
         WireSnapshot(ui, data, player, playback, episodeStore);
         WireStatus(ui, playback);
+        WireFailure(ui, playback);
         WireStateChanged(ui, player, playback);
+    }
+
+    static void WireFailure(IUiShell ui, PlaybackCoordinator playback)
+    {
+        playback.PlaybackFailed += reason => Application.MainLoop?.Invoke(() =>
+        {
+            try
+            {
+                ui.SetPlayerLoading(false);
+                ui.ShowOsd($"can't play: {reason}", 4000);
+            }
+            catch { }
+        });
     }
 
     static void WireSnapshot(IUiShell ui, AppData data, IAudioPlayer player, PlaybackCoordinator playback, Services.IEpisodeStore episodeStore)

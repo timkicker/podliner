@@ -34,9 +34,13 @@ sealed class FakeAudioPlayer : IAudioPlayer
     public readonly List<(string Url, long? StartMs)> PlayCalls = new();
     public string? LastPlayedUrl => PlayCalls.LastOrDefault().Url;
 
+    // Set to make Play throw, as an engine does for a file it cannot open.
+    public Exception? ThrowOnPlay { get; set; }
+
     public void Play(string url, long? startMs = null)
     {
         lock (PlayCalls) PlayCalls.Add((url, startMs));
+        if (ThrowOnPlay != null) throw ThrowOnPlay;
         State.IsPlaying = true;
     }
     public void SeekTo(TimeSpan t)      { State.Position = t; }

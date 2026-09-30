@@ -45,6 +45,8 @@ public sealed class PlaybackCoordinator : IDisposable
     public event Action? QueueChanged;
     public event Action<PlaybackSnapshot>? SnapshotAvailable;
     public event Action<PlaybackStatus>? StatusChanged;
+    // Raised with a short reason when the engine could not open the episode.
+    public event Action<string>? PlaybackFailed;
 
     private PlaybackSnapshot _lastSnapshot = PlaybackSnapshot.Empty;
 
@@ -138,7 +140,16 @@ public sealed class PlaybackCoordinator : IDisposable
             }
             catch (Exception ex)
             {
-                Log.Debug(ex, "audio play threw id={Id} url={Url}", ep.Id, ep.AudioUrl);
+                Log.Warning(ex, "audio play threw id={Id} url={Url}", ep.Id, ep.AudioUrl);
+                if (sid != _sid) return;
+
+                // Say why instead of letting the stall watch blame the
+                // network: "slow…" for ever over a 404 sent people looking
+                // at their connection.
+                try { _loadingCts?.Cancel(); } catch { }
+                CancelStallWatch();
+                FireStatus(PlaybackStatus.Failed);
+                try { PlaybackFailed?.Invoke(FailureReason(ex)); } catch { }
             }
         });
 
@@ -361,6 +372,15 @@ public sealed class PlaybackCoordinator : IDisposable
         CancelAndDispose(ref _stallCts);
     }
 
+    internal static string FailureReason(Exception ex) => ex switch
+    {
+        HttpRequestException { StatusCode: { } code } => $"HTTP {(int)code}",
+        HttpRequestException h => h.Message,
+        NotSupportedException => "not an mp3 (the builtin engine plays mp3 only)",
+        FileNotFoundException => "file not found",
+        _ => ex.Message,
+    };
+
     private bool IsEndReached(PlayerState s, out long effLenMs, out long posMs)
     {
         var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
@@ -570,7 +590,9 @@ public enum PlaybackStatus
     Ended = 4,
     // Second stage of the stall watch. Same "still buffering" meaning as
     // SlowNetwork, but late enough that the UI can say so more plainly.
-    VerySlowNetwork = 5
+    VerySlowNetwork = 5,
+    // The engine could not open the episode; PlaybackFailed says why.
+    Failed = 6,
 }
 
 #endregion

@@ -169,6 +169,23 @@ public sealed class UiPlayerPanelTests
         panel.BtnPlayPause.Enabled.Should().BeTrue();
     }
 
+    // When playback failed no snapshot followed to put the label back, and
+    // the button said "loading…" for good next to "can't play: HTTP 404".
+    [Fact]
+    public void Clearing_loading_without_a_snapshot_puts_the_play_label_back()
+    {
+        using var tui = new TuiHarness();
+        var panel = Mount(tui);
+        panel.SetLoading(true, "loading…");
+        tui.Render();
+
+        panel.SetLoading(false);
+        tui.Render();
+
+        tui.ScreenContains("loading").Should().BeFalse();
+        panel.BtnPlayPause.Text.ToString().Should().Contain("Play");
+    }
+
     [Fact]
     public void The_slow_network_message_reaches_the_screen()
     {

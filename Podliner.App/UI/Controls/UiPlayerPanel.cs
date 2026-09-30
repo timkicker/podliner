@@ -148,7 +148,15 @@ internal sealed class UiPlayerPanel : FrameView
         }
         else
         {
-            BtnPlayPause.Enabled = true; // text will be set back by render()
+            BtnPlayPause.Enabled = true;
+            // Normally the next snapshot puts the label back; when playback
+            // failed none follows, and "loading…" stayed for good.
+            BtnPlayPause.Text = _lastKnownPlaying
+                ? isUnicode ? "Pause ⏸" : "Pause ||"
+                : isUnicode ? "Play ⏵"  : "Play >";
+            var t = TimeLabel.Text?.ToString() ?? "";
+            if (t.EndsWith(" ⧖") || t.EndsWith(" …"))
+                TimeLabel.Text = t[..^2];
         }
 
         // force redraw

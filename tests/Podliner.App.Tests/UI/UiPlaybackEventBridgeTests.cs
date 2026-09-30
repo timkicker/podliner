@@ -254,4 +254,21 @@ public sealed class UiPlaybackEventBridgeTests
         // FakeAudioPlayer advertises Speed support.
         f.Ui.SpeedEnabled.Should().BeTrue();
     }
+
+    [Fact]
+    public void A_file_the_engine_cannot_open_says_why_instead_of_slow()
+    {
+        using var f = new Fixture();
+        f.Player.ThrowOnPlay = new HttpRequestException("HTTP 404", null, System.Net.HttpStatusCode.NotFound);
+
+        f.Playback.Play(f.Seed());
+        for (int i = 0; i < 100 && !f.Ui.OsdMessages.Any(m => m.Text.Contains("can't play")); i++)
+        {
+            f.Pump();
+            Thread.Sleep(20);
+        }
+
+        f.Ui.OsdMessages.Should().Contain(m => m.Text.Contains("can't play") && m.Text.Contains("HTTP 404"));
+        f.Ui.LoadingCalls.Last().On.Should().BeFalse();
+    }
 }

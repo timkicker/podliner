@@ -45,6 +45,35 @@ public sealed class PlaybackCoordinatorStatusTests
             },
             _ => { });
 
+    // A file the engine cannot open showed "slow…" for ever, as if the
+    // network were to blame. The built-in engine says why it failed; the
+    // coordinator reports that instead of waiting on a stall that will
+    // never clear.
+    [Theory]
+    [InlineData("http", "HTTP 404")]
+    [InlineData("format", "not an mp3")]
+    public void An_engine_that_cannot_open_the_file_reports_failed_with_the_reason(string kind, string expected)
+    {
+        var (pc, player, seen, feedId) = MakeSetup();
+        using var _pc = pc;
+        player.ThrowOnPlay = kind == "http"
+            ? new HttpRequestException("HTTP 404 for https://example.com/ep.mp3", null, System.Net.HttpStatusCode.NotFound)
+            : new NotSupportedException("builtin engine plays mp3 only, not https://example.com/ep.m4a");
+        string? reason = null;
+        pc.PlaybackFailed += r => reason = r;
+
+        pc.Play(MakeEpisode(feedId));
+        SpinWait.SpinUntil(() => { lock (seen) return seen.Contains(PlaybackStatus.Failed); }, 3000);
+        Thread.Sleep(2500);   // past the point the stall watch would say "slow"
+
+        lock (seen)
+        {
+            seen.Should().Contain(PlaybackStatus.Failed);
+            seen.Should().NotContain(PlaybackStatus.SlowNetwork);
+        }
+        reason.Should().Contain(expected);
+    }
+
     [Fact]
     public void Play_reports_loading_first()
     {
