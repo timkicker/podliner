@@ -3,6 +3,7 @@
 ## Next release
 
 ### Bugs
+- [X] `H` and `L` jumped 10 seconds, not the minute the help and README promise: the arrow key line also caught `(Key)'H'` and `(Key)'L'`
 - [X] Homebrew could not package podliner: its formula test needs one real action with no terminal, no audio engine and no network, and `--opml-import`/`--opml-export` only ran once the TUI was up (chenrui333/homebrew-tap#4952). Without a terminal they now do their work before an engine is looked for, print what happened and exit; import only records the subscriptions and the next start fetches them. `tests/smoke/headless_opml.py` runs them the way the formula would
 - [X] SIGTERM ended podliner without the exit cleanup, so the last save never ran and up to 30s of listening position was lost; SIGHUP from a closed terminal window lost it about half the time. Both now quit the way `q` does. `tests/smoke/signal_save.py` plays 20s and checks the saved position after `q`, SIGTERM and SIGHUP; on 2.1.0 half of the signal runs lost it
 - [X] With no VLC, mpv or ffplay installed podliner died on start with an unhandled `InvalidOperationException`, exit code 134 and a stack trace, the first thing someone saw after installing it without its optional dependencies. It now says what to install and exits with 1. `tests/smoke/no_engine.py` in CI, run before the job installs an engine

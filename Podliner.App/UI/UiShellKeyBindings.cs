@@ -128,8 +128,8 @@ internal static class UiShellKeyBindings
             return true;
         }
 
-        if (key == Key.CursorLeft || key == (Key)('H')) { b.InvokeCommand(":seek -10"); return true; }
-        if (key == Key.CursorRight || key == (Key)('L')) { b.InvokeCommand(":seek +10"); return true; }
+        if (key == Key.CursorLeft) { b.InvokeCommand(":seek -10"); return true; }
+        if (key == Key.CursorRight) { b.InvokeCommand(":seek +10"); return true; }
         if (kv == 'H') { b.InvokeCommand(":seek -60"); return true; }
         if (kv == 'L') { b.InvokeCommand(":seek +60"); return true; }
 

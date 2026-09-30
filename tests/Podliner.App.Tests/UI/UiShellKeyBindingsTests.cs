@@ -103,6 +103,19 @@ public sealed class UiShellKeyBindingsTests
         r.Commands.Should().Equal(":seek -10", ":seek +10");
     }
 
+    // The help and README say H and L jump a minute. The arrow key line
+    // above also caught (Key)'H' and (Key)'L', so they only ever did 10s.
+    [Fact]
+    public void Shift_h_and_l_seek_a_minute()
+    {
+        var r = new Recorder();
+
+        Press(r, 'H');
+        Press(r, 'L');
+
+        r.Commands.Should().Equal(":seek -60", ":seek +60");
+    }
+
     [Theory]
     [InlineData('g', ":seek 0:00")]
     [InlineData('G', ":seek 100%")]
