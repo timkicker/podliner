@@ -20,10 +20,18 @@ PLAY_S = 20
 WANT_MS = 16_000        # near the 20 s played; the last periodic save is up to 30 s old
 
 
+AUDIO_REQUESTS = []
+
+
 def serve(www):
     class Quiet(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *a):
             pass
+
+        def do_GET(self):
+            if self.path.endswith(".mp3"):
+                AUDIO_REQUESTS.append(time.time())
+            super().do_GET()
 
     handler = functools.partial(Quiet, directory=www)
     srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
@@ -105,10 +113,19 @@ def scenario(name, binary, base):
     try:
         pid, fd = start(binary, cfg, [])
         pump(fd, 4)
-        # to the episode list, play the one episode
-        os.write(fd, b"h"); pump(fd, 0.5)
-        os.write(fd, b"l"); pump(fd, 0.5)
-        os.write(fd, b"\r")
+        # to the episode list, play the one episode; a cold first start on
+        # a runner can take longer than that to take keys, so go again
+        # until the audio is actually asked for
+        AUDIO_REQUESTS.clear()
+        for _ in range(4):
+            os.write(fd, b"h"); pump(fd, 0.5)
+            os.write(fd, b"l"); pump(fd, 0.5)
+            os.write(fd, b"\r")
+            end = time.time() + 5
+            while not AUDIO_REQUESTS and time.time() < end:
+                pump(fd, 0.2)
+            if AUDIO_REQUESTS:
+                break
         pump(fd, PLAY_S)
 
         if name == "q":

@@ -117,10 +117,21 @@ def position_s(cfg):
     return max(((e.get("Progress") or {}).get("LastPosMs") or 0) for e in eps) / 1000.0
 
 
-def play_first(fd):
-    os.write(fd, b"h"); pump(fd, 0.5)
-    os.write(fd, b"l"); pump(fd, 0.5)
-    os.write(fd, b"\r")
+def play_first(fd, server=None):
+    # a cold first start on a runner can take longer to take keys; with a
+    # server to watch, go again until the audio is actually asked for
+    seen = len(server.requests) if server else 0
+    for _ in range(4 if server else 1):
+        os.write(fd, b"h"); pump(fd, 0.5)
+        os.write(fd, b"l"); pump(fd, 0.5)
+        os.write(fd, b"\r")
+        if not server:
+            return
+        end = time.time() + 5
+        while len(server.requests) == seen and time.time() < end:
+            pump(fd, 0.2)
+        if len(server.requests) > seen:
+            return
 
 
 def scenario(kind, binary, server, size):
@@ -145,7 +156,7 @@ def scenario(kind, binary, server, size):
 
         pid, fd = start(binary, cfg, [])
         pump(fd, 3)
-        play_first(fd)
+        play_first(fd, server)
         pump(fd, 5)
         os.write(fd, b"L"); pump(fd, 1.5)
         os.write(fd, b"L"); pump(fd, 2)
@@ -157,7 +168,7 @@ def scenario(kind, binary, server, size):
         server.requests.clear()
         pid, fd = start(binary, cfg, [])
         pump(fd, 3)
-        play_first(fd)
+        play_first(fd, server)
         pump(fd, 3)
         os.write(fd, b":"); pump(fd, 0.8)
         os.write(fd, b"seek 45:00\r"); pump(fd, 3)
@@ -167,7 +178,7 @@ def scenario(kind, binary, server, size):
 
         pid, fd = start(binary, cfg, [])
         pump(fd, 3)
-        play_first(fd)
+        play_first(fd, server)
         pump(fd, 4)
         quit(pid, fd)
         second = position_s(cfg)
