@@ -73,6 +73,9 @@ jobs:
       - name: With no audio engine it says what to install
         run: python3 tests/smoke/no_engine.py publish/Podliner.App
 
+      - name: OPML import and export work with no terminal, engine or network
+        run: python3 tests/smoke/headless_opml.py publish/Podliner.App
+
       # everything below needs an engine to start; ffplay is the lightest one,
       # and nothing here plays anything anyway
       - name: Install an audio engine

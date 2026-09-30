@@ -122,6 +122,20 @@ internal class Program
         _feedStore = new FeedStore(_libraryStore);
         _queue     = new QueueService(_libraryStore);
 
+        // No terminal and an OPML flag: do that and exit, before an audio
+        // engine is needed. With a terminal they still run inside the TUI.
+        if (HeadlessOpml.Wants(cli) && !TerminalGate.CanHostTui())
+        {
+            var code = HeadlessOpml.Run(cli, _feedStore, _episodes, _data,
+                () => { AppBridge.SyncFromAppDataToFacade(_data, _app); _app.SaveNow(); },
+                Console.Out, Console.Error);
+            try { _downloader?.Dispose(); } catch { }
+            try { _app?.Dispose(); } catch { }
+            Log.CloseAndFlush();
+            Environment.ExitCode = code;
+            return;
+        }
+
         // apply cli engine preference before creating audio player; unknown
         // values are left at whatever the config stored and surfaced via
         // stderr so the user isn't silently "corrected" to Auto.

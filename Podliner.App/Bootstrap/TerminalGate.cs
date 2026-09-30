@@ -21,5 +21,6 @@ internal static class TerminalGate
 
     public const string NoTerminalMessage =
         "podliner is a terminal application and needs a console to draw on.\n" +
-        "Run it from a terminal, or use --version / --help without one.";
+        "Run it from a terminal. Without one, --version, --help,\n" +
+        "--opml-import <FILE> and --opml-export <FILE> still work.";
 }
