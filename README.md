@@ -20,8 +20,6 @@
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-linux%20%7C%20macOS%20%7C%20windows-666">
 </p>
 
----
-
 ## Table of Contents
 - [Why podliner?](#why-podliner)
 - [Screenshots](#screenshots)
@@ -36,8 +34,6 @@
 - [Contributing](#contributing)
 - [Bug reports, logs & roadmap](#bug-reports-logs--roadmap)
 - [License & credits](#license--credits)
-
----
 
 ## Why podliner? 
 
@@ -56,7 +52,6 @@
 
 > No telemetry. Config lives in your user profile. All local.
 
-
 ## Screenshots
 <p align="center">
   <img src="assets/screens/02-details.png"  alt="Episode-details with shownotes" width="48%"/>
@@ -65,7 +60,6 @@
 <p align="center">
   <img src="assets/screens/01-episodes.png" alt="Episodelist with player" width="70%"/>
 </p>
-
 
 ## Install (stable releases)
 
@@ -94,7 +88,6 @@ irm https://github.com/timkicker/podliner/releases/latest/download/install.ps1 |
 
 > Looking for system-wide install, uninstall, pruning, or checksum verification? See the [FAQ](#faq--troubleshooting).
 
-
 ## Migrate from other players (OPML)
 
 Most podcast players support **OPML** export/import.
@@ -107,8 +100,6 @@ Most podcast players support **OPML** export/import.
 - If you prefer to drop files in place, podliner stores its config here:
   - Linux/macOS: `${XDG_CONFIG_HOME}/podliner` or `~/.config/podliner`
   - Windows: `%APPDATA%\podliner`
-
-
 
 ## gPodder sync
 
@@ -181,7 +172,6 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 - q : quit
 - :w / :wq : save / save & quit
 
-
 ## Configuration & data
 
 - **Config**:
@@ -198,7 +188,6 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 
 > Back up `appsettings.json` and `library.json` to migrate settings and library to another machine.
-
 
 ## Audio engines
 podliner can use different players:
@@ -276,7 +265,6 @@ Add install path to `PATH`:
 ### Reset config
 Quit, then move the config directory away (see [Configuration & data](#configuration--data)), restart to re-initialize.
 
-
 ## Contributing
 I welcome all focused PRs.
 
@@ -304,7 +292,6 @@ When filing an issue, please include:
   Example: `…/podliner/logs/podliner-20250101.log`
 
 Security-sensitive issues: contact tim@kicker.dev.  
-
 
 ## License and credits
 
