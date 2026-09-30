@@ -146,7 +146,7 @@ internal class Program
                 _data.PreferredEngine = parsed;
             else
             {
-                Console.Error.WriteLine($"podliner: unknown --engine '{cli.Engine}' (expected auto|vlc|mpv|ffplay|mediafoundation) — ignoring");
+                Console.Error.WriteLine($"podliner: unknown --engine '{cli.Engine}' (expected auto|vlc|mpv|ffplay|mediafoundation|builtin) — ignoring");
                 cli.Engine = null; // prevent CmdApplier from also dispatching an invalid ":engine" post-UI
             }
         }
@@ -697,7 +697,7 @@ internal class Program
         Console.WriteLine("Options:");
         Console.WriteLine("  --version, -v            Show version and exit");
         Console.WriteLine("  --help, -h               Show this help and exit");
-        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay|mediafoundation>");
+        Console.WriteLine("  --engine <auto|vlc|mpv|ffplay|mediafoundation|builtin>");
         Console.WriteLine("  --theme <base|accent|native|auto|user>");
         Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
         Console.WriteLine("  --search \"<term>\"");

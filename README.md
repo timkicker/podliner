@@ -205,6 +205,7 @@ podliner can use different players:
 - **VLC** (via LibVLC; bundled on Windows via `VideoLAN.LibVLC.Windows`, install `vlc` on Linux/macOS). Preferred: full seek/speed/volume support.
 - **mpv** (IPC socket). Full feature support.
 - **Media Foundation** (Windows only, built-in). No playback speed control.
+- **builtin** (in podliner, nothing to install). Seek, speed and volume; mp3 only. The fallback on macOS, on other systems only with `:engine builtin`.
 - **ffplay** (part of ffmpeg). Fallback only: coarse seek by restart, no live speed/volume.
 
 Install examples:
@@ -215,8 +216,8 @@ Install examples:
 - Windows: VLC is bundled; `mpv`/`ffmpeg` optional via your package manager of choice.
 
 Engine selection & fallback:
-- Default is `auto`: tries VLC first, then an OS-specific fallback chain (Windows: MediaFoundation → mpv → ffplay; Linux/macOS: mpv → ffplay).
-- Switch engines at runtime with `:engine vlc|mpv|ffplay|mediafoundation`.
+- Default is `auto`: tries VLC first, then an OS-specific fallback chain (Windows: MediaFoundation → mpv → ffplay; macOS: mpv → builtin → ffplay; Linux: mpv → ffplay).
+- Switch engines at runtime with `:engine vlc|mpv|ffplay|mediafoundation|builtin`.
 - `:play-source auto|local|remote` controls whether to prefer local downloads or the remote URL.
 
 ## FAQ / Troubleshooting

@@ -186,7 +186,7 @@ Full in-app help: `:h`
 - `:play-source [auto|local|remote|show]`  
   Prefer playback source.  
   Examples: `:play-source`, `:play-source show`, `:play-source local`
-- `:engine [show|help|auto|vlc|mpv|ffplay|mediafoundation|mf|diag]`
+- `:engine [show|help|auto|vlc|mpv|ffplay|mediafoundation|mf|builtin|diag]`
   Select or inspect playback engine. `mf` is a shorthand for `mediafoundation` (Windows only).
   Examples: `:engine`, `:engine mpv`, `:engine mf`, `:engine help`, `:engine diag`
 
@@ -260,6 +260,11 @@ Media Foundation (Windows only)
 - Built in on Windows. No extra install needed.
 - Speed control not supported.
 
+Built-in (builtin)
+- Supports seek, pause, volume, speed, local files, HTTP
+- Part of podliner, nothing to install. mp3 only.
+- Fallback on macOS; on Linux and Windows only when chosen.
+
 FFplay (limited)
 - Supports play and stop only
 - Coarse seek by restart (-ss). Speed and volume only at start.
@@ -271,8 +276,9 @@ FFplay (limited)
 :engine                                     -> show current engine and capabilities
 :engine help                                -> show this guide
 :engine auto                                -> Windows: VLC -> MediaFoundation -> MPV -> FFplay
-                                               Linux/macOS: VLC -> MPV -> FFplay
-:engine vlc|mpv|ffplay|mediafoundation|mf   -> set preference
+                                               macOS: VLC -> MPV -> builtin -> FFplay
+                                               Linux: VLC -> MPV -> FFplay
+:engine vlc|mpv|ffplay|mediafoundation|mf|builtin -> set preference
 :engine diag                                -> show active engine, caps, preference and last used
 ```
 

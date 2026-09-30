@@ -108,6 +108,6 @@ internal sealed class EngineUseCase
             return;
         }
 
-        _ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay|mediafoundation]", 1500);
+        _ui.ShowOsd("usage: :engine [show|help|auto|vlc|mpv|ffplay|mediafoundation|builtin]", 1500);
     }
 }

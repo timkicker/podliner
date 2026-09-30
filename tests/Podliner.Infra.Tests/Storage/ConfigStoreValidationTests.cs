@@ -95,12 +95,13 @@ public sealed class ConfigStoreValidationTests : IDisposable
     // AppBridge persists the engine through ToWire, so anything ConfigStore
     // rejects here silently resets the user's engine choice to "auto" on the
     // next launch.
+    // Every engine, so a new one cannot be left out of ConfigStore's list
+    // again (builtin was, and :engine builtin reset to auto on restart).
+    public static IEnumerable<object[]> AllEngines()
+        => Enum.GetValues<AudioEngine>().Select(e => new object[] { e });
+
     [Theory]
-    [InlineData(AudioEngine.Auto)]
-    [InlineData(AudioEngine.Vlc)]
-    [InlineData(AudioEngine.Mpv)]
-    [InlineData(AudioEngine.Ffplay)]
-    [InlineData(AudioEngine.MediaFoundation)]
+    [MemberData(nameof(AllEngines))]
     public void Engine_preference_survives_a_ToWire_roundtrip(AudioEngine engine)
     {
         var wire = engine.ToWire();

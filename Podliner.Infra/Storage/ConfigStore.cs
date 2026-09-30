@@ -38,7 +38,7 @@ namespace Podliner.Infra.Storage
             // as a legacy alias. A value missing here is silently reset to
             // "auto" on load, which used to wipe a vlc/mediafoundation choice
             // on every launch.
-            c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "vlc", "libvlc", "mpv", "ffplay", "mediafoundation");
+            c.EnginePreference = NormalizeChoice(c.EnginePreference, "auto", "vlc", "libvlc", "mpv", "ffplay", "mediafoundation", "builtin");
             // Must accept every ThemeMode name plus "auto". "User" used to be
             // missing, so the toggle's fourth stop was rewritten to "auto" on
             // load; that happened to still resolve to User, but the stored

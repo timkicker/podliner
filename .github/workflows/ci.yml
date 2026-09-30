@@ -101,3 +101,6 @@ jobs:
 
       - name: The position survives kill and a closed terminal
         run: python3 tests/smoke/signal_save.py publish/Podliner.App
+
+      - name: The built-in engine plays, seeks and resumes
+        run: python3 tests/smoke/builtin_engine.py publish/Podliner.App

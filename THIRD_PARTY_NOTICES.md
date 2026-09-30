@@ -13,6 +13,8 @@ This project uses open-source components. We thank the authors. Below is a non-e
 | LibVLCSharp | LGPL-2.1-or-later | https://github.com/videolan/libvlcsharp | VLC bindings |
 | VideoLAN.LibVLC.Windows | LGPL-2.1-or-later | https://www.nuget.org/packages/VideoLAN.LibVLC.Windows | LibVLC binaries for Windows |
 | NAudio | MIT | https://github.com/naudio/NAudio | Windows audio (Media Foundation) |
+| SoundFlow | MIT | https://github.com/LSXPrime/SoundFlow | Built-in engine (decoding, output) |
+| miniaudio | MIT or Unlicense | https://miniaud.io/ | Native audio library, bundled via SoundFlow |
 | mpv | GPL-2.0-or-later | https://mpv.io/ | External player (optional) |
 | FFmpeg / ffplay | LGPL/GPL (per build options) | https://ffmpeg.org/legal.html | External tools (optional) |
 | VLC / LibVLC | LGPL-2.1-or-later | https://www.videolan.org/legal.html | Engine used via LibVLCSharp |

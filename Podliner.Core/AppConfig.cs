@@ -7,7 +7,7 @@
         public int SchemaVersion { get; set; } = 1;
 
         // playback and engine
-        public string EnginePreference { get; set; } = "auto"; // auto, libvlc, mpv, ffplay
+        public string EnginePreference { get; set; } = "auto"; // auto, libvlc, mpv, ffplay, mediafoundation, builtin
         public int    Volume0_100     { get; set; } = 65;      // range 0..100
         public double Speed           { get; set; } = 1.0;     // typically 0.5 to 3.0
 

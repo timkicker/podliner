@@ -28,7 +28,7 @@ public static class AudioPlayerFactory
         string why = "";
 
         // Ordering lives in EngineSelectionPolicy; this loop only probes.
-        var candidates = EngineSelectionPolicy.CandidateOrder(pref, isWin);
+        var candidates = EngineSelectionPolicy.CandidateOrder(pref, isWin, isMac);
         Log.Information("[engine-detect] candidate order: {Order}",
             string.Join(" → ", candidates.Select(c => c.ToWire())));
 
@@ -40,6 +40,7 @@ public static class AudioPlayerFactory
                 AudioEngine.Mpv             => TryMpv(out chosen!, out why),
                 AudioEngine.Ffplay          => TryFfp(out chosen!, out why),
                 AudioEngine.MediaFoundation => TryMf(out chosen!,  out why),
+                AudioEngine.Builtin         => TryBuiltin(out chosen!, out why),
                 _                           => false,
             };
 
@@ -143,6 +144,26 @@ public static class AudioPlayerFactory
         {
             reason = $"init error: {Short(ex)}";
             Log.Warning("[engine-detect] probe fail: mpv ({Reason})", reason);
+            return false;
+        }
+    }
+
+    private static bool TryBuiltin(out IAudioPlayer p, out string reason)
+    {
+        Log.Information("[engine-detect] probe start: builtin");
+        try
+        {
+            p = new BuiltinAudioPlayer();
+            reason = "ok";
+            Log.Information("[engine-detect] probe ok: builtin");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // no sound device, or the native library would not load
+            p = null!;
+            reason = $"init failed: {Short(ex)}";
+            Log.Warning("[engine-detect] probe fail: builtin ({Reason})", reason);
             return false;
         }
     }

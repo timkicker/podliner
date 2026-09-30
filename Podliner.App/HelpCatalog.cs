@@ -258,7 +258,7 @@ namespace Podliner.App
                 Category: HelpCategory.NetworkEngine, Rank: 56),
 
             new(":engine", "Select or inspect playback engine.",
-                "[show|help|auto|vlc|mpv|ffplay|mediafoundation|mf]",
+                "[show|help|auto|vlc|mpv|ffplay|mediafoundation|mf|builtin]",
                 Examples: new[]{ ":engine", ":engine mpv", ":engine mediafoundation", ":engine mf", ":engine help", ":engine diag" },
                 Category: HelpCategory.NetworkEngine, Rank: 48),
 
@@ -355,6 +355,10 @@ namespace Podliner.App
   - Supports: seek, pause, volume, speed, local files, HTTP
   - Requires 'mpv' in PATH. Uses IPC socket. Very capable.
 
+• Built-in (builtin)
+  - Supports: seek, pause, volume, speed, local files, HTTP
+  - Nothing to install. mp3 only. Fallback on macOS; elsewhere only when chosen.
+
 • FFplay (ffplay, limited)
   - Supports: play/stop; *coarse seek* by restart (-ss). Speed/volume only at start.
   - Live pause/seek/speed/volume not supported.
@@ -364,7 +368,7 @@ Switching engines
   :engine                 → show current engine & capabilities
   :engine help            → show this guide
   :engine auto            → prefer VLC, Media Foundation (Windows), MPV, FFplay
-  :engine vlc|mpv|ffplay|mediafoundation|mf  → set preference
+  :engine vlc|mpv|ffplay|mediafoundation|mf|builtin  → set preference
   :engine diag            → show active engine, caps, preference & last-used
 
 Notes

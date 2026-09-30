@@ -9,10 +9,11 @@ public enum AudioEngine
     Mpv,
     Ffplay,
     MediaFoundation,
+    Builtin,        // in process, nothing to install (SoundFlow/miniaudio)
 }
 
 // Wire-format conversion for AudioEngine. We persist engine preferences
-// as lower-case strings ("auto", "vlc", "mpv", "ffplay", "mediafoundation")
+// as lower-case strings ("auto", "vlc", "mpv", "ffplay", "mediafoundation", "builtin")
 // in appsettings.json so the format is both human-readable and stable
 // across enum renames. FromWire normalizes vendor aliases ("libvlc" → vlc,
 // "mf" → mediafoundation) and empty/null → Auto so a missing config
@@ -28,6 +29,7 @@ public static class AudioEngineExt
             "mpv"                    => AudioEngine.Mpv,
             "ffplay"                 => AudioEngine.Ffplay,
             "mediafoundation" or "mf"=> AudioEngine.MediaFoundation,
+            "builtin"                => AudioEngine.Builtin,
             _                        => AudioEngine.Auto,
         };
     }
@@ -38,6 +40,7 @@ public static class AudioEngineExt
         AudioEngine.Mpv             => "mpv",
         AudioEngine.Ffplay          => "ffplay",
         AudioEngine.MediaFoundation => "mediafoundation",
+        AudioEngine.Builtin         => "builtin",
         _                           => "auto",
     };
 }

@@ -16,8 +16,10 @@ internal static class EngineSelectionPolicy
     //   VLC   — best capabilities everywhere, bundled on Windows.
     //   MF    — Windows only, native, but no rate control.
     //   mpv   — full features over an IPC socket.
+    //   builtin — macOS only unless asked for: in process, nothing to
+    //           install, mp3 only (#3).
     //   ffplay— degraded last resort: coarse seek, no live speed or volume.
-    public static IReadOnlyList<AudioEngine> CandidateOrder(AudioEngine preferred, bool isWindows)
+    public static IReadOnlyList<AudioEngine> CandidateOrder(AudioEngine preferred, bool isWindows, bool isMac = false)
     {
         var order = new List<AudioEngine>();
 
@@ -33,6 +35,7 @@ internal static class EngineSelectionPolicy
         Add(AudioEngine.Vlc);
         if (isWindows) Add(AudioEngine.MediaFoundation);
         Add(AudioEngine.Mpv);
+        if (isMac) Add(AudioEngine.Builtin);
         Add(AudioEngine.Ffplay);
 
         return order;

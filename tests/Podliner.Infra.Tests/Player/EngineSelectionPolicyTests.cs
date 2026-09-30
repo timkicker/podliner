@@ -17,6 +17,9 @@ public sealed class EngineSelectionPolicyTests
     private static IReadOnlyList<AudioEngine> Windows(AudioEngine pref = AudioEngine.Auto)
         => EngineSelectionPolicy.CandidateOrder(pref, isWindows: true);
 
+    private static IReadOnlyList<AudioEngine> Mac(AudioEngine pref = AudioEngine.Auto)
+        => EngineSelectionPolicy.CandidateOrder(pref, isWindows: false, isMac: true);
+
     // ── the auto chain ──────────────────────────────────────────────────────
 
     [Fact]
@@ -33,6 +36,22 @@ public sealed class EngineSelectionPolicyTests
     {
         Linux().Last().Should().Be(AudioEngine.Ffplay);
         Windows().Last().Should().Be(AudioEngine.Ffplay);
+    }
+
+    // #3: a Mac without VLC or mpv had nothing that could pause, seek or
+    // change speed. The built-in engine needs nothing installed and comes
+    // before ffplay, which can do none of that live.
+    [Fact]
+    public void Auto_on_mac_falls_back_to_the_builtin_engine_before_ffplay()
+        => Mac().Should().Equal(AudioEngine.Vlc, AudioEngine.Mpv, AudioEngine.Builtin, AudioEngine.Ffplay);
+
+    [Fact]
+    public void Linux_and_windows_only_use_the_builtin_engine_when_asked()
+    {
+        Linux().Should().NotContain(AudioEngine.Builtin);
+        Windows().Should().NotContain(AudioEngine.Builtin);
+        Linux(AudioEngine.Builtin).First().Should().Be(AudioEngine.Builtin);
+        Windows(AudioEngine.Builtin).First().Should().Be(AudioEngine.Builtin);
     }
 
     // ── preference wins ─────────────────────────────────────────────────────
@@ -79,6 +98,7 @@ public sealed class EngineSelectionPolicyTests
         {
             Linux(pref).Should().OnlyHaveUniqueItems();
             Windows(pref).Should().OnlyHaveUniqueItems();
+            Mac(pref).Should().OnlyHaveUniqueItems();
         }
     }
 
@@ -140,7 +160,8 @@ public sealed class EngineSelectionPolicyTests
 
         foreach (var e in new[]
                  {
-                     AudioEngine.Auto, AudioEngine.Vlc, AudioEngine.Mpv, AudioEngine.MediaFoundation
+                     AudioEngine.Auto, AudioEngine.Vlc, AudioEngine.Mpv, AudioEngine.MediaFoundation,
+                     AudioEngine.Builtin
                  })
             EngineSelectionPolicy.IsDegraded(e).Should().BeFalse();
     }
