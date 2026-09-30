@@ -38,7 +38,11 @@ jobs:
       - name: Build
         run: dotnet build --no-restore -c Release
 
+      # a slow windows runner once took more than vstest's 90s just to start
+      # the test host, before a single test ran
       - name: Test
+        env:
+          VSTEST_CONNECTION_TIMEOUT: "300"
         run: dotnet test --no-build -c Release --logger "trx;LogFileName=test-results.trx"
 
       - name: Upload test results
