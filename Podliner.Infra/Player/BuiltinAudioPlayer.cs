@@ -201,8 +201,10 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         // Raised on the audio thread inside the guard's lock; taking _gate
         // there could deadlock with a thread that holds _gate and waits for
         // that lock.
-        player.PlaybackEnded += (_, _) => ThreadPool.QueueUserWorkItem(_ => OnEnded(gen));
-        var guard = new GuardedComponent(_engine, _format, player, ex => OnFault(gen, player, ex));
+        player.PlaybackEnded += (_, _) => Detached(() => OnEnded(gen));
+        var start = _segmentStart;
+        var guard = new GuardedComponent(_engine, _format, player, ex => OnFault(gen, player, ex),
+            afterBuffer: () => { if (State.IsPlaying) State.Position = start + TimeSpan.FromSeconds(player.Time); });
         if (State.IsPlaying) player.Play();
         _device.MasterMixer.AddComponent(guard);
         _player = player;
@@ -234,6 +236,16 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         }
         Raise();
     }
+
+    // Runs rare work off the audio thread on a thread of its own: the pool
+    // can be starved for seconds on a busy machine (seen on the Windows
+    // runner), and the end of an episode must not wait for it.
+    internal static void Detached(Action work)
+        => new Thread(() =>
+        {
+            try { work(); }
+            catch (Exception ex) { Log.Warning(ex, "builtin/event handler threw"); }
+        }) { IsBackground = true, Name = "builtin-events" }.Start();
 
     // tests: what the guard does when the audio thread throws
     internal void FaultAudioThread(Exception ex)
@@ -316,13 +328,18 @@ internal sealed class GuardedComponent : SoundComponent
 {
     readonly SoundComponent _inner;
     readonly Action<Exception> _onFault;
+    readonly Action? _afterBuffer;
     int _faulted;
 
-    public GuardedComponent(SfEngine engine, AudioFormat format, SoundComponent inner, Action<Exception> onFault)
+    // afterBuffer runs on the audio thread after every buffer; the engine
+    // keeps its position there, where a busy thread pool cannot hold it up.
+    public GuardedComponent(SfEngine engine, AudioFormat format, SoundComponent inner,
+                            Action<Exception> onFault, Action? afterBuffer = null)
         : base(engine, format)
     {
         _inner = inner;
         _onFault = onFault;
+        _afterBuffer = afterBuffer;
     }
 
     public object Sync { get; } = new();
@@ -332,7 +349,11 @@ internal sealed class GuardedComponent : SoundComponent
         if (Volatile.Read(ref _faulted) == 1) { buffer.Clear(); return; }
         try
         {
-            lock (Sync) _inner.Process(buffer, channels);
+            lock (Sync)
+            {
+                _inner.Process(buffer, channels);
+                _afterBuffer?.Invoke();
+            }
         }
         catch (Exception ex)
         {
@@ -344,7 +365,7 @@ internal sealed class GuardedComponent : SoundComponent
     internal void Fault(Exception ex)
     {
         if (Interlocked.Exchange(ref _faulted, 1) == 0)
-            ThreadPool.QueueUserWorkItem(_ => _onFault(ex));
+            BuiltinAudioPlayer.Detached(() => _onFault(ex));
     }
 }
 
