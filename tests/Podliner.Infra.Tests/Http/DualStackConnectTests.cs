@@ -54,8 +54,11 @@ public sealed class DualStackConnectTests
         var sw = Stopwatch.StartNew();
         using var s = await DualStackConnect.ConnectAsync(new[] { V6, V4 }, f.Connect, Stagger, default);
 
+        // v6 never connects: coming back at all means v4 won. The bound only
+        // leaves room for a starved thread pool (3.5s seen on two cores).
         s.AddressFamily.Should().Be(AddressFamily.InterNetwork);
-        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15));
+        SpinWait.SpinUntil(() => { lock (f.Cancelled) return f.Cancelled.Contains(V6); }, 5000);
         f.Cancelled.Should().Contain(V6, "the losing attempt is called off");
     }
 
@@ -65,7 +68,8 @@ public sealed class DualStackConnectTests
         var f = new FakeConnect();
         f.Delay[V6] = TimeSpan.FromMilliseconds(5);
 
-        using var s = await DualStackConnect.ConnectAsync(new[] { V6, V4 }, f.Connect, Stagger, default);
+        // a stagger far above the 5 ms, so a busy machine cannot start v4
+        using var s = await DualStackConnect.ConnectAsync(new[] { V6, V4 }, f.Connect, TimeSpan.FromSeconds(2), default);
 
         s.AddressFamily.Should().Be(AddressFamily.InterNetworkV6);
         f.Started.Should().Equal(V6);
@@ -79,10 +83,10 @@ public sealed class DualStackConnectTests
         f.Delay[V4] = TimeSpan.FromMilliseconds(5);
 
         var sw = Stopwatch.StartNew();
-        using var s = await DualStackConnect.ConnectAsync(new[] { V6, V4 }, f.Connect, TimeSpan.FromSeconds(5), default);
+        using var s = await DualStackConnect.ConnectAsync(new[] { V6, V4 }, f.Connect, TimeSpan.FromSeconds(60), default);
 
         s.AddressFamily.Should().Be(AddressFamily.InterNetwork);
-        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1), "a refusal does not wait for the stagger");
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15), "a refusal does not wait for the 60s stagger");
     }
 
     [Fact]
