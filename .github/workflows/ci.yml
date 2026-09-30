@@ -86,3 +86,11 @@ jobs:
 
       - name: Typing after a resize still reaches the command box
         run: python3 tests/smoke/resize_input.py publish/Podliner.App
+
+      # last, so the steps above keep running on ffplay alone; this one needs
+      # an engine that reports the position
+      - name: Install mpv
+        run: sudo apt-get install -y --no-install-recommends mpv
+
+      - name: The position survives kill and a closed terminal
+        run: python3 tests/smoke/signal_save.py publish/Podliner.App

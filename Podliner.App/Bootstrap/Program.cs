@@ -462,6 +462,12 @@ internal class Program
                 catch (Exception ex) { Log.Warning(ex, "gPodder auto-sync startup failed"); }
             });
 
+        // kill and a shutdown send SIGTERM, a closed terminal window SIGHUP.
+        // SIGTERM ended the process without the cleanup below, so up to 30s
+        // of listening position was lost. Both now quit the way q does.
+        using var onTerm = OnSignalQuit(PosixSignal.SIGTERM);
+        using var onHup  = OnSignalQuit(PosixSignal.SIGHUP);
+
         try { Application.Run(); }
         finally
         {
@@ -613,6 +619,29 @@ internal class Program
             catch (Exception ex) { tcs.TrySetException(ex); }
         });
         return tcs.Task;
+    }
+
+    // Turns the signal into a quit on the main loop, so the exit cleanup and
+    // its final save run. Without a running loop the runtime's default
+    // (terminate) stays in place.
+    private static PosixSignalRegistration? OnSignalQuit(PosixSignal signal)
+    {
+        try
+        {
+            return PosixSignalRegistration.Create(signal, ctx =>
+            {
+                var loop = Application.MainLoop;
+                if (loop == null || UiLoopStopped) return;
+                ctx.Cancel = true;
+                Log.Information("signal {Signal}, quitting", ctx.Signal);
+                loop.Invoke(() => _ui?.RequestQuit());
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "no handler for {Signal}", signal);
+            return null;
+        }
     }
 
     // resolve configuration directory
