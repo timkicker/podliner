@@ -130,6 +130,50 @@ public sealed class BuiltinAudioPlayerTests
         (p.State.Position - from).TotalSeconds.Should().BeInRange(3.0, 5.0);
     }
 
+    // SoundFlow 1.4.1 rebuilds its time stretcher's buffers inside
+    // SetSpeed, on the caller's thread, while the audio thread may be using
+    // them; the exception that follows is unhandled on the audio thread and
+    // ends the process (seen on the macOS runner: "count ('-7168') must be a
+    // non-negative value" in WsolaTimeStretcher.Process).
+    [Fact]
+    public void Changing_speed_over_and_over_while_playing_does_not_bring_it_down()
+    {
+        var (p, _) = Start(Hour);
+        using var _p = p;
+        Wait(0.5);
+
+        var speeds = new[] { 1.0, 1.5, 2.0, 0.75, 1.25, 3.0, 0.5 };
+        var until = DateTime.UtcNow.AddSeconds(4);
+        for (int i = 0; DateTime.UtcNow < until; i++)
+        {
+            p.SetSpeed(speeds[i % speeds.Length]);
+            if (i % 50 == 0) p.SeekRelative(TimeSpan.FromSeconds(i % 100 == 0 ? 5 : -5));
+            Thread.Sleep(2);
+        }
+        p.SetSpeed(1.0);
+        var at = p.State.Position;
+        Wait(1);
+
+        p.State.IsPlaying.Should().BeTrue();
+        p.State.Position.Should().BeGreaterThan(at + TimeSpan.FromMilliseconds(500), "it still plays");
+    }
+
+    [Fact]
+    public void After_the_audio_thread_throws_playback_goes_on_from_where_it_was()
+    {
+        var (p, _) = Start(Hour, startMs: 600_000);
+        using var _p = p;
+        Wait(1.5);
+        var before = p.State.Position;
+
+        p.FaultAudioThread(new ArgumentOutOfRangeException("count"));
+        Wait(1.5);
+
+        p.State.IsPlaying.Should().BeTrue();
+        p.State.Position.Should().BeGreaterThan(before + TimeSpan.FromMilliseconds(700));
+        p.State.Position.Should().BeLessThan(before + TimeSpan.FromSeconds(4));
+    }
+
     [Fact]
     public void The_end_stops_playback_at_the_full_length()
     {

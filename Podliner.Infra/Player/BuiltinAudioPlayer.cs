@@ -53,6 +53,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
     Stream? _source;
     Mp3Info? _info;
     SoundPlayer? _player;
+    GuardedComponent? _guard;       // what the mixer plays; wraps _player
     Mp3SegmentProvider? _provider;
     TimeSpan _segmentStart;
     int _generation;
@@ -112,7 +113,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         lock (_gate)
         {
             if (_player == null) return;
-            if (State.IsPlaying) _player.Pause(); else _player.Play();
+            lock (_guard!.Sync) { if (State.IsPlaying) _player.Pause(); else _player.Play(); }
             State.IsPlaying = !State.IsPlaying;
         }
         Raise();
@@ -132,7 +133,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
             if (_player != null && position >= now && position - now <= DecodeOverLimit)
             {
                 // cheap: the decoder reads on to it
-                _player.Seek(position - _segmentStart);
+                lock (_guard!.Sync) _player.Seek(position - _segmentStart);
             }
             else
             {
@@ -148,7 +149,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         lock (_gate)
         {
             State.Volume0_100 = Math.Clamp(vol0to100, 0, 100);
-            if (_player != null) _player.Volume = State.Volume0_100 / 100f;
+            if (_player != null) lock (_guard!.Sync) _player.Volume = State.Volume0_100 / 100f;
         }
         Raise();
     }
@@ -158,7 +159,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         lock (_gate)
         {
             State.Speed = Math.Clamp(speed, 0.5, 3.0);
-            if (_player != null) _player.PlaybackSpeed = (float)State.Speed;
+            if (_player != null) lock (_guard!.Sync) _player.PlaybackSpeed = (float)State.Speed;
         }
         Raise();
     }
@@ -197,11 +198,30 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
             PlaybackSpeed = (float)State.Speed,
         };
         int gen = _generation;
-        player.PlaybackEnded += (_, _) => OnEnded(gen);
-        _device.MasterMixer.AddComponent(player);
+        // Raised on the audio thread inside the guard's lock; taking _gate
+        // there could deadlock with a thread that holds _gate and waits for
+        // that lock.
+        player.PlaybackEnded += (_, _) => ThreadPool.QueueUserWorkItem(_ => OnEnded(gen));
+        var guard = new GuardedComponent(_engine, _format, player, ex => OnFault(gen, player, ex));
         if (State.IsPlaying) player.Play();
+        _device.MasterMixer.AddComponent(guard);
         _player = player;
+        _guard = guard;
         State.Position = _segmentStart;
+    }
+
+    // The audio thread threw and the guard went quiet: start again where
+    // playback was, with a fresh decoder and player.
+    void OnFault(int gen, SoundPlayer player, Exception ex)
+    {
+        lock (_gate)
+        {
+            if (gen != _generation || player != _player) return;
+            Log.Warning(ex, "builtin/audio thread threw at {Pos}, restarting the segment", PositionLocked());
+            try { StartSegmentLocked(PositionLocked()); }
+            catch (Exception again) { Log.Warning(again, "builtin/restart failed"); State.IsPlaying = false; }
+        }
+        Raise();
     }
 
     void OnEnded(int gen)
@@ -213,6 +233,12 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
             if (State.Length is { } len) State.Position = len;
         }
         Raise();
+    }
+
+    // tests: what the guard does when the audio thread throws
+    internal void FaultAudioThread(Exception ex)
+    {
+        lock (_gate) _guard?.Fault(ex);
     }
 
     TimeSpan PositionLocked()
@@ -230,14 +256,19 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
 
     void DropSegmentLocked()
     {
-        if (_player != null)
+        if (_guard != null)
         {
-            try { _player.Stop(); } catch { }
-            try { _device.MasterMixer.RemoveComponent(_player); } catch { }
-            try { _player.Dispose(); } catch { }
+            try { _device.MasterMixer.RemoveComponent(_guard); } catch { }
+            lock (_guard.Sync)
+            {
+                try { _player?.Stop(); } catch { }
+                try { _player?.Dispose(); } catch { }
+                try { _provider?.Dispose(); } catch { }
+            }
+            try { _guard.Dispose(); } catch { }
         }
-        try { _provider?.Dispose(); } catch { }
         _player = null;
+        _guard = null;
         _provider = null;
     }
 
@@ -270,6 +301,50 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
         try { _device.Dispose(); } catch { }
         try { _engine.Dispose(); } catch { }
         _http.Dispose();
+    }
+}
+
+// Plays another component and keeps the audio thread alive.
+//
+// An exception on the audio thread is unhandled and ends the process. The
+// macOS runner saw one from inside SoundFlow 1.4.1's time stretcher, whose
+// SetSpeed rebuilds buffers on the caller's thread while the audio thread
+// may be using them. Everything that changes the inner player happens under
+// Sync, which the audio thread holds for one buffer at a time; anything that
+// still throws becomes silence and one report, and the engine starts over.
+internal sealed class GuardedComponent : SoundComponent
+{
+    readonly SoundComponent _inner;
+    readonly Action<Exception> _onFault;
+    int _faulted;
+
+    public GuardedComponent(SfEngine engine, AudioFormat format, SoundComponent inner, Action<Exception> onFault)
+        : base(engine, format)
+    {
+        _inner = inner;
+        _onFault = onFault;
+    }
+
+    public object Sync { get; } = new();
+
+    protected override void GenerateAudio(Span<float> buffer, int channels)
+    {
+        if (Volatile.Read(ref _faulted) == 1) { buffer.Clear(); return; }
+        try
+        {
+            lock (Sync) _inner.Process(buffer, channels);
+        }
+        catch (Exception ex)
+        {
+            buffer.Clear();
+            Fault(ex);
+        }
+    }
+
+    internal void Fault(Exception ex)
+    {
+        if (Interlocked.Exchange(ref _faulted, 1) == 0)
+            ThreadPool.QueueUserWorkItem(_ => _onFault(ex));
     }
 }
 
