@@ -64,7 +64,7 @@ public sealed class BuiltinAudioPlayer : IAudioPlayer
     // nothing; tests and machines without a sound card.
     internal BuiltinAudioPlayer(bool silent, HttpClient? http = null)
     {
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        _http = http ?? new HttpClient(Podliner.Infra.Http.DualStackConnect.Handler()) { Timeout = TimeSpan.FromSeconds(30) };
         // SoundFlow 1.4.1 hands its backend enum to miniaudio unchanged,
         // but numbers it from 1 where miniaudio starts at 0; 14 is
         // miniaudio's ma_backend_null (SoundFlow's own Null misses it).

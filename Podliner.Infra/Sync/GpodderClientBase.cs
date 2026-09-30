@@ -30,12 +30,12 @@ public abstract class GpodderClientBase : IGpodderClient
 
     protected GpodderClientBase()
     {
-        var handler = new HttpClientHandler
+        var handler = Podliner.Infra.Http.DualStackConnect.Handler(h =>
         {
-            CookieContainer = _cookies,
-            UseCookies = true,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-        };
+            h.CookieContainer = _cookies;
+            h.UseCookies = true;
+            h.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+        });
         Http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
     }
 

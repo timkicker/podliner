@@ -59,15 +59,15 @@ namespace Podliner.Infra.Download
             _lib = lib ?? throw new ArgumentNullException(nameof(lib));
             _indexStore = new DownloadIndexStore(configDir);
 
-            var handler = new SocketsHttpHandler
+            var handler = Podliner.Infra.Http.DualStackConnect.Handler(h =>
             {
-                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-                ConnectTimeout = TimeSpan.FromMilliseconds(CONNECT_TIMEOUT_MS),
-                AllowAutoRedirect = true,
-                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-                MaxConnectionsPerServer = 6,
-                EnableMultipleHttp2Connections = true
-            };
+                h.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli;
+                h.ConnectTimeout = TimeSpan.FromMilliseconds(CONNECT_TIMEOUT_MS);
+                h.AllowAutoRedirect = true;
+                h.PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2);
+                h.MaxConnectionsPerServer = 6;
+                h.EnableMultipleHttp2Connections = true;
+            });
 
             _http = new HttpClient(handler, disposeHandler: true)
             {

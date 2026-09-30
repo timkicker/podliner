@@ -229,8 +229,6 @@ public sealed class ChaptersFetcher : IDisposable
         try { _http.Dispose(); } catch { /* best effort */ }
     }
 
-    private static HttpClientHandler BuildDefaultHandler() => new()
-    {
-        AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
-    };
+    private static HttpMessageHandler BuildDefaultHandler() => Podliner.Infra.Http.DualStackConnect.Handler(h =>
+        h.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli);
 }

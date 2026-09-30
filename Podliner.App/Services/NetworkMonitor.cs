@@ -15,7 +15,7 @@ sealed class NetworkMonitor
     readonly IEpisodeStore _episodes;
     readonly ViewUseCase _view;
 
-    static readonly HttpClient _probeHttp = new() { Timeout = TimeSpan.FromMilliseconds(1200) };
+    static readonly HttpClient _probeHttp = new(Podliner.Infra.Http.DualStackConnect.Handler()) { Timeout = TimeSpan.FromMilliseconds(1200) };
 
     volatile bool _probeRunning = false;
 
