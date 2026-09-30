@@ -233,6 +233,55 @@ public sealed class UiComposerWireUiTests
         f.B.Player.LastPlayedUrl.Should().Be(ep.AudioUrl);
     }
 
+    // Auto-advance had been dead since October 2025: the coordinator still
+    // picked the next episode at the end of one, but the handler that played
+    // it was lost in a refactor, so playback just stopped.
+    private static (Episode first, Episode next) PlayToTheEnd(Fixture f)
+    {
+        var first = f.Seed("First");
+        var next = new Episode
+        {
+            Id = Guid.NewGuid(), FeedId = FeedId, Title = "Next",
+            AudioUrl = "https://ex.test/next.mp3",
+            PubDate = first.PubDate!.Value.AddDays(-1),
+        };
+        f.B.Episodes.Seed(next);
+        f.Ui.SelectedEpisode = first;
+        f.B.Data.NetworkOnline = true;
+        f.Ui.RaisePlaySelected();
+        SettlePlayback(f);
+
+        var st = f.B.Player.State;
+        st.Length = TimeSpan.FromMinutes(30);
+        st.Position = TimeSpan.FromMinutes(30);
+        st.IsPlaying = false;
+        f.B.Playback.PersistProgressTick(st, _ => { });
+        for (int i = 0; i < 50 && f.B.Player.PlayCalls.Count < 2; i++) { f.Tui.Pump(); Thread.Sleep(10); }
+        return (first, next);
+    }
+
+    [Fact]
+    public void The_end_of_an_episode_plays_the_next_one()
+    {
+        using var f = new Fixture();
+
+        var (_, next) = PlayToTheEnd(f);
+
+        f.B.Player.LastPlayedUrl.Should().Be(next.AudioUrl);
+        f.Ui.NowPlayingId.Should().Be(next.Id);
+    }
+
+    [Fact]
+    public void With_auto_advance_off_the_end_is_the_end()
+    {
+        using var f = new Fixture();
+        f.B.Data.AutoAdvance = false;
+
+        PlayToTheEnd(f);
+
+        f.B.Player.PlayCalls.Should().HaveCount(1);
+    }
+
     [Fact]
     public void Playing_marks_the_episode_as_now_playing()
     {

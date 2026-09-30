@@ -14,53 +14,78 @@ internal static class UiPlaybackWiring
     public static void Wire(AppServices ctx, Func<Task> save)
     {
         WirePlaySelected(ctx, save);
+        WireAutoAdvance(ctx, save);
         WireTogglePlayed(ctx, save);
+    }
+
+    // At the end of an episode the coordinator picks the next one (queue
+    // first, then the feed); this plays it the way Enter would. The handler
+    // was lost in a refactor in October 2025 and playback just stopped.
+    static void WireAutoAdvance(AppServices ctx, Func<Task> save)
+    {
+        if (ctx.Playback == null) return;
+        ctx.Playback.AutoAdvanceSuggested += next =>
+        {
+            void Go()
+            {
+                try { PlayEpisode(ctx, next, save); }
+                catch (Exception ex) { Serilog.Log.Warning(ex, "auto-advance failed id={Id}", next.Id); }
+            }
+            var loop = Application.MainLoop;
+            if (loop != null) loop.Invoke(Go); else Go();
+        };
     }
 
     static void WirePlaySelected(AppServices ctx, Func<Task> save)
     {
         var ui = ctx.Ui;
-        var data = ctx.Data;
-        var app = ctx.App;
-        var playback = ctx.Playback;
-        var audioPlayer = ctx.Player;
         var episodeStore = ctx.Episodes;
         var queueService = ctx.Queue;
 
         ui.PlaySelected += () =>
         {
             var ep = ui?.GetSelectedEpisode();
-            if (ep == null || audioPlayer == null || playback == null || ui == null) return;
-
-            ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
-            _ = save();
-
+            if (ep == null || ui == null) return;
             TrimQueueIfViewingQueue(ui, episodeStore, queueService, ep, save);
-
-            string? localPath = app!.TryGetLocalPath(ep.Id, out var lp) ? lp : null;
-            bool isRemote = IsRemote(localPath, ep);
-
-            ShowLoading(ui, audioPlayer, isRemote);
-
-            var source = Services.PlaySourceResolver.Resolve(data, localPath, ep);
-            if (source == null)
-            {
-                // Name the actual reason. Blaming the network while online
-                // sends the user looking in the wrong place; with
-                // ":play-source local" the setting is what blocks playback.
-                ui.SetPlayerLoading(false);
-                var mode = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
-                var why =
-                    mode == "local"       ? "play-source is local, but this episode isn't downloaded"
-                    : !data.NetworkOnline ? "offline: not downloaded"
-                    :                       "no playable source";
-                ui.ShowOsd(why, 1500);
-                return;
-            }
-
-            StartPlayback(playback, ep, source, ui, data);
-            ArmLocalFileFallbackIfNeeded(audioPlayer, playback, ep, localPath, ui);
+            PlayEpisode(ctx, ep, save);
         };
+    }
+
+    static void PlayEpisode(AppServices ctx, Episode ep, Func<Task> save)
+    {
+        var ui = ctx.Ui;
+        var data = ctx.Data;
+        var app = ctx.App;
+        var playback = ctx.Playback;
+        var audioPlayer = ctx.Player;
+        if (audioPlayer == null || playback == null || ui == null) return;
+
+        ep.Progress.LastPlayedAt = DateTimeOffset.UtcNow;
+        _ = save();
+
+        string? localPath = app!.TryGetLocalPath(ep.Id, out var lp) ? lp : null;
+        bool isRemote = IsRemote(localPath, ep);
+
+        ShowLoading(ui, audioPlayer, isRemote);
+
+        var source = Services.PlaySourceResolver.Resolve(data, localPath, ep);
+        if (source == null)
+        {
+            // Name the actual reason. Blaming the network while online
+            // sends the user looking in the wrong place; with
+            // ":play-source local" the setting is what blocks playback.
+            ui.SetPlayerLoading(false);
+            var mode = (data.PlaySource ?? "auto").Trim().ToLowerInvariant();
+            var why =
+                mode == "local"       ? "play-source is local, but this episode isn't downloaded"
+                : !data.NetworkOnline ? "offline: not downloaded"
+                :                       "no playable source";
+            ui.ShowOsd(why, 1500);
+            return;
+        }
+
+        StartPlayback(playback, ep, source, ui, data);
+        ArmLocalFileFallbackIfNeeded(audioPlayer, playback, ep, localPath, ui);
     }
 
     static void WireTogglePlayed(AppServices ctx, Func<Task> save)
