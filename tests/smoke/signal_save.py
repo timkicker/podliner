@@ -13,7 +13,7 @@ given way and reads the position back from library.json.
 
 usage: signal_save.py <binary> [--only NAME...]
 """
-import argparse, fcntl, functools, http.server, json, os, pty, select, shutil, signal
+import argparse, fcntl, glob, functools, http.server, json, os, pty, select, shutil, signal
 import socketserver, struct, subprocess, sys, tempfile, termios, threading, time
 
 PLAY_S = 20
@@ -120,6 +120,10 @@ def scenario(name, binary, base):
         eps = library(cfg)["Episodes"]
         pos = max((e.get("Progress") or {}).get("LastPosMs") or 0 for e in eps)
         ok = gone and pos >= WANT_MS
+        if not ok:
+            for log in glob.glob(os.path.join(cfg, "logs", "*.log")):
+                with open(log, errors="replace") as f:
+                    print("".join(f.readlines()[-25:]))
         return ok, f"exited={gone} saved position {pos / 1000:.1f}s (want at least {WANT_MS / 1000:.0f}s)"
     finally:
         shutil.rmtree(cfg, ignore_errors=True)

@@ -88,9 +88,13 @@ jobs:
         run: python3 tests/smoke/resize_input.py publish/Podliner.App
 
       # last, so the steps above keep running on ffplay alone; this one needs
-      # an engine that reports the position
-      - name: Install mpv
-        run: sudo apt-get install -y --no-install-recommends mpv
+      # an engine that reports the position, and something to play into: the
+      # runner has no sound card, so a pulseaudio server with a null sink
+      - name: Install mpv and a null sound device
+        run: |
+          sudo apt-get install -y --no-install-recommends mpv pulseaudio
+          pulseaudio -D --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=null
 
       - name: The position survives kill and a closed terminal
         run: python3 tests/smoke/signal_save.py publish/Podliner.App
