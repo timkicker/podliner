@@ -456,8 +456,10 @@ internal sealed class UiPlayerPanel : FrameView
 
         // Loading state must be updated before we early-return: if we skip
         // because nothing changed at second granularity but the engine did
-        // start playing (posSec > 0), the loading flag still needs clearing.
-        if (_isLoading && (snap.IsPlaying || posSec > 0))
+        // start playing, the loading flag still needs clearing. Playing, not
+        // a position: a resumed episode's first snapshot already carries
+        // where it resumes while the stream still loads.
+        if (_isLoading && snap.IsPlaying)
             _isLoading = false;
 
         int vol = Math.Clamp(volume0to100, 0, 100);

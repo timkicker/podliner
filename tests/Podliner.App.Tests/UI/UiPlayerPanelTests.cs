@@ -186,6 +186,25 @@ public sealed class UiPlayerPanelTests
         panel.BtnPlayPause.Text.ToString().Should().Contain("Play");
     }
 
+    // A resumed episode's first snapshot carries where it resumes, 3:11
+    // say, while the stream still loads; that alone must not take
+    // "loading…" away. Only the engine playing does.
+    [Fact]
+    public void A_resume_position_alone_does_not_end_loading()
+    {
+        using var tui = new TuiHarness();
+        var panel = Mount(tui);
+        panel.SetLoading(true, "loading…");
+
+        panel.Update(Snap(191_673, 3_600_000, playing: false), volume0to100: 50, Fmt);
+        tui.Render();
+        tui.ScreenContains("loading").Should().BeTrue();
+
+        panel.Update(Snap(192_500, 3_600_000, playing: true), volume0to100: 50, Fmt);
+        tui.Render();
+        tui.ScreenContains("loading").Should().BeFalse();
+    }
+
     [Fact]
     public void The_slow_network_message_reaches_the_screen()
     {

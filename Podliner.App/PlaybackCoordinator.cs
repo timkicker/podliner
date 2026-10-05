@@ -168,11 +168,13 @@ public sealed class PlaybackCoordinator : IDisposable
 
         StartStallWatch(sid, TimeSpan.FromSeconds(5));
 
+        // Where it resumes, not 0:00: while a stream loads the list showed
+        // the episode as unplayed until the first tick.
         _lastSnapshot = PlaybackSnapshot.From(
             sid,
             ep.Id,
-            TimeSpan.Zero,
-            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(startMs ?? 0),
+            TimeSpan.FromMilliseconds(Math.Max(0, ep.DurationMs)),
             isPlaying: false,
             speed: 1.0,
             now: DateTimeOffset.Now

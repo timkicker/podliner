@@ -104,4 +104,23 @@ public sealed class PlaybackCoordinatorResumeTests
 
         ep.Progress.LastPosMs.Should().Be(200_000);
     }
+
+    // The first snapshot of a session said 0:00 while a resumed episode
+    // loaded, and the list showed its row as unplayed until it started.
+    [Fact]
+    public void While_it_loads_the_snapshot_shows_where_it_resumes()
+    {
+        var (pc, player, _) = Make();
+        using var _pc = pc;
+        player.PlayGate = new ManualResetEventSlim(false);
+        PlaybackSnapshot? first = null;
+        pc.SnapshotAvailable += snap => first ??= snap;
+
+        pc.Play(Ep(durationMs: 3_600_000, lastPosMs: 191_673));
+        player.PlayGate.Set();
+
+        first.Should().NotBeNull();
+        first!.Value.Position.Should().Be(TimeSpan.FromMilliseconds(191_673));
+        first.Value.Length.Should().Be(TimeSpan.FromHours(1));
+    }
 }
