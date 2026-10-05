@@ -37,9 +37,14 @@ sealed class FakeAudioPlayer : IAudioPlayer
     // Set to make Play throw, as an engine does for a file it cannot open.
     public Exception? ThrowOnPlay { get; set; }
 
+    // Set to hold Play until the test releases it, as a slow stream does
+    // while the engine opens it.
+    public ManualResetEventSlim? PlayGate { get; set; }
+
     public void Play(string url, long? startMs = null)
     {
         lock (PlayCalls) PlayCalls.Add((url, startMs));
+        PlayGate?.Wait(TimeSpan.FromSeconds(10));
         if (ThrowOnPlay != null) throw ThrowOnPlay;
         State.IsPlaying = true;
     }

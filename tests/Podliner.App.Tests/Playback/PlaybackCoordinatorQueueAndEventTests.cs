@@ -42,7 +42,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         episodes.Seed(epA, epB, epC);
         queue.Seed(epA.Id, epB.Id, epC.Id);
 
-        pc.Play(epB);
+        pc.PlayTaken(epB);
 
         // epA and epB consumed; epC remains
         queue.Snapshot().Should().Equal([epC.Id]);
@@ -58,7 +58,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         episodes.Seed(epA, epB, epC);
         queue.Seed(epA.Id, epB.Id);
 
-        pc.Play(epC);
+        pc.PlayTaken(epC);
 
         queue.Snapshot().Should().Equal([epA.Id, epB.Id]);
     }
@@ -72,7 +72,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         episodes.Seed(epA, epB);
         queue.Seed(epA.Id, epB.Id);
 
-        pc.Play(epB); // epB is last → entire queue consumed
+        pc.PlayTaken(epB); // epB is last → entire queue consumed
 
         queue.Snapshot().Should().BeEmpty();
     }
@@ -89,7 +89,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         int eventCount = 0;
         pc.QueueChanged += () => eventCount++;
 
-        pc.Play(epB); // consumes both → one QueueChanged fired
+        pc.PlayTaken(epB); // consumes both → one QueueChanged fired
 
         eventCount.Should().Be(1);
     }
@@ -106,7 +106,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         int eventCount = 0;
         pc.QueueChanged += () => eventCount++;
 
-        pc.Play(epB); // epB not in queue → no QueueChanged
+        pc.PlayTaken(epB); // epB not in queue → no QueueChanged
 
         eventCount.Should().Be(0);
     }
@@ -123,7 +123,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         PlaybackSnapshot? received = null;
         pc.SnapshotAvailable += s => received = s;
 
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         received.Should().NotBeNull();
         received!.Value.EpisodeId.Should().Be(ep.Id);
@@ -136,7 +136,7 @@ public sealed class PlaybackCoordinatorQueueAndEventTests
         var (_, pc, feedId, episodes, _) = MakeSetup();
         var ep = MakeEpisode(feedId);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         // Capture only the tick-fired snapshot (not the initial one from Play)
         PlaybackSnapshot? tickSnapshot = null;

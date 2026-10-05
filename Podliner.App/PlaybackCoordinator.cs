@@ -20,9 +20,15 @@ public sealed class PlaybackCoordinator : IDisposable
 
     private Episode? _current;
 
-    private CancellationTokenSource? _resumeCts;
     private CancellationTokenSource? _stallCts;
     private bool _progressSeenForSession = false;
+
+    // The session the engine has taken: set once its Play has returned.
+    // Until then its state still describes the episode before (#39 notes).
+    private int _engineSid = -1;
+
+    // tests: whether the engine has taken the episode last played
+    internal bool EngineHasTaken => Volatile.Read(ref _engineSid) == _sid;
 
     private DateTime _lastUiRefresh    = DateTime.MinValue;
     private DateTime _lastPeriodicSave = DateTime.MinValue;
@@ -88,7 +94,6 @@ public sealed class PlaybackCoordinator : IDisposable
         _current.Progress.LastPlayedAt = DateTimeOffset.Now;
         _ = _saveAsync();
 
-        CancelResume();
         CancelStallWatch();
         
         CancelAndDispose(ref _loadingCts);
@@ -136,7 +141,11 @@ public sealed class PlaybackCoordinator : IDisposable
         {
             try
             {
-                _audioPlayer.Play(ep.AudioUrl, null);
+                // The position goes with the play. A seek 350 ms later, as it
+                // was, is dropped by every engine while a stream still opens
+                // (#39), and the episode started at 0:00.
+                _audioPlayer.Play(ep.AudioUrl, startMs);
+                if (sid == _sid) Volatile.Write(ref _engineSid, sid);
             }
             catch (Exception ex)
             {
@@ -156,9 +165,6 @@ public sealed class PlaybackCoordinator : IDisposable
         // Per-feed speed override (set via ":feed speed N"). Applied after
         // Play() so the engine accepts the rate on an already-opened stream.
         ApplyFeedSpeedOverride(ep, sid);
-
-        if (startMs is long want && want > 0)
-            StartOneShotResume(want, sid);
 
         StartStallWatch(sid, TimeSpan.FromSeconds(5));
 
@@ -181,6 +187,11 @@ public sealed class PlaybackCoordinator : IDisposable
     {
         if (_current is null) return;
 
+        // Until the engine has taken this episode its state is the last
+        // one's: writing it here gave a 12 s episode the 40:00 of the one
+        // before and marked it played.
+        if (Volatile.Read(ref _engineSid) != _sid) return;
+
         long effLenMs, posMs;
         var endNow = IsEndReached(s, out effLenMs, out posMs);
 
@@ -196,6 +207,10 @@ public sealed class PlaybackCoordinator : IDisposable
             CancelStallWatch();
             try { _loadingCts?.Cancel(); } catch { }
         }
+
+        // Nothing plays yet: the engine reports 0 while it opens a stream,
+        // and that used to overwrite the saved position.
+        if (!_progressSeenForSession) return;
 
         if (effLenMs > 0)
             _current.DurationMs = effLenMs;
@@ -277,37 +292,6 @@ public sealed class PlaybackCoordinator : IDisposable
 
     #region helpers
 
-    private void StartOneShotResume(long ms, int sid)
-    {
-        CancelAndDispose(ref _resumeCts);
-        var cts = new CancellationTokenSource();
-        _resumeCts = cts;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(350, cts.Token);
-                if (cts.IsCancellationRequested) return;
-                if (sid != _sid) return;
-
-                Application.MainLoop?.Invoke(() =>
-                {
-                    try
-                    {
-                        if (sid != _sid) return;
-                        var lenMs = _audioPlayer.State.Length?.TotalMilliseconds ?? 0;
-                        if (lenMs > 0 && ms > lenMs - 10000) return;
-                        _audioPlayer.SeekTo(TimeSpan.FromMilliseconds(ms));
-                    }
-                    catch (Exception ex) { Log.Debug(ex, "resume seek failed sid={Sid} ms={Ms}", sid, ms); }
-                });
-            }
-            catch (TaskCanceledException) { }
-            catch (Exception ex) { Log.Debug(ex, "resume task threw sid={Sid} ms={Ms}", sid, ms); }
-        });
-    }
-
     // Applies Feed.SpeedOverride if the current episode's feed has one.
     // Scheduled onto the main loop so the engine is guaranteed to have an
     // open media handle — LibVLC ignores SetSpeed before media load.
@@ -329,7 +313,6 @@ public sealed class PlaybackCoordinator : IDisposable
         });
     }
 
-    private void CancelResume() => CancelAndDispose(ref _resumeCts);
 
     private void StartStallWatch(int sid, TimeSpan timeout)
     {
@@ -368,7 +351,6 @@ public sealed class PlaybackCoordinator : IDisposable
     public void Dispose()
     {
         CancelAndDispose(ref _loadingCts);
-        CancelAndDispose(ref _resumeCts);
         CancelAndDispose(ref _stallCts);
     }
 

@@ -52,7 +52,7 @@ public sealed class PlaybackCoordinatorProgressTests
         var (_, pc, feedId, episodes) = MakeSetup();
         var ep = MakeEpisode(feedId, durationMs: 0); // unknown duration initially
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         Tick(pc, posMs: 45_000, lenMs: 120_000);
 
@@ -69,7 +69,7 @@ public sealed class PlaybackCoordinatorProgressTests
         // 10-minute episode; 90% = 540 000 ms; remain = 60 s > 30 s → ratio triggers
         var ep = MakeEpisode(feedId, durationMs: 600_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         Tick(pc, posMs: 540_001, lenMs: 600_000);
 
@@ -82,7 +82,7 @@ public sealed class PlaybackCoordinatorProgressTests
         var (_, pc, feedId, episodes) = MakeSetup();
         var ep = MakeEpisode(feedId, durationMs: 600_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         // 89.9 %, remain = 60 001 ms > 30 s → neither threshold reached
         Tick(pc, posMs: 539_999, lenMs: 600_000);
@@ -97,7 +97,7 @@ public sealed class PlaybackCoordinatorProgressTests
         // 5-minute episode; posMs such that remain = 29 999 ms < 30 s
         var ep = MakeEpisode(feedId, durationMs: 300_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         Tick(pc, posMs: 270_001, lenMs: 300_000); // remain = 29 999 ms
 
@@ -110,7 +110,7 @@ public sealed class PlaybackCoordinatorProgressTests
         var (_, pc, feedId, episodes) = MakeSetup();
         var ep = MakeEpisode(feedId, durationMs: 300_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         // remain = 30 001 ms > 30 s, ratio = 89.9 % < 90 % → neither threshold
         Tick(pc, posMs: 269_999, lenMs: 300_000);
@@ -127,7 +127,7 @@ public sealed class PlaybackCoordinatorProgressTests
         // 60-second episode; remain = 4 999 ms < 5 s
         var ep = MakeEpisode(feedId, durationMs: 60_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         Tick(pc, posMs: 55_001, lenMs: 60_000); // remain = 4 999 ms
 
@@ -140,7 +140,7 @@ public sealed class PlaybackCoordinatorProgressTests
         var (_, pc, feedId, episodes) = MakeSetup();
         var ep = MakeEpisode(feedId, durationMs: 60_000);
         episodes.Seed(ep);
-        pc.Play(ep);
+        pc.PlayTaken(ep);
 
         // remain = 5 001 ms > 5 s, ratio ≈ 91.7 % < 98 % → neither threshold
         Tick(pc, posMs: 54_999, lenMs: 60_000);
@@ -162,7 +162,7 @@ public sealed class PlaybackCoordinatorProgressTests
 
         Episode? suggested = null;
         pc.AutoAdvanceSuggested += ep => suggested = ep;
-        pc.Play(ep1);
+        pc.PlayTaken(ep1);
 
         // 99.5 % reached → IsEndReached returns true
         Tick(pc, posMs: 119_401, lenMs: 120_000);
@@ -182,7 +182,7 @@ public sealed class PlaybackCoordinatorProgressTests
 
         Episode? suggested = null;
         pc.AutoAdvanceSuggested += ep => suggested = ep;
-        pc.Play(ep1);
+        pc.PlayTaken(ep1);
 
         Tick(pc, posMs: 119_401, lenMs: 120_000);
 

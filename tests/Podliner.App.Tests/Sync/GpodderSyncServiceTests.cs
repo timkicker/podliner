@@ -350,7 +350,7 @@ public sealed class GpodderSyncServiceTests
             episodes.Seed(ep);
 
             // Play: snapshot fires → _lastSessionId set, _lastEpisodeId = ep.Id
-            pc.Play(ep);
+            pc.PlayTaken(ep);
 
             // Tick at near-end: IsPlaying=false, remain=1s ≤ 2000ms → IsEndReached=true
             pc.PersistProgressTick(

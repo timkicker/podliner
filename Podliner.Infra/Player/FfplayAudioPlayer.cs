@@ -40,6 +40,10 @@ namespace Podliner.Infra.Player
                 _lastStartMs = Math.Max(0, startMs ?? 0);
                 _proc = StartFfplay(url, _lastStartMs, State.Volume0_100, State.Speed);
                 State.IsPlaying = true;
+                // ffplay reports no position; without this the last
+                // episode's stayed and was taken for the new one's
+                State.Position = TimeSpan.FromMilliseconds(_lastStartMs);
+                State.Length = null;
             }
             FireStateChanged();
         }

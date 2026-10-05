@@ -83,7 +83,7 @@ public sealed class UiPlaybackEventBridgeTests
         using var f = new Fixture();
         var ep = f.Seed();
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.Ui.PlayerSnapshots.Should().NotBeEmpty();
@@ -97,7 +97,7 @@ public sealed class UiPlaybackEventBridgeTests
         f.Player.SetVolume(37);
         var ep = f.Seed();
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.Ui.PlayerSnapshots.Last().Volume.Should().Be(37);
@@ -108,7 +108,7 @@ public sealed class UiPlaybackEventBridgeTests
     {
         using var f = new Fixture();
         var ep = f.Seed();
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         var before = f.Ui.PlayerSnapshots.Count;
 
@@ -123,7 +123,7 @@ public sealed class UiPlaybackEventBridgeTests
     {
         using var f = new Fixture();
         var ep = f.Seed();
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.TickAndPump(30_000, 600_000);
@@ -143,7 +143,7 @@ public sealed class UiPlaybackEventBridgeTests
         var ep = f.Seed("Some Episode");
         f.Ui.SetNowPlaying(ep.Id);
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         f.TickAndPump(1_000, 600_000);
 
@@ -158,7 +158,7 @@ public sealed class UiPlaybackEventBridgeTests
         var ep = f.Seed("Some Episode");
         f.Ui.SetNowPlaying(ep.Id);
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         f.TickAndPump(1_000, 600_000);
 
@@ -173,7 +173,7 @@ public sealed class UiPlaybackEventBridgeTests
         using var f = new Fixture();
         var ep = f.Seed("Some Episode");
         f.Ui.SetNowPlaying(ep.Id);
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         f.TickAndPump(1_000, 600_000);
 
@@ -191,7 +191,7 @@ public sealed class UiPlaybackEventBridgeTests
         using var f = new Fixture();
         var ep = f.Seed();
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.Ui.LoadingCalls.Should().Contain(c => c.On);
@@ -202,7 +202,7 @@ public sealed class UiPlaybackEventBridgeTests
     {
         using var f = new Fixture();
         var ep = f.Seed();
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.TickAndPump(1_000, 600_000);
@@ -216,7 +216,7 @@ public sealed class UiPlaybackEventBridgeTests
         // LibVLC reports IsPlaying while still buffering.
         using var f = new Fixture();
         var ep = f.Seed();
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
 
         f.TickAndPump(0, 600_000);
@@ -230,7 +230,7 @@ public sealed class UiPlaybackEventBridgeTests
         using var f = new Fixture();
         var ep = f.Seed();
         ep.DurationMs = 10_000;
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         f.TickAndPump(1_000, 10_000);
 
@@ -247,7 +247,7 @@ public sealed class UiPlaybackEventBridgeTests
         using var f = new Fixture();
         var ep = f.Seed();
 
-        f.Playback.Play(ep);
+        f.Playback.PlayTaken(ep);
         f.Pump();
         f.TickAndPump(1_000, 600_000);
 

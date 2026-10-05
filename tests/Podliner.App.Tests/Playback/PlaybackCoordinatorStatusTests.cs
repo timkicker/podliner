@@ -80,7 +80,7 @@ public sealed class PlaybackCoordinatorStatusTests
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
 
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
 
         lock (seen) seen.Should().StartWith(new[] { PlaybackStatus.Loading });
     }
@@ -90,7 +90,7 @@ public sealed class PlaybackCoordinatorStatusTests
     {
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
 
         Tick(pc, posMs: 1_000, lenMs: 600_000);
 
@@ -104,7 +104,7 @@ public sealed class PlaybackCoordinatorStatusTests
         // only a position that actually moved counts as playing.
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
 
         Tick(pc, posMs: 0, lenMs: 600_000);
 
@@ -116,7 +116,7 @@ public sealed class PlaybackCoordinatorStatusTests
     {
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
 
         Tick(pc, 1_000, 600_000);
         Tick(pc, 2_000, 600_000);
@@ -130,7 +130,7 @@ public sealed class PlaybackCoordinatorStatusTests
     {
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
-        pc.Play(MakeEpisode(feedId, durationMs: 10_000));
+        pc.PlayTaken(MakeEpisode(feedId, durationMs: 10_000));
 
         Tick(pc, 1_000, 10_000);
         Tick(pc, 10_000, 10_000, playing: false);
@@ -143,7 +143,7 @@ public sealed class PlaybackCoordinatorStatusTests
     {
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
-        pc.Play(MakeEpisode(feedId, durationMs: 10_000));
+        pc.PlayTaken(MakeEpisode(feedId, durationMs: 10_000));
 
         Tick(pc, 1_000, 10_000);
         Tick(pc, 10_000, 10_000, playing: false);
@@ -158,11 +158,11 @@ public sealed class PlaybackCoordinatorStatusTests
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
 
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
         Tick(pc, 1_000, 600_000);
         lock (seen) seen.Clear();
 
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
 
         lock (seen) seen.Should().StartWith(new[] { PlaybackStatus.Loading });
     }
@@ -173,9 +173,9 @@ public sealed class PlaybackCoordinatorStatusTests
         var (pc, _, seen, feedId) = MakeSetup();
         using var _pc = pc;
 
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
         Tick(pc, 1_000, 600_000);
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
         Tick(pc, 1_000, 600_000);
 
         lock (seen) seen.Count(s => s == PlaybackStatus.Playing).Should().Be(2);
@@ -195,7 +195,7 @@ public sealed class PlaybackCoordinatorStatusTests
     {
         var (pc, _, seen, feedId) = MakeSetup();
 
-        pc.Play(MakeEpisode(feedId));
+        pc.PlayTaken(MakeEpisode(feedId));
         pc.Dispose();
 
         lock (seen) seen.Should().NotContain(PlaybackStatus.SlowNetwork);

@@ -266,12 +266,25 @@ namespace Podliner.Infra.Player
                     _pendingSeekMs = null;
                     if (want is long ms && ms > 0)
                     {
-                        try
+                        // Not from here: libvlc must not be called back from
+                        // its own event thread, and a seek from inside this
+                        // handler left a stream stuck at 0:00 with no further
+                        // time events (seen once #39 made the start position
+                        // reach the engine).
+                        var sid = _sessionId;
+                        ThreadPool.QueueUserWorkItem(_ =>
                         {
-                            if (_mp.IsSeekable) _mp.Time = ms;
-                            else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
-                        }
-                        catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
+                            lock (_sync)
+                            {
+                                if (sid != _sessionId) return;
+                                try
+                                {
+                                    if (_mp.IsSeekable) _mp.Time = ms;
+                                    else if (_mp.Length > 0) _mp.Position = Math.Clamp((float)ms / _mp.Length, 0f, 1f);
+                                }
+                                catch (Exception ex) { Log.Debug(ex, "pending seek failed"); }
+                            }
+                        });
                     }
 
                     if (!_ready)
