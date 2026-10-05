@@ -79,7 +79,7 @@ public sealed class PlaybackCoordinatorResumeTests
 
         pc.Play(ep);
         WaitForPlay(player);
-        Thread.Sleep(100);              // Play has returned; the stream is not open yet
+        SpinWait.SpinUntil(() => pc.EngineHasTaken, 15000);   // Play returned; the stream is not open yet
         player.State.Position = TimeSpan.Zero;
         player.State.IsPlaying = false;
         Tick(pc, player);
@@ -96,8 +96,7 @@ public sealed class PlaybackCoordinatorResumeTests
         var ep = Ep(durationMs: 3_600_000, lastPosMs: 191_673);
 
         pc.Play(ep);
-        WaitForPlay(player);
-        Thread.Sleep(100);
+        SpinWait.SpinUntil(() => pc.EngineHasTaken, 15000);
         player.State.Position = TimeSpan.FromSeconds(200);
         player.State.Length = TimeSpan.FromHours(1);
         player.State.IsPlaying = true;

@@ -250,6 +250,7 @@ public sealed class UiComposerWireUiTests
         f.B.Data.NetworkOnline = true;
         f.Ui.RaisePlaySelected();
         SettlePlayback(f);
+        SpinWait.SpinUntil(() => f.B.Playback.EngineHasTaken, 15000);
 
         var st = f.B.Player.State;
         st.Length = TimeSpan.FromMinutes(30);

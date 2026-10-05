@@ -32,9 +32,9 @@ public sealed class MprisFollowsCoordinatorTests
 
         var pc = new PlaybackCoordinator(data, player, () => Task.CompletedTask, new MemoryLogSink(), episodes, new FakeQueueService());
         pc.Play(ep);
-        // the coordinator hands the url to the engine on the thread pool
-        var until = DateTime.UtcNow.AddSeconds(5);
-        while (player.PlayCalls.Count == 0 && DateTime.UtcNow < until) Thread.Sleep(5);
+        // the coordinator hands the url to the engine on the thread pool, and
+        // takes ticks once the engine's Play has returned
+        SpinWait.SpinUntil(() => pc.EngineHasTaken, 15000);
         return (new MprisObject(data, player, pc, episodes, feeds), player, pc, ep);
     }
 
