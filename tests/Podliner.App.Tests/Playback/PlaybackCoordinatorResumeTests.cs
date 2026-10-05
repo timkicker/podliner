@@ -34,7 +34,7 @@ public sealed class PlaybackCoordinatorResumeTests
     static void Tick(PlaybackCoordinator pc, FakeAudioPlayer p) => pc.PersistProgressTick(p.State, _ => { });
 
     static void WaitForPlay(FakeAudioPlayer p)
-        => SpinWait.SpinUntil(() => { lock (p.PlayCalls) return p.PlayCalls.Count > 0; }, 3000);
+        => SpinWait.SpinUntil(() => { lock (p.PlayCalls) return p.PlayCalls.Count > 0; }, 15000);   // a busy windows runner took over 3 s
 
     [Fact]
     public void The_saved_position_goes_to_the_engine_with_the_play()

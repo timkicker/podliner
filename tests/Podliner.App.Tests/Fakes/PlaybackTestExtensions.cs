@@ -7,6 +7,6 @@ static class PlaybackTestExtensions
     public static void PlayTaken(this PlaybackCoordinator pc, Podliner.Core.Episode ep)
     {
         pc.Play(ep);
-        SpinWait.SpinUntil(() => pc.EngineHasTaken, 3000);
+        SpinWait.SpinUntil(() => pc.EngineHasTaken, 15000);
     }
 }

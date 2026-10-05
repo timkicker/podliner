@@ -117,7 +117,8 @@ public sealed class MprisObjectEdgeCaseTests
 
         obj.NotifySeeked(123_456_789L);
 
-        var received = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        // generous: the windows runner's thread pool has taken more than 2 s
+        var received = await tcs.Task.WaitAsync(TimeSpan.FromSeconds(15));
         received.Should().Be(123_456_789L);
     }
 
