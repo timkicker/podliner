@@ -1,0 +1,41 @@
+name: winget
+
+# Submits an existing release to winget-pkgs on its own, for when the step in
+# release.yml failed and the release itself must not be built again.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v2.3.0"
+        required: true
+        type: string
+
+jobs:
+  submit-to-winget:
+    name: submit to winget
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Tag → version
+        id: meta
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Winget Releaser (updates existing package)
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: TimKicker.Podliner
+          version: ${{ steps.meta.outputs.version }}
+          token: ${{ secrets.WINGET_TOKEN }}
+          installers-regex: '\.(exe|msi|msix|appx)(bundle)?$'
+          release-repository: ${{ github.repository }}
+          release-tag: ${{ inputs.tag }}
+          fork-user: timkicker
