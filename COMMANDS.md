@@ -175,9 +175,9 @@ Full in-app help: `:h`
 - `:audioPlayer [top|bottom|toggle]`  
   Place the player bar.  
   Examples: `:audioPlayer top`, `:audioPlayer toggle`
-- `:theme [toggle|base|accent|native|auto]`  
-  Switch theme or toggle.  
-  Examples: `:theme`, `:theme native`
+- `:theme [toggle|base|accent|native|user|light|auto]`  
+  Switch theme or toggle. `light` is the light theme, `user` the dark default.  
+  Examples: `:theme`, `:theme light`
 
 ### Network and engine
 - `:net online|offline|toggle`  

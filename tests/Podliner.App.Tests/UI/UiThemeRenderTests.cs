@@ -37,6 +37,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.MenuAccent)]
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
+    [InlineData(ThemeMode.Light)]
     public void Every_theme_applies_without_throwing(ThemeMode mode)
     {
         using var tui = new TuiHarness();
@@ -52,6 +53,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.MenuAccent)]
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
+    [InlineData(ThemeMode.Light)]
     public void Every_theme_still_shows_the_content(ThemeMode mode)
     {
         using var tui = new TuiHarness();
@@ -70,6 +72,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.MenuAccent)]
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
+    [InlineData(ThemeMode.Light)]
     public void Every_theme_reports_itself_back(ThemeMode mode)
     {
         using var tui = new TuiHarness();
@@ -87,17 +90,18 @@ public sealed class UiThemeRenderTests
         var shell = BuildShell();
         shell.SetTheme(ThemeMode.Base);
 
+        var all = Enum.GetValues<ThemeMode>();
         var seen = new List<ThemeMode> { shell.CurrentTheme };
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < all.Length; i++)
         {
             shell.ToggleTheme();
             seen.Add(shell.CurrentTheme);
         }
 
-        // Four steps from Base must land back on Base, having passed through
-        // each of the other three exactly once.
+        // One step per theme from Base must land back on Base, having passed
+        // through each of the others exactly once.
         seen.Last().Should().Be(ThemeMode.Base);
-        seen.Take(4).Should().BeEquivalentTo(Enum.GetValues<ThemeMode>());
+        seen.Take(all.Length).Should().BeEquivalentTo(all);
     }
 
     [Fact]

@@ -194,6 +194,15 @@ public sealed class CmdViewModuleTests
     }
 
     [Fact]
+    public void Theme_light_selects_the_light_theme()
+    {
+        _sut.ExecTheme(new[] { "light" });
+
+        _ui.LastSetTheme.Should().Be(Podliner.App.UI.ThemeMode.Light);
+        _data.ThemePref.Should().Be("Light");
+    }
+
+    [Fact]
     public void Theme_with_an_unknown_name_changes_nothing_and_says_so()
     {
         _data.ThemePref = "Native";

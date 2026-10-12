@@ -3,7 +3,7 @@ using Attribute = Terminal.Gui.Attribute;
 
 namespace Podliner.App.UI;
 
-// Pure colour-scheme factory for the "User" theme. Kept as a static helper
+// Pure colour-scheme factory for the "User" and "Light" themes. Kept as a static helper
 // (no UiShell instance state) so the palette values + scheme construction
 // live apart from the widget-mutation logic in UiShell.ApplyTheme.
 //
@@ -114,6 +114,109 @@ internal static class UiShellColorSchemes
         };
 
         return new UserSchemes { Main = main, Menu = menu, List = list, Input = input, Dialog = dialog, Status = status };
+    }
+
+    // Light theme. Terminal.Gui 1.x only knows the 16 named colours, so the
+    // slots are picked by WCAG contrast across the xterm, VGA, Windows
+    // Campbell, macOS Terminal and GNOME Tango palettes (see
+    // LightThemeContrastTests): text Black on White, accent text Blue, the
+    // cursor and other "you are here" marks White on that same Blue and the
+    // bar fill Blue on a light grey track. No yellow or orange at all: as
+    // text on white it is unreadable, as a background it glares, and the
+    // plain yellow slot is too dark for black text in the VGA palette.
+    internal static class Light
+    {
+        public const Color Bg     = Color.White;
+        public const Color Fg     = Color.Black;
+        public const Color Muted  = Color.DarkGray;
+        public const Color Accent = Color.Blue;
+        public const Color Mark   = Color.Blue;
+        public const Color OnMark = Color.White;
+        public const Color Field  = Color.Gray;
+        public const Color Track  = Color.Gray;
+        public const Color Error  = Color.Red;
+    }
+
+    private static ColorScheme LightScheme(Color hot, Color focus = Light.Mark) => new()
+    {
+        Normal    = Attr(Light.Fg,    Light.Bg),
+        Focus     = focus == Light.Mark ? Attr(Light.OnMark, Light.Mark) : Attr(Light.Fg, focus),
+        HotNormal = Attr(hot,         Light.Bg),
+        HotFocus  = Attr(Light.OnMark, Light.Mark),
+        Disabled  = Attr(Light.Muted, Light.Bg)
+    };
+
+    public static UserSchemes BuildLightSchemes()
+    {
+        var field = Attr(Light.Fg, Light.Field);
+        return new UserSchemes
+        {
+            Main   = LightScheme(Light.Accent),
+            Menu   = LightScheme(Light.Accent),
+            List   = LightScheme(Light.Accent),
+            Dialog = LightScheme(Light.Accent),
+            Input  = new ColorScheme { Normal = field, Focus = field, HotNormal = field, HotFocus = field, Disabled = field },
+            Status = BuildLightProgressScheme()
+        };
+    }
+
+    public static ColorScheme BuildLightDetailsScheme()
+    {
+        var normal = Attr(Light.Fg, Light.Bg);
+        var hot    = Attr(Light.Accent, Light.Bg);
+        return new ColorScheme { Normal = normal, Focus = normal, HotNormal = hot, HotFocus = hot, Disabled = Attr(Light.Muted, Light.Bg) };
+    }
+
+    // The bar draws spaces in Normal and the filled part as █ in HotNormal's
+    // foreground: a blue fill on a light grey track.
+    public static ColorScheme BuildLightProgressScheme()
+    {
+        var track = Attr(Light.Fg, Light.Track);
+        var fill  = Attr(Light.Mark, Light.Track);
+        return new ColorScheme { Normal = track, Focus = track, HotNormal = fill, HotFocus = fill, Disabled = track };
+    }
+
+    // Dialogs, message boxes, the help browser and a few labels use the global
+    // Terminal.Gui schemes directly, and views keep a reference to those
+    // objects. So the light theme writes its colours into them in place and
+    // puts the originals back when another theme is picked. Terminal.Gui fills
+    // a focused text field or text view with Focus, so outside the menus Focus
+    // is the grey field colour; a yellow one would flood the help search and
+    // the log view.
+    static readonly string[] GlobalSchemes = { "TopLevel", "Base", "Dialog", "Menu", "Error" };
+    static readonly Dictionary<string, (ColorScheme Scheme, Attribute[] Attrs)> _globalDefaults = new();
+
+    public static void ApplyLightGlobals(bool on)
+    {
+        foreach (var name in GlobalSchemes)
+        {
+            if (!Colors.ColorSchemes.TryGetValue(name, out var scheme) || scheme == null) continue;
+
+            // Application.Init hands out fresh scheme objects, so a snapshot
+            // only counts for the object it was taken from.
+            var known = _globalDefaults.TryGetValue(name, out var d) && ReferenceEquals(d.Scheme, scheme);
+            if (on)
+            {
+                if (!known) _globalDefaults[name] = (scheme, Snapshot(scheme));
+                Write(scheme, Snapshot(name switch
+                {
+                    "Menu"  => LightScheme(Light.Accent),
+                    "Error" => LightScheme(Light.Error, Light.Field),
+                    _       => LightScheme(Light.Accent, Light.Field)
+                }));
+            }
+            else if (known)
+            {
+                Write(scheme, d.Attrs);
+            }
+        }
+    }
+
+    static Attribute[] Snapshot(ColorScheme s) => new[] { s.Normal, s.Focus, s.HotNormal, s.HotFocus, s.Disabled };
+
+    static void Write(ColorScheme s, Attribute[] a)
+    {
+        s.Normal = a[0]; s.Focus = a[1]; s.HotNormal = a[2]; s.HotFocus = a[3]; s.Disabled = a[4];
     }
 
     private static Color C(string hex) => ApproxAnsi(hex);

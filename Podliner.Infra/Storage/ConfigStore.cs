@@ -44,7 +44,7 @@ namespace Podliner.Infra.Storage
             // load; that happened to still resolve to User, but the stored
             // value was wrong and would have moved with any change of default.
             // "HighContrast" was never a ThemeMode and is gone.
-            c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "Native", "User");
+            c.Theme            = NormalizeChoice(c.Theme, "auto", "Base", "MenuAccent", "Native", "User", "Light");
             c.GlyphSet         = NormalizeChoice(c.GlyphSet, "auto", "unicode", "ascii");
 
             c.ViewDefaults.SortBy  = NormalizeChoice(c.ViewDefaults.SortBy, "pubdate", "title", "duration", "feed", "progress");

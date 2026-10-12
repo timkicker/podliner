@@ -131,13 +131,14 @@ internal sealed class ViewUseCase
             "accent" => ThemeMode.MenuAccent,
             "native" => ThemeMode.Native,
             "user"   => ThemeMode.User,
+            "light"  => ThemeMode.Light,
             "auto"   => OperatingSystem.IsWindows() ? ThemeMode.Base : ThemeMode.MenuAccent,
             _        => null
         };
 
         if (picked is not { } mode)
         {
-            _ui.ShowOsd($"theme: unknown '{arg}', try base, accent, native, user, auto", 2000);
+            _ui.ShowOsd($"theme: unknown '{arg}', try base, accent, native, user, light, auto", 2000);
             return;
         }
 

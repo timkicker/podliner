@@ -698,7 +698,7 @@ internal class Program
         Console.WriteLine("  --version, -v            Show version and exit");
         Console.WriteLine("  --help, -h               Show this help and exit");
         Console.WriteLine("  --engine <auto|vlc|mpv|ffplay|mediafoundation|builtin>");
-        Console.WriteLine("  --theme <base|accent|native|auto|user>");
+        Console.WriteLine("  --theme <base|accent|native|auto|user|light>");
         Console.WriteLine("  --feed <all|saved|downloaded|history|queue|GUID>");
         Console.WriteLine("  --search \"<term>\"");
         Console.WriteLine("  --opml-import <FILE> [--import-mode merge|replace|dry-run]");

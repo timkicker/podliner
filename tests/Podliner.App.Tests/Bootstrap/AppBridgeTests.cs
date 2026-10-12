@@ -123,6 +123,7 @@ public sealed class AppBridgeTests : IDisposable
     [InlineData(ThemeMode.MenuAccent)]
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
+    [InlineData(ThemeMode.Light)]
     public void Every_theme_the_toggle_can_reach_survives(ThemeMode mode)
         => RoundTripViaDisk(new AppData { ThemePref = mode.ToString() })
             .ThemePref.Should().Be(mode.ToString());

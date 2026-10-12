@@ -12,6 +12,7 @@ public sealed class UiThemeResolverTests
     [InlineData("accent", "MenuAccent")]
     [InlineData("native", "Native")]
     [InlineData("user",   "User")]
+    [InlineData("light",  "Light")]
     public void Cli_theme_maps_to_mode_and_persists_name(string cli, string expectedMode)
     {
         var r = UiThemeResolver.Resolve(cli, savedPref: null);

@@ -98,9 +98,12 @@ public sealed partial class UiShell
     {
         UI(() =>
         {
-            if (_theme == ThemeMode.User)
+            var light = _theme == ThemeMode.Light;
+            UiShellColorSchemes.ApplyLightGlobals(light);
+
+            if (_theme is ThemeMode.User or ThemeMode.Light)
             {
-                var u = UiShellColorSchemes.BuildUserSchemes();
+                var u = light ? UiShellColorSchemes.BuildLightSchemes() : UiShellColorSchemes.BuildUserSchemes();
 
                 if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
                 if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
@@ -118,7 +121,7 @@ public sealed partial class UiShell
                 if (_player != null)
                 {
                     _player.ColorScheme          = u.Main;
-                    _player.Progress.ColorScheme = new ColorScheme {
+                    _player.Progress.ColorScheme = light ? MakeProgressScheme() : new ColorScheme {
                         Normal    = u.Status.Normal,
                         Focus     = u.Status.Focus,
                         HotNormal = u.Menu.HotNormal,
@@ -132,7 +135,9 @@ public sealed partial class UiShell
                 if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
 
                 if (_episodesPane?.Details != null)
-                    _episodesPane.Details.ColorScheme = UiShellColorSchemes.BuildDetailsScheme();
+                    _episodesPane.Details.ColorScheme = light
+                        ? UiShellColorSchemes.BuildLightDetailsScheme()
+                        : UiShellColorSchemes.BuildDetailsScheme();
 
                 _osd.ApplyTheme();
                 RequestRepaint();
@@ -184,6 +189,9 @@ public sealed partial class UiShell
 
     private ColorScheme MakeProgressScheme()
     {
+        if (_theme == ThemeMode.Light)
+            return UiShellColorSchemes.BuildLightProgressScheme();
+
         if (_theme == ThemeMode.Native)
         {
             return new ColorScheme

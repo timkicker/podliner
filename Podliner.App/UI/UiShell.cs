@@ -120,6 +120,7 @@ public sealed partial class UiShell : IUiShell
             ThemeMode.Base       => ThemeMode.MenuAccent,
             ThemeMode.MenuAccent => ThemeMode.Native,
             ThemeMode.Native     => ThemeMode.User,
+            ThemeMode.User       => ThemeMode.Light,
             _                    => ThemeMode.Base
         };
 

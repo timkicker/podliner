@@ -19,6 +19,7 @@ static class UiThemeResolver
                 "accent" => ThemeMode.MenuAccent,
                 "native" => ThemeMode.Native,
                 "user"   => ThemeMode.User,
+                "light"  => ThemeMode.Light,
                 "auto"   => ThemeMode.User, // default user
                 _        => ThemeMode.User
             };
