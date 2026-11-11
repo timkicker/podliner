@@ -223,6 +223,16 @@ public sealed class AppBridgeTests : IDisposable
     public void Never_refreshed_stays_never()
         => RoundTripViaDisk(new AppData { LastRefreshAt = null }).LastRefreshAt.Should().BeNull();
 
+    // ── when an episode counts as played (#40) ──────────────────────────────
+
+    [Fact]
+    public void Played_at_end_survives_a_restart()
+        => RoundTripViaDisk(new AppData { MarkPlayedAtEnd = true }).MarkPlayedAtEnd.Should().BeTrue();
+
+    [Fact]
+    public void A_fresh_install_marks_played_near_the_end()
+        => RoundTripViaDisk(new AppData()).MarkPlayedAtEnd.Should().BeFalse();
+
     // ── everything at once ──────────────────────────────────────────────────
 
     [Fact]

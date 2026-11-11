@@ -77,7 +77,7 @@ internal enum TopCommand
     Goto, VimTop, VimMiddle, VimBottom,
     NextUnplayed, PrevUnplayed,
     Save, Sort, Filter, PlayerBar,
-    Net, PlaySource,
+    Net, PlaySource, PlayedAt,
     AddFeed, Refresh, RemoveFeed, Feed,
     History, Opml, Open, Copy,
     Write, WriteQuit, WriteQuitBang, QuitBang,

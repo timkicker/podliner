@@ -86,6 +86,7 @@ namespace Podliner.App.Command
 
             (":net",          TopCommand.Net),
             (":play-source",  TopCommand.PlaySource),
+            (":played-at",    TopCommand.PlayedAt),
 
             (":feed",         TopCommand.Feed),
             (":history",      TopCommand.History),

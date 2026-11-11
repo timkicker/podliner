@@ -11,6 +11,10 @@
         public int    Volume0_100     { get; set; } = 65;      // range 0..100
         public double Speed           { get; set; } = 1.0;     // typically 0.5 to 3.0
 
+        // false: played at 90% or 30 s before the end (5 s for short ones),
+        // true: only once playback reaches the end (#40)
+        public bool MarkPlayedAtEnd { get; set; } = false;
+
         // ui theme and glyphs
         public string Theme    { get; set; } = "auto";         // auto, base, menuaccent, highcontrast
         public string GlyphSet { get; set; } = "auto";         // auto, unicode, ascii

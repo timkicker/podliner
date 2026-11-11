@@ -100,6 +100,9 @@ Full in-app help: `:h`
 - `:replay [N]`  
   Replay from 0:00 or jump back N seconds.  
   Examples: `:replay`, `:replay 30`
+- `:played-at [near-end|end|show]`  
+  When an episode counts as played. `near-end` (default) marks it at 90% or 30 seconds before the end (5 seconds for episodes up to a minute), `end` only once playback reaches the end. Also `MarkPlayedAtEnd` in `appsettings.json`.  
+  Examples: `:played-at`, `:played-at end`, `:played-at near-end`
 - `:vol [N | +/-N]`  
   Set or change volume (0 to 100).  
   Examples: `:vol 70`, `:vol +5`, `:vol -10`

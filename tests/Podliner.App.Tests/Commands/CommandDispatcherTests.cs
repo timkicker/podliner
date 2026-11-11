@@ -49,6 +49,7 @@ public sealed class CommandDispatcherTests
     [InlineData(":logs",           "Logs")]
     [InlineData(":osd test",       "Osd")]
     [InlineData(":play-source local", "PlaySource")]
+    [InlineData(":played-at end",  "PlayedAt")]
     [InlineData(":update",         "Refresh")]
     [InlineData(":next-unplayed",  "NextUnplayed")]
     [InlineData(":prev-unplayed",  "PrevUnplayed")]

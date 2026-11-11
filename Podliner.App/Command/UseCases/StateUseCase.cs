@@ -5,17 +5,20 @@ using Podliner.Core;
 namespace Podliner.App.Command.UseCases;
 
 // Toggles the per-episode Saved flag. ApplyList is re-triggered so the
-// saved virtual feed reflects the change immediately.
+// saved virtual feed reflects the change immediately. Also sets when an
+// episode counts as played.
 internal sealed class StateUseCase
 {
     readonly IUiShell _ui;
+    readonly AppData _data;
     readonly Func<Task> _persist;
     readonly IEpisodeStore _episodes;
     readonly ViewUseCase _view;
 
-    public StateUseCase(IUiShell ui, Func<Task> persist, IEpisodeStore episodes, ViewUseCase view)
+    public StateUseCase(IUiShell ui, AppData data, Func<Task> persist, IEpisodeStore episodes, ViewUseCase view)
     {
         _ui = ui;
+        _data = data;
         _persist = persist;
         _episodes = episodes;
         _view = view;
@@ -37,5 +40,21 @@ internal sealed class StateUseCase
 
         _view.ApplyList();
         _ui.ShowOsd(newVal ? "Saved ★" : "Unsaved");
+    }
+
+    public void ExecPlayedAt(string[] args)
+    {
+        var arg = string.Join(' ', args ?? Array.Empty<string>()).Trim().ToLowerInvariant();
+        if (arg is "show" or "") { _ui.ShowOsd($"played-at: {Name(_data.MarkPlayedAtEnd)}"); return; }
+
+        if (arg is "near-end" or "end")
+        {
+            _data.MarkPlayedAtEnd = arg == "end";
+            _ = _persist();
+            _ui.ShowOsd($"played-at: {arg}");
+        }
+        else _ui.ShowOsd("usage: :played-at near-end|end|show");
+
+        static string Name(bool atEnd) => atEnd ? "end" : "near-end";
     }
 }

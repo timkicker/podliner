@@ -13,6 +13,7 @@ static class AppBridge
         data.PreferredEngine = AudioEngineExt.FromWire(app.EnginePreference);
         data.Volume0_100     = app.Volume0100;
         data.Speed           = app.Speed;
+        data.MarkPlayedAtEnd = app.MarkPlayedAtEnd;
         data.ThemePref       = app.Theme;
         data.PlayerAtTop     = app.PlayerAtTop;
         data.UnplayedOnly    = app.UnplayedOnly;
@@ -30,6 +31,7 @@ static class AppBridge
         app.EnginePreference = data.PreferredEngine.ToWire();
         app.Volume0100       = data.Volume0_100;
         app.Speed            = data.Speed;
+        app.MarkPlayedAtEnd  = data.MarkPlayedAtEnd;
         app.Theme            = data.ThemePref ?? app.Theme;
         app.PlayerAtTop      = data.PlayerAtTop;
         app.UnplayedOnly     = data.UnplayedOnly;

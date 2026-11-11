@@ -2,7 +2,7 @@ namespace Podliner.App.Command.Handler;
 
 internal sealed class CmdNetStateHandler : ICmdHandler
 {
-    public bool CanHandle(TopCommand k) => k is TopCommand.Net or TopCommand.PlaySource or TopCommand.Save;
+    public bool CanHandle(TopCommand k) => k is TopCommand.Net or TopCommand.PlaySource or TopCommand.PlayedAt or TopCommand.Save;
 
     public void Handle(CmdParsed cmd, CmdContext ctx)
     {
@@ -11,6 +11,7 @@ internal sealed class CmdNetStateHandler : ICmdHandler
             case TopCommand.Net:         ctx.Cases.Net.ExecNet(cmd.Args); return;
             case TopCommand.PlaySource:  ctx.Cases.Net.ExecPlaySource(cmd.Args); return;
             case TopCommand.Save:        ctx.Cases.State.ExecSave(cmd.Args); return;
+            case TopCommand.PlayedAt:    ctx.Cases.State.ExecPlayedAt(cmd.Args); return;
         }
     }
 }

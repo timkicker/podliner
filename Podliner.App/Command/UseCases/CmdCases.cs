@@ -53,7 +53,7 @@ internal sealed class CmdCases
         // post-mutation refresh.
         View       = new ViewUseCase(ui, data, persist, episodes, feedStore);
         History    = new HistoryUseCase(ui, data, persist, episodes, View);
-        State      = new StateUseCase(ui, persist, episodes, View);
+        State      = new StateUseCase(ui, data, persist, episodes, View);
         Net        = new NetUseCase(ui, data, persist, episodes, View);
         Io         = new IoUseCase(ui, feedStore);
         Feed       = new FeedUseCase(ui, data, persist, episodes, feedStore);

@@ -137,6 +137,11 @@ namespace Podliner.App
                 Examples: new[]{ ":replay", ":replay 30" },
                 Category: HelpCategory.Playback, Rank: 40),
 
+            new(":played-at", "When an episode counts as played: near the end (default) or only at the end.",
+                "[near-end|end|show]",
+                Examples: new[]{ ":played-at", ":played-at end", ":played-at near-end" },
+                Category: HelpCategory.Playback, Rank: 42),
+
             new(":vol", "Set or change volume.",
                 "[N | +/-N]  (0–100)",
                 Examples: new[]{ ":vol 70", ":vol +5", ":vol -10" },

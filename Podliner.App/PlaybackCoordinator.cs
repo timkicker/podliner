@@ -239,7 +239,12 @@ public sealed class PlaybackCoordinator : IDisposable
             var remainCut   = isVeryShort ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(30);
             var ratioCut    = isVeryShort ? 0.98 : 0.90;
 
-            if (!_current.ManuallyMarkedPlayed && (ratio >= ratioCut || remain <= remainCut))
+            // ":played-at end" waits for the real end instead (#40)
+            var reached = _data.MarkPlayedAtEnd
+                ? AtVeryEnd(s, posMs, effLenMs)
+                : ratio >= ratioCut || remain <= remainCut;
+
+            if (!_current.ManuallyMarkedPlayed && reached)
             {
                 _current.ManuallyMarkedPlayed = true;
                 _current.Progress.LastPlayedAt = DateTimeOffset.Now;
@@ -393,6 +398,17 @@ public sealed class PlaybackCoordinator : IDisposable
             return true;
 
         return false;
+    }
+
+    // Stricter than IsEndReached, whose 99.5% is 36 s of a two hour episode.
+    // The engine's length wins over the feed's, which is often a little off.
+    // A stopped engine reports its last position, up to a poll short of it.
+    private static bool AtVeryEnd(PlayerState s, long posMs, long effLenMs)
+    {
+        var lenMsPlayer = (long)(s.Length?.TotalMilliseconds ?? 0);
+        var lenMs  = lenMsPlayer > 0 ? lenMsPlayer : effLenMs;
+        var remain = lenMs - posMs;
+        return remain <= 500 || (!s.IsPlaying && remain <= 2000);
     }
 
     private bool TryFindNext(Episode current, out Episode next)

@@ -184,6 +184,7 @@ Credentials are stored in the OS keyring when available (libsecret on Linux, Key
   - File pattern: `podliner-.log` (daily)
   - Example: `…/podliner/logs/podliner-YYYYMMDD.log`
 - **Feed refresh**: every 60 minutes by default, set with `:refresh auto <minutes>` or `RefreshIntervalMinutes` in `appsettings.json` (`0` turns it off, otherwise 5 minutes to a week). `--offline` fetches nothing.
+- **Played**: an episode counts as played 30 seconds before its end or at 90% (5 seconds or 98% for episodes up to a minute). `:played-at end` or `MarkPlayedAtEnd` in `appsettings.json` waits until playback reaches the end, `:played-at near-end` goes back.
 - **Downloads**: `~/Podcasts/` by default (all platforms). Override at runtime with `:downloads set-dir <path>` (or `set-dir reset` to restore default), or by setting `DownloadDir` in `appsettings.json`.
 - **OPML**: imports/exports under [Migrate from other players (OPML)](#migrate-from-other-players-opml)
 

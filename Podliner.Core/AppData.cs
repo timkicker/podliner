@@ -29,6 +29,7 @@
         public bool AutoAdvance { get; set; } = true;
         public bool WrapAdvance { get; set; } = true;
         public int PlayedThresholdPercent { get; set; } = 95;
+        public bool MarkPlayedAtEnd { get; set; } = false;
 
         public bool UnplayedOnly { get; set; } = false;
         public Dictionary<Guid, int> LastSelectedEpisodeIndexByFeed { get; set; } = new();

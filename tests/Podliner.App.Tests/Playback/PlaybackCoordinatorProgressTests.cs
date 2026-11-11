@@ -148,6 +148,116 @@ public sealed class PlaybackCoordinatorProgressTests
         ep.ManuallyMarkedPlayed.Should().BeFalse();
     }
 
+    // ── ":played-at end": only the real end counts (#40) ───────────────────
+
+    [Theory]
+    [InlineData(540_001)] // 90 %
+    [InlineData(575_000)] // 25 s left
+    [InlineData(596_000)] // 4 s left, still playing
+    public void AtEnd_long_episode_not_marked_near_the_end(long posMs)
+    {
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 600_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs, lenMs: 600_000);
+
+        ep.ManuallyMarkedPlayed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AtEnd_short_episode_not_marked_5s_before_the_end()
+    {
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 60_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 59_000, lenMs: 60_000);
+
+        ep.ManuallyMarkedPlayed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AtEnd_marked_once_playback_reaches_the_end()
+    {
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 600_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 597_000, lenMs: 600_000);
+        ep.ManuallyMarkedPlayed.Should().BeFalse();
+
+        Tick(pc, posMs: 600_000, lenMs: 600_000);
+        ep.ManuallyMarkedPlayed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AtEnd_marked_when_the_engine_stops_just_short_of_the_end()
+    {
+        // mpv and VLC report end of file with the position a few hundred
+        // milliseconds before the length.
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 600_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 590_000, lenMs: 600_000);
+        Tick(pc, posMs: 599_400, lenMs: 600_000, playing: false);
+
+        ep.ManuallyMarkedPlayed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AtEnd_two_hour_episode_not_marked_at_99_6_percent()
+    {
+        // 99.5% already counts as the end of playback, 36 s of two hours.
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 7_200_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 7_171_200, lenMs: 7_200_000); // 28.8 s left
+
+        ep.ManuallyMarkedPlayed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AtEnd_the_engine_length_wins_over_a_longer_feed_duration()
+    {
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 610_000); // feed says 10:10
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 599_800, lenMs: 600_000); // file is 10:00
+
+        ep.ManuallyMarkedPlayed.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AtEnd_pausing_near_the_end_does_not_mark()
+    {
+        var (data, pc, feedId, episodes) = MakeSetup();
+        data.MarkPlayedAtEnd = true;
+        var ep = MakeEpisode(feedId, durationMs: 600_000);
+        episodes.Seed(ep);
+        pc.PlayTaken(ep);
+
+        Tick(pc, posMs: 590_000, lenMs: 600_000);
+        Tick(pc, posMs: 590_000, lenMs: 600_000, playing: false);
+
+        ep.ManuallyMarkedPlayed.Should().BeFalse();
+    }
+
     // ── auto-advance ──────────────────────────────────────────────────────────
 
     [Fact]

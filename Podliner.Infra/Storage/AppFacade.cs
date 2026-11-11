@@ -61,6 +61,12 @@ namespace Podliner.Infra.Storage
             set { ConfigStore.Current.Speed = value; ConfigStore.SaveAsync(); }
         }
 
+        public bool MarkPlayedAtEnd
+        {
+            get => ConfigStore.Current.MarkPlayedAtEnd;
+            set { ConfigStore.Current.MarkPlayedAtEnd = value; ConfigStore.SaveAsync(); }
+        }
+
         public string? Theme
         {
             get => ConfigStore.Current.Theme;

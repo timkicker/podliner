@@ -18,7 +18,7 @@ public sealed class CmdStateModuleTests
     {
         Task SaveAsync() => Task.CompletedTask;
         var view = new ViewUseCase(_ui, _data, SaveAsync, _episodes, _feeds);
-        _sut = new StateUseCase(_ui, SaveAsync, _episodes, view);
+        _sut = new StateUseCase(_ui, _data, SaveAsync, _episodes, view);
     }
 
     [Fact]
@@ -62,5 +62,40 @@ public sealed class CmdStateModuleTests
         _ui.SelectedEpisode = null;
         _sut.ExecSave(Array.Empty<string>());
         _ui.OsdMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void PlayedAt_end_waits_for_the_end()
+    {
+        _sut.ExecPlayedAt(new[] { "end" });
+        _data.MarkPlayedAtEnd.Should().BeTrue();
+        _ui.OsdMessages.Should().Contain(m => m.Text == "played-at: end");
+    }
+
+    [Fact]
+    public void PlayedAt_near_end_goes_back_to_the_default()
+    {
+        _data.MarkPlayedAtEnd = true;
+        _sut.ExecPlayedAt(new[] { "near-end" });
+        _data.MarkPlayedAtEnd.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(new string[0], "played-at: near-end")]
+    [InlineData(new[] { "show" }, "played-at: near-end")]
+    public void PlayedAt_without_value_shows_the_setting(string[] args, string osd)
+    {
+        _sut.ExecPlayedAt(args);
+        _data.MarkPlayedAtEnd.Should().BeFalse();
+        _ui.OsdMessages.Should().Contain(m => m.Text == osd);
+    }
+
+    [Fact]
+    public void PlayedAt_unknown_value_changes_nothing()
+    {
+        _data.MarkPlayedAtEnd = true;
+        _sut.ExecPlayedAt(new[] { "90" });
+        _data.MarkPlayedAtEnd.Should().BeTrue();
+        _ui.OsdMessages.Should().Contain(m => m.Text.StartsWith("usage: :played-at"));
     }
 }
