@@ -21,7 +21,7 @@ internal static class UiShellLogsDialog
         {
             var lines = mem.Snapshot(tail);
             var dlg = new Dialog($"Logs (last {tail}) — F12/Esc to close", 100, 30);
-            var tv = new TextView
+            var tv = new LogTextView
             {
                 ReadOnly = true, X = 0, Y = 0,
                 Width = Dim.Fill(), Height = Dim.Fill(),
@@ -50,6 +50,27 @@ internal static class UiShellLogsDialog
             };
             dlg.Add(tv);
             return dlg;
+        }
+    }
+
+    // Terminal.Gui's TextView lets the mouse wheel scroll until only the last
+    // line is left at the top, so the log ran into a blank view (#42). Keys
+    // were fine. Keep the wheel inside the text.
+    internal sealed class LogTextView : TextView
+    {
+        public override bool MouseEvent(MouseEvent ev)
+        {
+            var handled = base.MouseEvent(ev);
+            if (ev.Flags.HasFlag(MouseFlags.WheeledDown))
+            {
+                var last = Math.Max(0, Lines - Math.Max(1, Frame.Height));
+                if (TopRow > last)
+                {
+                    TopRow = last;
+                    SetNeedsDisplay();
+                }
+            }
+            return handled;
         }
     }
 }
