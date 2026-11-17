@@ -38,6 +38,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
     [InlineData(ThemeMode.Light)]
+    [InlineData(ThemeMode.Terminal)]
     public void Every_theme_applies_without_throwing(ThemeMode mode)
     {
         using var tui = new TuiHarness();
@@ -54,6 +55,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
     [InlineData(ThemeMode.Light)]
+    [InlineData(ThemeMode.Terminal)]
     public void Every_theme_still_shows_the_content(ThemeMode mode)
     {
         using var tui = new TuiHarness();
@@ -73,6 +75,7 @@ public sealed class UiThemeRenderTests
     [InlineData(ThemeMode.Native)]
     [InlineData(ThemeMode.User)]
     [InlineData(ThemeMode.Light)]
+    [InlineData(ThemeMode.Terminal)]
     public void Every_theme_reports_itself_back(ThemeMode mode)
     {
         using var tui = new TuiHarness();

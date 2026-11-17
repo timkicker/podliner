@@ -120,6 +120,7 @@ public sealed class ConfigStoreValidationTests : IDisposable
     [InlineData("Native")]
     [InlineData("User")]
     [InlineData("Light")]
+    [InlineData("Terminal")]
     [InlineData("auto")]
     public void Known_themes_are_preserved(string theme)
     {

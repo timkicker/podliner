@@ -121,6 +121,7 @@ public sealed partial class UiShell : IUiShell
             ThemeMode.MenuAccent => ThemeMode.Native,
             ThemeMode.Native     => ThemeMode.User,
             ThemeMode.User       => ThemeMode.Light,
+            ThemeMode.Light      => ThemeMode.Terminal,
             _                    => ThemeMode.Base
         };
 
@@ -176,6 +177,9 @@ public sealed partial class UiShell : IUiShell
     #region build
     public void Build()
     {
+        Application.NotifyNewRunState -= FitNewTopToTheme;
+        Application.NotifyNewRunState += FitNewTopToTheme;
+
         _mainWin = new Window
         {
             X = 0,

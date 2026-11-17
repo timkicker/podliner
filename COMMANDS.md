@@ -178,8 +178,8 @@ Full in-app help: `:h`
 - `:audioPlayer [top|bottom|toggle]`  
   Place the player bar.  
   Examples: `:audioPlayer top`, `:audioPlayer toggle`
-- `:theme [toggle|base|accent|native|user|light|auto]`  
-  Switch theme or toggle. `light` is the light theme, `user` the dark default.  
+- `:theme [toggle|base|accent|native|user|light|terminal|auto]`  
+  Switch theme or toggle. `light` is the light theme, `user` the dark default. `terminal` only uses your terminal's black and white, so it follows the terminal's colour scheme.  
   Examples: `:theme`, `:theme light`
 
 ### Network and engine

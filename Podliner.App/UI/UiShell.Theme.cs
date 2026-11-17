@@ -99,11 +99,14 @@ public sealed partial class UiShell
         UI(() =>
         {
             var light = _theme == ThemeMode.Light;
-            UiShellColorSchemes.ApplyLightGlobals(light);
+            var term  = _theme == ThemeMode.Terminal;
+            UiShellColorSchemes.ApplyGlobals(_theme);
 
-            if (_theme is ThemeMode.User or ThemeMode.Light)
+            if (_theme is ThemeMode.User or ThemeMode.Light or ThemeMode.Terminal)
             {
-                var u = light ? UiShellColorSchemes.BuildLightSchemes() : UiShellColorSchemes.BuildUserSchemes();
+                var u = light ? UiShellColorSchemes.BuildLightSchemes()
+                      : term  ? UiShellColorSchemes.BuildTerminalSchemes()
+                      : UiShellColorSchemes.BuildUserSchemes();
 
                 if (Application.Top != null)          Application.Top.ColorScheme = u.Main;
                 if (_mainWin != null)                 _mainWin.ColorScheme = u.Main;
@@ -121,7 +124,7 @@ public sealed partial class UiShell
                 if (_player != null)
                 {
                     _player.ColorScheme          = u.Main;
-                    _player.Progress.ColorScheme = light ? MakeProgressScheme() : new ColorScheme {
+                    _player.Progress.ColorScheme = light || term ? MakeProgressScheme() : new ColorScheme {
                         Normal    = u.Status.Normal,
                         Focus     = u.Status.Focus,
                         HotNormal = u.Menu.HotNormal,
@@ -135,8 +138,8 @@ public sealed partial class UiShell
                 if (_searchBox  != null) _searchBox.ColorScheme  = u.Input;
 
                 if (_episodesPane?.Details != null)
-                    _episodesPane.Details.ColorScheme = light
-                        ? UiShellColorSchemes.BuildLightDetailsScheme()
+                    _episodesPane.Details.ColorScheme = light ? UiShellColorSchemes.BuildLightDetailsScheme()
+                        : term ? UiShellColorSchemes.BuildTerminalDetailsScheme()
                         : UiShellColorSchemes.BuildDetailsScheme();
 
                 _osd.ApplyTheme();
@@ -175,6 +178,24 @@ public sealed partial class UiShell
         });
     }
 
+    // Dialogs draw a shadow in bright black, whatever the theme. In the
+    // terminal theme that is the one slot it avoids (#41), so dialogs opened
+    // there go without it.
+    void FitNewTopToTheme(Application.RunState rs)
+    {
+        if (_theme != ThemeMode.Terminal || rs?.Toplevel?.Border is not { Effect3D: true }) return;
+        FitToTheme(rs.Toplevel, _theme);
+        // The first frame may already carry the shadow, and only the dialog
+        // is redrawn while it runs. Paint everything once more.
+        try { Application.MainLoop?.Invoke(Application.Refresh); } catch { }
+    }
+
+    internal static void FitToTheme(Toplevel? top, ThemeMode theme)
+    {
+        if (top?.Border != null && theme == ThemeMode.Terminal)
+            top.Border.Effect3D = false;
+    }
+
     private static ColorScheme BuildNativeScheme()
     {
         return new ColorScheme
@@ -191,6 +212,8 @@ public sealed partial class UiShell
     {
         if (_theme == ThemeMode.Light)
             return UiShellColorSchemes.BuildLightProgressScheme();
+        if (_theme == ThemeMode.Terminal)
+            return UiShellColorSchemes.BuildTerminalProgressScheme();
 
         if (_theme == ThemeMode.Native)
         {

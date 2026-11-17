@@ -203,6 +203,15 @@ public sealed class CmdViewModuleTests
     }
 
     [Fact]
+    public void Theme_terminal_selects_the_terminal_theme()
+    {
+        _sut.ExecTheme(new[] { "terminal" });
+
+        _ui.LastSetTheme.Should().Be(Podliner.App.UI.ThemeMode.Terminal);
+        _data.ThemePref.Should().Be("Terminal");
+    }
+
+    [Fact]
     public void Theme_with_an_unknown_name_changes_nothing_and_says_so()
     {
         _data.ThemePref = "Native";

@@ -20,6 +20,7 @@ static class UiThemeResolver
                 "native" => ThemeMode.Native,
                 "user"   => ThemeMode.User,
                 "light"  => ThemeMode.Light,
+                "terminal" => ThemeMode.Terminal,
                 "auto"   => ThemeMode.User, // default user
                 _        => ThemeMode.User
             };

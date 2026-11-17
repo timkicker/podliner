@@ -176,18 +176,68 @@ internal static class UiShellColorSchemes
         return new ColorScheme { Normal = track, Focus = track, HotNormal = fill, HotFocus = fill, Disabled = track };
     }
 
+    // Terminal theme (#41). Only the terminal's black and white slots (ANSI 0
+    // for the page, ANSI 7 for the text) and marks drawn as the two swapped.
+    // Generated palettes such as matugen's set the other slots from the
+    // wallpaper, bright black included, and a pale bright black under pale
+    // text was unreadable. ANSI 0 and 7 are the pair every palette keeps
+    // readable, and when the palette changes the theme changes with it.
+    internal static class Term
+    {
+        public const Color Bg = Color.Black;
+        public const Color Fg = Color.Gray;
+    }
+
+    static Attribute TermText => Attr(Term.Fg, Term.Bg);
+    static Attribute TermMark => Attr(Term.Bg, Term.Fg);
+
+    static ColorScheme TerminalScheme() => new()
+    {
+        Normal = TermText, Focus = TermMark, HotNormal = TermText, HotFocus = TermMark, Disabled = TermText
+    };
+
+    static ColorScheme TerminalPlain() => new()
+    {
+        Normal = TermText, Focus = TermText, HotNormal = TermText, HotFocus = TermText, Disabled = TermText
+    };
+
+    public static UserSchemes BuildTerminalSchemes() => new()
+    {
+        Main = TerminalScheme(), Menu = TerminalScheme(), List = TerminalScheme(), Dialog = TerminalScheme(),
+        Input = TerminalPlain(),
+        Status = BuildTerminalProgressScheme()
+    };
+
+    public static ColorScheme BuildTerminalDetailsScheme() => TerminalPlain();
+
+    // The track is the page, the filled part is drawn as █ in the text colour.
+    public static ColorScheme BuildTerminalProgressScheme() => TerminalPlain();
+
     // Dialogs, message boxes, the help browser and a few labels use the global
     // Terminal.Gui schemes directly, and views keep a reference to those
-    // objects. So the light theme writes its colours into them in place and
-    // puts the originals back when another theme is picked. Terminal.Gui fills
-    // a focused text field or text view with Focus, so outside the menus Focus
-    // is the grey field colour; a yellow one would flood the help search and
-    // the log view.
+    // objects. So the light and terminal themes write their colours into them
+    // in place and put the originals back when another theme is picked. For
+    // the light theme Terminal.Gui fills a focused text field or text view
+    // with Focus, so outside the menus Focus is the grey field colour; a
+    // yellow one would flood the help search and the log view. The terminal
+    // theme has no third colour, so a focused field is shown swapped.
     static readonly string[] GlobalSchemes = { "TopLevel", "Base", "Dialog", "Menu", "Error" };
     static readonly Dictionary<string, (ColorScheme Scheme, Attribute[] Attrs)> _globalDefaults = new();
 
-    public static void ApplyLightGlobals(bool on)
+    public static void ApplyGlobals(ThemeMode mode)
     {
+        Func<string, ColorScheme>? pick = mode switch
+        {
+            ThemeMode.Light => name => name switch
+            {
+                "Menu"  => LightScheme(Light.Accent),
+                "Error" => LightScheme(Light.Error, Light.Field),
+                _       => LightScheme(Light.Accent, Light.Field)
+            },
+            ThemeMode.Terminal => _ => TerminalScheme(),
+            _ => null
+        };
+
         foreach (var name in GlobalSchemes)
         {
             if (!Colors.ColorSchemes.TryGetValue(name, out var scheme) || scheme == null) continue;
@@ -195,15 +245,10 @@ internal static class UiShellColorSchemes
             // Application.Init hands out fresh scheme objects, so a snapshot
             // only counts for the object it was taken from.
             var known = _globalDefaults.TryGetValue(name, out var d) && ReferenceEquals(d.Scheme, scheme);
-            if (on)
+            if (pick != null)
             {
                 if (!known) _globalDefaults[name] = (scheme, Snapshot(scheme));
-                Write(scheme, Snapshot(name switch
-                {
-                    "Menu"  => LightScheme(Light.Accent),
-                    "Error" => LightScheme(Light.Error, Light.Field),
-                    _       => LightScheme(Light.Accent, Light.Field)
-                }));
+                Write(scheme, Snapshot(pick(name)));
             }
             else if (known)
             {

@@ -200,7 +200,7 @@ namespace Podliner.App
                 Category: HelpCategory.PlayerTheme, Rank: 52),
 
             new(":theme", "Switch theme or toggle.",
-                "[toggle|base|accent|native|user|light|auto]",
+                "[toggle|base|accent|native|user|light|terminal|auto]",
                 Examples: new[]{ ":theme", ":theme toggle", ":theme light" },
                 Category: HelpCategory.PlayerTheme, Rank: 58),
 
